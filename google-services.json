@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "799789130161",
+    "project_id": "yallgame-ebd19",
+    "storage_bucket": "yallgame-ebd19.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:799789130161:android:ba45e9ef11171196b1dd90",
+        "android_client_info": {
+          "package_name": "com.mh.games"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMceZSxeYbt2IltGjsQayO7JjaQtpCsrk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

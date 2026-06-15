@@ -1,0 +1,46 @@
+import { FeaturedGame } from '../types/game';
+
+export const featuredGames: FeaturedGame[] = [
+  {
+    id: 'carrom-royal',
+    title: 'كاروم رويال',
+    provider: 'Native Prototype',
+    category: 'مهارة وتصويب',
+    description: 'نسخة محلية لاختبار التصويب، التصادم، الجيوب، وتبديل الأدوار.',
+    accentColor: '#D7A54A',
+    tableLabel: 'جاهزة',
+    playerCount: '2',
+  },
+  {
+    id: 'royal-majlis',
+    title: 'مجلس الملوك',
+    provider: 'Royal SDK',
+    category: 'طاولة فاخرة',
+    description: 'جلسة سريعة بتجربة اجتماعية راقية ومظهر ملكي.',
+    accentColor: '#E8BE61',
+    tableLabel: 'VIP',
+    playerCount: '128',
+  },
+  {
+    id: 'desert-fortune',
+    title: 'تحدي الصحراء',
+    provider: 'Mena Arcade',
+    category: 'أركيد اجتماعي',
+    description: 'منافسات خفيفة بطابع شرقي ومكافآت عرضية تجريبية بلا أي رهانات.',
+    accentColor: '#B8294B',
+    tableLabel: 'قريبا',
+    playerCount: '86',
+    isComingSoon: true,
+  },
+  {
+    id: 'golden-nights',
+    title: 'ليالي الذهب',
+    provider: 'Live Preview',
+    category: 'تحديات مباشرة',
+    description: 'واجهة معاينة جاهزة لاستقبال ألعاب WebView في الموجة القادمة.',
+    accentColor: '#7C3AED',
+    tableLabel: 'قريبا',
+    playerCount: '-',
+    isComingSoon: true,
+  },
+];
