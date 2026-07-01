@@ -112,12 +112,23 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
 
       <GlassCard style={styles.actionCard}>
         <View style={styles.actionHeader}>
-          <Text style={styles.actionBadge}>قريبا</Text>
-          <Text style={styles.actionTitle}>ابدأ لعبة</Text>
+          <Text style={styles.actionBadge}>LiveKit</Text>
+          <Text style={styles.actionTitle}>Start Drawing Guess</Text>
         </View>
         <Text style={styles.actionBody}>
-          زر محجوز لفتح لعبة من داخل المجموعة في موجة لاحقة، بدون منطق لعب أو مزامنة الآن.
+          Opens Drawing Guess with this voice room id while voice stays connected separately.
         </Text>
+        <LuxuryButton
+          onPress={() =>
+            navigation.navigate('DrawingGuess', {
+              roomId: room.id,
+              source: 'voice-room',
+              mode: 'online',
+            })
+          }
+          style={styles.startGameButton}
+          title="Start Drawing Guess"
+        />
       </GlassCard>
 
       <SectionBlock count={listeners.length} title="المستمعون">
@@ -398,6 +409,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  startGameButton: {
+    marginTop: spacing.md,
   },
   sectionCard: {
     gap: spacing.md,

@@ -9,6 +9,11 @@ export type RootStackParamList = {
     initialMode?: MiniGameModeId;
   };
   Carrom: undefined;
+  DrawingGuess: {
+    roomId?: string;
+    source?: 'games' | 'voice-room';
+    mode?: 'online' | 'local-simulated';
+  };
   VoiceRoom: {
     roomId: string;
   };

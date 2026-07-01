@@ -2,6 +2,7 @@ import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { CarromScreen } from '../screens/CarromScreen';
+import { DrawingGuessScreen } from '../drawingGuess/screens/DrawingGuessScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { MainShellScreen } from '../screens/MainShellScreen';
 import { MiniGameScreen } from '../screens/MiniGameScreen';
@@ -38,6 +39,7 @@ export function RootNavigator() {
         <Stack.Screen name="Main" component={MainShellScreen} />
         <Stack.Screen name="MiniGame" component={MiniGameScreen} />
         <Stack.Screen name="Carrom" component={CarromScreen} />
+        <Stack.Screen name="DrawingGuess" component={DrawingGuessScreen} />
         <Stack.Screen name="VoiceRoom" component={VoiceRoomScreen} />
       </Stack.Navigator>
     </NavigationContainer>

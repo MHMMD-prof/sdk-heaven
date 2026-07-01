@@ -17,6 +17,7 @@ type ScreenContainerProps = PropsWithChildren<{
   horizontalPadding?: number;
   topPadding?: number;
   scroll?: boolean;
+  scrollEnabled?: boolean;
 }>;
 
 export function ScreenContainer({
@@ -25,6 +26,7 @@ export function ScreenContainer({
   fixedBottom,
   horizontalPadding = spacing.lg,
   scroll = true,
+  scrollEnabled = true,
   topPadding,
 }: ScreenContainerProps) {
   const insets = useSafeAreaInsets();
@@ -66,6 +68,7 @@ export function ScreenContainer({
           {scroll ? (
             <ScrollView
               contentContainerStyle={styles.scrollContent}
+              scrollEnabled={scrollEnabled}
               showsVerticalScrollIndicator={false}
             >
               {content}

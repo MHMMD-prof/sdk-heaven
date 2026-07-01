@@ -48,6 +48,12 @@ export function GamesScreen({ bottomNavigation, navigation }: GamesScreenProps) 
                 ? () => navigation.navigate('Carrom')
                 : game.id === 'royal-majlis'
                   ? () => navigation.navigate('MiniGame', { initialMode: 'naval' })
+                  : game.id === 'drawing-guess'
+                    ? () =>
+                        navigation.navigate('DrawingGuess', {
+                          mode: 'local-simulated',
+                          source: 'games',
+                        })
                   : undefined
             }
           />

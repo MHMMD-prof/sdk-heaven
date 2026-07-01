@@ -22,6 +22,16 @@ export const featuredGames: FeaturedGame[] = [
     playerCount: '128',
   },
   {
+    id: 'drawing-guess',
+    title: 'Drawing Guess',
+    provider: 'Local Simulation',
+    category: 'Social drawing',
+    description: 'Guess the hidden prompt from a live drawing. This local wave proves rooms, turns, guesses, and scores.',
+    accentColor: '#2BCB88',
+    tableLabel: 'LOCAL',
+    playerCount: '3',
+  },
+  {
     id: 'desert-fortune',
     title: 'تحدي الصحراء',
     provider: 'Mena Arcade',

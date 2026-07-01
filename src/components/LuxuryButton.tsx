@@ -26,6 +26,9 @@ export function LuxuryButton({
 }: LuxuryButtonProps) {
   return (
     <Pressable
+      accessibilityLabel={title}
+      accessibilityRole="button"
+      accessibilityState={{ busy: loading, disabled: disabled || loading }}
       disabled={disabled || loading}
       onPress={onPress}
       style={({ pressed }) => [
