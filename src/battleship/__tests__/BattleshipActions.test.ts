@@ -39,12 +39,10 @@ describe('Battleship setup actions', () => {
     const phase = createSetter<GamePhase>('setup-player-1');
     const selectedTargetId = createSetter<string | undefined>('ship-one');
     const previewCellId = createSetter<string | undefined>('0-0');
-    const dragPoint = createSetter<DragPoint | undefined>({ x: 10, y: 12 });
     const notifySuccess = vi.fn();
 
     const actions = useBattleshipSetupActions({
       clearSunkEffects: noop,
-      getBoardPointFromEvent: () => ({ x: 0, y: 0 }),
       getCellIdFromBoardEvent: () => undefined,
       impactLight: noop,
       impactMedium: noop,
@@ -58,7 +56,6 @@ describe('Battleship setup actions', () => {
       selectedTarget: undefined,
       selectedTargetId: selectedTargetId.get(),
       setCurrentPlayer: createSetter<1 | 2>(1).set,
-      setDragPoint: dragPoint.set,
       setLastShot: createSetter<LastShot | undefined>(undefined).set,
       setPendingTurnPass: createSetter(false).set,
       setPhase: phase.set,
@@ -79,7 +76,6 @@ describe('Battleship setup actions', () => {
     expect(phase.get()).toBe('handoff-to-player-2');
     expect(selectedTargetId.get()).toBeUndefined();
     expect(previewCellId.get()).toBeUndefined();
-    expect(dragPoint.get()).toBeUndefined();
     expect(notifySuccess).toHaveBeenCalledOnce();
   });
 
@@ -94,7 +90,6 @@ describe('Battleship setup actions', () => {
 
     const actions = useBattleshipSetupActions({
       clearSunkEffects,
-      getBoardPointFromEvent: () => ({ x: 0, y: 0 }),
       getCellIdFromBoardEvent: () => undefined,
       impactLight: noop,
       impactMedium: noop,
@@ -108,7 +103,6 @@ describe('Battleship setup actions', () => {
       selectedTarget: undefined,
       selectedTargetId: undefined,
       setCurrentPlayer: currentPlayer.set,
-      setDragPoint: createSetter<DragPoint | undefined>(undefined).set,
       setLastShot: lastShot.set,
       setPendingTurnPass: pendingTurnPass.set,
       setPhase: phase.set,
@@ -138,13 +132,11 @@ describe('Battleship setup actions', () => {
   it('keeps tap invalid and drag invalid placement state behavior distinct', () => {
     const setupTargets = createEmptyTargets(navalMode);
     const selectedTarget = setupTargets.find((target) => target.id === 'ship-three')!;
-    const dragPoint = createSetter<DragPoint | undefined>({ x: 20, y: 24 });
     const previewCellId = createSetter<string | undefined>(undefined);
     const invalidFeedback = vi.fn();
 
     const actions = useBattleshipSetupActions({
       clearSunkEffects: noop,
-      getBoardPointFromEvent: () => ({ x: 20, y: 24 }),
       getCellIdFromBoardEvent: () => '9-9',
       impactLight: noop,
       impactMedium: noop,
@@ -158,7 +150,6 @@ describe('Battleship setup actions', () => {
       selectedTarget,
       selectedTargetId: selectedTarget.id,
       setCurrentPlayer: createSetter<1 | 2>(1).set,
-      setDragPoint: dragPoint.set,
       setLastShot: createSetter<LastShot | undefined>(undefined).set,
       setPendingTurnPass: createSetter(false).set,
       setPhase: createSetter<GamePhase>('setup-player-1').set,
@@ -177,14 +168,10 @@ describe('Battleship setup actions', () => {
     actions.handleSetupCellPress('9-9');
 
     expect(previewCellId.get()).toBe('9-9');
-    expect(dragPoint.get()).toEqual({ x: 20, y: 24 });
 
-    actions.handleDragRelease({
-      nativeEvent: { locationX: 20, locationY: 24 },
-    } as never);
+    actions.handleDragReleaseCell('9-9');
 
     expect(previewCellId.get()).toBe('9-9');
-    expect(dragPoint.get()).toBeUndefined();
     expect(invalidFeedback).toHaveBeenCalledTimes(2);
   });
 
@@ -194,11 +181,9 @@ describe('Battleship setup actions', () => {
     const playerOneTargets = createSetter<MiniGameTarget[]>(setupTargets);
     const previewCellId = createSetter<string | undefined>(undefined);
     const selectedTargetId = createSetter<string | undefined>(selectedTarget.id);
-    const dragPoint = createSetter<DragPoint | undefined>({ x: 10, y: 10 });
 
     const actions = useBattleshipSetupActions({
       clearSunkEffects: noop,
-      getBoardPointFromEvent: () => ({ x: 10, y: 10 }),
       getCellIdFromBoardEvent: () => '2-2',
       impactLight: noop,
       impactMedium: noop,
@@ -212,7 +197,6 @@ describe('Battleship setup actions', () => {
       selectedTarget,
       selectedTargetId: selectedTarget.id,
       setCurrentPlayer: createSetter<1 | 2>(1).set,
-      setDragPoint: dragPoint.set,
       setLastShot: createSetter<LastShot | undefined>(undefined).set,
       setPendingTurnPass: createSetter(false).set,
       setPhase: createSetter<GamePhase>('setup-player-1').set,
@@ -234,7 +218,6 @@ describe('Battleship setup actions', () => {
       '2-2',
     ]);
     expect(previewCellId.get()).toBeUndefined();
-    expect(dragPoint.get()).toBeUndefined();
   });
 
   it('commits optimized drag release from the hovered cell', () => {
@@ -243,11 +226,9 @@ describe('Battleship setup actions', () => {
     const playerOneTargets = createSetter<MiniGameTarget[]>(setupTargets);
     const previewCellId = createSetter<string | undefined>(undefined);
     const selectedTargetId = createSetter<string | undefined>(selectedTarget.id);
-    const dragPoint = createSetter<DragPoint | undefined>({ x: 80, y: 96 });
 
     const actions = useBattleshipSetupActions({
       clearSunkEffects: noop,
-      getBoardPointFromEvent: () => ({ x: 80, y: 96 }),
       getCellIdFromBoardEvent: () => undefined,
       impactLight: noop,
       impactMedium: noop,
@@ -261,7 +242,6 @@ describe('Battleship setup actions', () => {
       selectedTarget,
       selectedTargetId: selectedTarget.id,
       setCurrentPlayer: createSetter<1 | 2>(1).set,
-      setDragPoint: dragPoint.set,
       setLastShot: createSetter<LastShot | undefined>(undefined).set,
       setPendingTurnPass: createSetter(false).set,
       setPhase: createSetter<GamePhase>('setup-player-1').set,
@@ -284,7 +264,6 @@ describe('Battleship setup actions', () => {
       '3-3',
     ]);
     expect(previewCellId.get()).toBeUndefined();
-    expect(dragPoint.get()).toBeUndefined();
   });
 });
 
@@ -388,3 +367,4 @@ describe('Battleship battle actions', () => {
     expect(phase.get()).toBe('battle');
   });
 });
+

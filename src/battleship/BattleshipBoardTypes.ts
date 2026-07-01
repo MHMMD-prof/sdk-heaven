@@ -9,11 +9,6 @@ export type ShipFrame = {
   style: StyleProp<ViewStyle>;
 };
 
-export type DragPoint = {
-  x: number;
-  y: number;
-};
-
 export type ShipVisual = {
   image: ImageSourcePropType;
   imageStyle: StyleProp<ImageStyle>;
