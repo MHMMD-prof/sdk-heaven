@@ -33,13 +33,14 @@ Status: COMPLETE
 Added the `roomCommand` Function, host-only role/status mutations, moderation audit events, removed/closed room enforcement, and host moderation controls.
 
 # Wave 6 — Live room presence
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint: cbf0139
+Implementation commit: 69e48ff8336f16a82b4aa9a33d3b9a2f8bd62da9
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Planned next. Add Firestore-backed room presence using client heartbeats, derive active speakers/listeners/counts from fresh presence docs, mark stale presence on leave, and keep membership as the authorization source.
 
