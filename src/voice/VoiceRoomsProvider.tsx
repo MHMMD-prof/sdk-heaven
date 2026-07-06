@@ -19,7 +19,9 @@ import { VoiceRoom, VoiceRoomType } from '../types/voice';
 import { createMockVoiceRoomDraft } from './createMockVoiceRoomDraft';
 import {
   CreateRoomInput,
+  JoinPrivateRoomInput,
   RoomsStatus,
+  canJoinRoomWithInvite,
   createRoomDocument,
   createRoomMemberDocument,
   mapRoomDocument,
@@ -33,8 +35,10 @@ type VoiceRoomsContextValue = {
   roomsStatus: RoomsStatus;
   createRoom: (input: CreateRoomInput) => Promise<VoiceRoom>;
   createDraftRoom: (type: VoiceRoomType, title?: string) => Promise<VoiceRoom>;
+  createPrivateRoom: (input: CreateRoomInput) => Promise<VoiceRoom>;
   getRoomById: (roomId: string) => VoiceRoom;
   joinRoom: (roomId: string) => Promise<VoiceRoom>;
+  joinPrivateRoom: (input: JoinPrivateRoomInput) => Promise<VoiceRoom>;
   startRoomPresence: (roomId: string) => void;
   stopRoomPresence: (roomId: string) => Promise<void>;
 };
@@ -76,7 +80,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
     setRoomsStatus('loading');
 
     return onSnapshot(
-      query(collection(firebaseDb, 'rooms'), where('status', '==', 'active')),
+      query(collection(firebaseDb, 'rooms'), where('status', '==', 'active'), where('visibility', '==', 'public')),
       (snapshot) => {
         const nextRooms = snapshot.docs
           .map((roomSnapshot) => mapRoomDocument(roomSnapshot.data(), roomSnapshot.id))
@@ -327,6 +331,11 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
     [createRoom],
   );
 
+  const createPrivateRoom = useCallback(
+    (input: CreateRoomInput) => createRoom({ ...input, visibility: 'private' }),
+    [createRoom],
+  );
+
   const joinRoom = useCallback(
     async (roomId: string) => {
       if (!authUser) {
@@ -356,6 +365,10 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         }
 
         const existingMember = await transaction.get(memberRef);
+        if (roomDocument.visibility === 'private' && !existingMember.exists()) {
+          throw new Error('Private room invite is required.');
+        }
+
         const existingMemberData = existingMember.data();
         const role =
           existingMemberData?.role === 'host' || existingMemberData?.role === 'speaker'
@@ -400,6 +413,79 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
     [authUser, firestoreRooms.length, roomsStatus],
   );
 
+  const joinPrivateRoom = useCallback(
+    async (input: JoinPrivateRoomInput) => {
+      if (!authUser) {
+        throw new Error('A complete signed-in profile is required to join a private room.');
+      }
+
+      const roomRef = doc(firebaseDb, 'rooms', input.roomId);
+      const memberRef = doc(firebaseDb, 'rooms', input.roomId, 'members', authUser.uid);
+
+      const room = await runTransaction(firebaseDb, async (transaction) => {
+        const roomSnapshot = await transaction.get(roomRef);
+
+        if (!roomSnapshot.exists()) {
+          throw new Error('Room was not found.');
+        }
+
+        const roomDocument = mapRoomDocument(roomSnapshot.data(), roomSnapshot.id);
+
+        if (!roomDocument || roomDocument.status !== 'active' || roomDocument.visibility !== 'private') {
+          throw new Error('Private room is not available.');
+        }
+
+        const existingMember = await transaction.get(memberRef);
+
+        if (!canJoinRoomWithInvite(roomDocument, input.inviteCode, existingMember.exists())) {
+          throw new Error('Private room invite is invalid.');
+        }
+
+        const existingMemberData = existingMember.data();
+        const role =
+          existingMemberData?.role === 'host' || existingMemberData?.role === 'speaker'
+            ? existingMemberData.role
+            : 'listener';
+        const memberDocument = createRoomMemberDocument(authUser, role, input.inviteCode);
+
+        transaction.set(
+          memberRef,
+          {
+            ...memberDocument,
+            joinedAt: existingMember.exists() ? existingMember.data().joinedAt : serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        if (!existingMember.exists()) {
+          transaction.update(roomRef, {
+            participantCount: increment(1),
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        return {
+          ...mapRoomDocumentToVoiceRoom(roomDocument, [memberDocument]),
+          localMember: {
+            id: memberDocument.uid,
+            displayName: memberDocument.displayName,
+            avatarLabel: memberDocument.avatarLabel,
+            role: memberDocument.role,
+            status: memberDocument.status,
+            canPublishAudio: memberDocument.canPublishAudio,
+          },
+        };
+      });
+
+      setJoinedRoomOverrides((currentRooms) => ({ ...currentRooms, [room.id]: room }));
+      joinedRoomBaseRef.current = { ...joinedRoomBaseRef.current, [room.id]: room };
+
+      return room;
+    },
+    [authUser],
+  );
+
   const getRoomById = useCallback(
     (roomId: string) => {
       return (
@@ -424,15 +510,28 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   const value = useMemo(
     () => ({
       createDraftRoom,
+      createPrivateRoom,
       createRoom,
       getRoomById,
+      joinPrivateRoom,
       joinRoom,
       rooms,
       roomsStatus,
       startRoomPresence,
       stopRoomPresence,
     }),
-    [createDraftRoom, createRoom, getRoomById, joinRoom, rooms, roomsStatus, startRoomPresence, stopRoomPresence],
+    [
+      createDraftRoom,
+      createPrivateRoom,
+      createRoom,
+      getRoomById,
+      joinPrivateRoom,
+      joinRoom,
+      rooms,
+      roomsStatus,
+      startRoomPresence,
+      stopRoomPresence,
+    ],
   );
 
   return <VoiceRoomsContext.Provider value={value}>{children}</VoiceRoomsContext.Provider>;

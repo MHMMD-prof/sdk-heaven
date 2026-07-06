@@ -1,5 +1,6 @@
 export type VoiceRoomType = 'voice' | 'game';
 export type VoiceRoomStatus = 'active' | 'closed';
+export type VoiceRoomVisibility = 'public' | 'private';
 export type VoiceRoomMemberRole = 'host' | 'speaker' | 'listener';
 export type VoiceRoomMemberStatus = 'active' | 'removed';
 
@@ -18,6 +19,8 @@ export type VoiceRoom = {
   hostId: string;
   type: VoiceRoomType;
   status?: VoiceRoomStatus;
+  visibility?: VoiceRoomVisibility;
+  inviteCode?: string;
   participantCount: number;
   speakers: VoiceRoomMember[];
   listeners: VoiceRoomMember[];
