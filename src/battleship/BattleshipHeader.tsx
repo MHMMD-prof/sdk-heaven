@@ -26,6 +26,7 @@ export function BattleshipHeader({
     <>
       <View style={styles.header} testID="battleship-header">
         <Pressable
+          accessibilityHint={labels.backHint}
           accessibilityLabel={labels.back}
           accessibilityRole="button"
           onPress={onBack}
@@ -50,6 +51,7 @@ export function BattleshipHeader({
           return (
             <Pressable
               accessibilityLabel={item.title}
+              accessibilityHint={labels.modeHint}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               key={item.id}
@@ -65,6 +67,7 @@ export function BattleshipHeader({
 
       <Pressable
         accessibilityLabel={soundMuted ? labels.soundOff : labels.soundOn}
+        accessibilityHint={labels.soundHint}
         accessibilityRole="switch"
         accessibilityState={{ checked: !soundMuted }}
         onPress={onToggleSound}
@@ -93,6 +96,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   backText: {
     color: colors.goldSoft,
@@ -139,6 +144,8 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   modeText: {
     color: colors.textMuted,
@@ -159,6 +166,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   soundToggleText: {
     color: colors.goldSoft,

@@ -99,20 +99,17 @@ export function useBattleshipBoardLayout({
     });
   }, []);
 
-  const getBoardPointFromEvent = useCallback(
-    (event: GestureResponderEvent) =>
-      getBoardPointFromResponderEvent(event, targetBoardOriginRef.current),
-    [],
-  );
-
   const getCellIdFromBoardPoint = useCallback(
     (point: BoardPoint) => getCellIdFromBoardPointValue(point, cellSize, cellGap),
     [cellGap, cellSize],
   );
 
   const getCellIdFromBoardEvent = useCallback(
-    (event: GestureResponderEvent) => getCellIdFromBoardPoint(getBoardPointFromEvent(event)),
-    [getBoardPointFromEvent, getCellIdFromBoardPoint],
+    (event: GestureResponderEvent) =>
+      getCellIdFromBoardPoint(
+        getBoardPointFromResponderEvent(event, targetBoardOriginRef.current),
+      ),
+    [getCellIdFromBoardPoint],
   );
 
   return {
@@ -120,7 +117,6 @@ export function useBattleshipBoardLayout({
     boardWidth,
     cellGap,
     cellSize,
-    getBoardPointFromEvent,
     getCellIdFromBoardEvent,
     getCellIdFromBoardPoint,
     handleTargetBoardLayout,

@@ -28,13 +28,20 @@ export type VoiceProviderConfig = {
   provider: VoiceProviderKind;
   liveKit?: {
     tokenEndpoint: string;
-    userId: string;
-    displayName: string;
+    roomCommandEndpoint?: string;
     canPublishAudio?: boolean;
   };
 };
 
-export type VoiceRoomCommandType = 'mute' | 'kick' | 'report' | 'block';
+export type VoiceRoomCommandType =
+  | 'mute'
+  | 'kick'
+  | 'report'
+  | 'block'
+  | 'promote'
+  | 'demote'
+  | 'remove'
+  | 'close';
 
 export type VoiceRoomCommand = {
   type: VoiceRoomCommandType;

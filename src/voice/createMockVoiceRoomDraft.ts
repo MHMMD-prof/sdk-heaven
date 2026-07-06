@@ -1,7 +1,8 @@
-import { VoiceRoom, VoiceRoomType } from '../types/voice';
+import { VoiceRoom, VoiceRoomMember, VoiceRoomType } from '../types/voice';
 
 type CreateMockVoiceRoomDraftInput = {
   type: VoiceRoomType;
+  host?: VoiceRoomMember;
   id?: string;
   title?: string;
 };
@@ -13,6 +14,7 @@ const localHost = {
 };
 
 export function createMockVoiceRoomDraft({
+  host = localHost,
   id,
   title,
   type,
@@ -20,11 +22,11 @@ export function createMockVoiceRoomDraft({
   return {
     id: id ?? `draft-${type}`,
     title: title ?? getDefaultDraftRoomTitle(type),
-    hostId: localHost.id,
+    hostId: host.id,
     type,
     participantCount: 1,
     currentGameId: type === 'game' ? 'carrom-royal' : undefined,
-    speakers: [localHost],
+    speakers: [host],
     listeners: [],
   };
 }

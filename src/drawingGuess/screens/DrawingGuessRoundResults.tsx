@@ -4,6 +4,7 @@ import { GlassCard } from '../../components/GlassCard';
 import { LuxuryButton } from '../../components/LuxuryButton';
 import { colors, spacing, typography } from '../../theme';
 import { DrawingGuessActions, DrawingGuessViewModel } from '../controller/drawingGuessControllerTypes';
+import { triggerDrawingGuessHaptic } from './drawingGuessHaptics';
 
 type DrawingGuessRoundResultsProps = {
   viewModel: DrawingGuessViewModel;
@@ -29,10 +30,30 @@ export function DrawingGuessRoundResults({ actions, viewModel }: DrawingGuessRou
         ))}
       </View>
       {viewModel.canAdvanceRound ? (
-        <LuxuryButton onPress={actions.advanceRound} title={viewModel.nextRoundLabel} />
+        <LuxuryButton
+          accessibilityHint={
+            viewModel.isFinalRound
+              ? 'Show the final scoreboard.'
+              : 'Move to the next drawer.'
+          }
+          onPress={() => {
+            void triggerDrawingGuessHaptic(viewModel.isFinalRound ? 'success' : 'selection');
+            actions.advanceRound();
+          }}
+          title={viewModel.nextRoundLabel}
+        />
       ) : null}
       {viewModel.isHost ? (
-        <Pressable accessibilityRole="button" onPress={actions.finishMatch} style={styles.secondaryAction}>
+        <Pressable
+          accessibilityHint="End the match and show final scores."
+          accessibilityLabel="End match"
+          accessibilityRole="button"
+          onPress={() => {
+            void triggerDrawingGuessHaptic('warning');
+            actions.finishMatch();
+          }}
+          style={styles.secondaryAction}
+        >
           <Text style={styles.secondaryActionText}>
             End match
           </Text>
@@ -110,6 +131,7 @@ const styles = StyleSheet.create({
   },
   prompt: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.title,
     fontWeight: typography.weights.black,
     textAlign: 'right',
@@ -168,21 +190,25 @@ const styles = StyleSheet.create({
   },
   resultCopy: {
     flex: 1,
+    minWidth: 0,
   },
   resultName: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.bold,
     textAlign: 'right',
   },
   resultStatus: {
     color: colors.textSubtle,
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     marginTop: 2,
     textAlign: 'right',
   },
   pointsBox: {
     alignItems: 'flex-start',
+    flexShrink: 0,
     minWidth: 72,
   },
   delta: {

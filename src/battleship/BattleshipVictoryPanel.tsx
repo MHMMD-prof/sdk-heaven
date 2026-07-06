@@ -70,7 +70,11 @@ export function BattleshipVictoryPanel({
         </View>
       </View>
 
-      <LuxuryButton onPress={onReset} title={labels.newRound} />
+      <LuxuryButton
+        accessibilityHint={labels.newRoundHint}
+        onPress={onReset}
+        title={labels.newRound}
+      />
     </View>
   );
 }

@@ -404,6 +404,37 @@ describe('carromEngine physics audit', () => {
     expect(coin.vy).toBe(0);
   });
 
+  it('adds mild pocket pull for a coin moving toward the mouth', () => {
+    const pocket = CARROM_POCKETS[0];
+    const state = createIsolatedPocketState('white-1', {
+      x: pocket.x + CARROM_POCKET_RADIUS + 34,
+      y: pocket.y,
+      vx: -3,
+      vy: 0,
+    });
+    const stepped = stepCarrom(state);
+    const coin = getDisc(stepped, 'white-1');
+
+    expect(Boolean(coin.pocketed)).toBe(false);
+    expect(coin.vx).toBeLessThan(-3);
+  });
+
+  it('does not pull a coin near a pocket while it is moving away', () => {
+    const pocket = CARROM_POCKETS[0];
+    const state = createIsolatedPocketState('white-1', {
+      x: pocket.x + CARROM_POCKET_RADIUS + 34,
+      y: pocket.y,
+      vx: 6,
+      vy: 0,
+    });
+    const stepped = stepCarrom(state);
+    const coin = getDisc(stepped, 'white-1');
+
+    expect(Boolean(coin.pocketed)).toBe(false);
+    expect(coin.vx).toBeGreaterThan(0);
+    expect(coin.x).toBeGreaterThan(pocket.x + CARROM_POCKET_RADIUS + 34);
+  });
+
   it('keeps repeated fast pocket captures deterministic', () => {
     const pocket = CARROM_POCKETS[0];
     const state = createIsolatedPocketState('white-1', {
@@ -526,6 +557,25 @@ describe('carromEngine physics audit', () => {
     expect(settled.scores[1]).toBe(1);
     expect(settled.scores[2]).toBe(0);
     expect(getDisc(settled, 'white-1').pocketed).toBe(true);
+  });
+
+  it('scores an opponent coin pocket and changes the turn', () => {
+    const pocket = CARROM_POCKETS[0];
+    const state = {
+      ...withDisc(createInitialCarromState(), 'black-1', {
+        x: pocket.x,
+        y: pocket.y,
+        vx: 0,
+        vy: 0,
+      }),
+      status: 'moving' as const,
+    };
+    const settled = stepCarrom(state);
+
+    expect(settled.currentPlayer).toBe(2);
+    expect(settled.scores[1]).toBe(0);
+    expect(settled.scores[2]).toBe(1);
+    expect(getDisc(settled, 'black-1').pocketed).toBe(true);
   });
 
   it('returns an uncovered queen after the next shot fails to cover it', () => {

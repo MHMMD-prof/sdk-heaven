@@ -1,0 +1,184 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return verified() && request.auth.uid == userId;
+    }
+
+    function profilePath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
+    function hasCompleteProfile() {
+      return verified()
+        && exists(profilePath(request.auth.uid))
+        && get(profilePath(request.auth.uid)).data.uid == request.auth.uid
+        && get(profilePath(request.auth.uid)).data.email == request.auth.token.email
+        && get(profilePath(request.auth.uid)).data.displayName is string
+        && get(profilePath(request.auth.uid)).data.displayName.size() >= 2
+        && get(profilePath(request.auth.uid)).data.displayName.size() <= 32
+        && get(profilePath(request.auth.uid)).data.avatarLabel is string
+        && get(profilePath(request.auth.uid)).data.avatarLabel.size() >= 1
+        && get(profilePath(request.auth.uid)).data.avatarLabel.size() <= 1;
+    }
+
+    function validProfile(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'avatarLabel',
+          'createdAt',
+          'updatedAt',
+        ])
+        && data.uid == request.auth.uid
+        && data.uid == userId
+        && data.email == request.auth.token.email
+        && data.displayName is string
+        && data.displayName.size() >= 2
+        && data.displayName.size() <= 32
+        && data.avatarLabel is string
+        && data.avatarLabel.size() >= 1
+        && data.avatarLabel.size() <= 1
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validProfile(userId);
+      allow delete: if false;
+    }
+
+    function validRoomType(type) {
+      return type == 'voice' || type == 'game';
+    }
+
+    function validActiveRoom(roomId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'id',
+          'title',
+          'type',
+          'hostId',
+          'hostDisplayName',
+          'hostAvatarLabel',
+          'status',
+          'participantCount',
+          'currentGameId',
+          'createdAt',
+          'updatedAt',
+        ])
+        && data.id == roomId
+        && data.title is string
+        && data.title.size() >= 2
+        && data.title.size() <= 48
+        && validRoomType(data.type)
+        && data.hostId == request.auth.uid
+        && data.hostDisplayName == get(profilePath(request.auth.uid)).data.displayName
+        && data.hostAvatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
+        && data.status == 'active'
+        && data.participantCount == 1
+        && (!('currentGameId' in data) || data.currentGameId is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validRoomStatus(status) {
+      return status == 'active' || status == 'closed';
+    }
+
+    function roomPath(roomId) {
+      return /databases/$(database)/documents/rooms/$(roomId);
+    }
+
+    function memberPath(roomId, userId) {
+      return /databases/$(database)/documents/rooms/$(roomId)/members/$(userId);
+    }
+
+    function validMember(roomId, userId) {
+      let data = request.resource.data;
+      let room = getAfter(roomPath(roomId)).data;
+      return data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'avatarLabel',
+          'role',
+          'status',
+          'canPublishAudio',
+          'joinedAt',
+          'updatedAt',
+        ])
+        && data.uid == request.auth.uid
+        && data.uid == userId
+        && data.displayName == get(profilePath(request.auth.uid)).data.displayName
+        && data.avatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
+        && (
+          (room.hostId == request.auth.uid && data.role == 'host' && data.canPublishAudio == true) ||
+          (room.hostId != request.auth.uid && data.role == 'listener' && data.canPublishAudio == false)
+        )
+        && data.status == 'active'
+        && data.joinedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validMemberRefresh(userId) {
+      let data = request.resource.data;
+      return data.uid == userId
+        && data.uid == request.auth.uid
+        && data.displayName == get(profilePath(request.auth.uid)).data.displayName
+        && data.avatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
+        && data.role == resource.data.role
+        && data.status == resource.data.status
+        && data.canPublishAudio == resource.data.canPublishAudio
+        && data.joinedAt == resource.data.joinedAt
+        && data.updatedAt is timestamp;
+    }
+
+    function validJoinCountUpdate(roomId) {
+      return hasCompleteProfile()
+        && resource.data.status == 'active'
+        && !exists(memberPath(roomId, request.auth.uid))
+        && getAfter(memberPath(roomId, request.auth.uid)).data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantCount', 'updatedAt'])
+        && request.resource.data.participantCount == resource.data.participantCount + 1
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    match /rooms/{roomId} {
+      allow get, list: if hasCompleteProfile() && resource.data.status == 'active';
+      allow create: if hasCompleteProfile()
+        && validActiveRoom(roomId)
+        && getAfter(memberPath(roomId, request.auth.uid)).data.role == 'host';
+      allow update: if validJoinCountUpdate(roomId);
+      allow delete: if false;
+
+      match /members/{userId} {
+        allow get: if hasCompleteProfile() && request.auth.uid == userId;
+        allow list: if false;
+        allow create: if hasCompleteProfile()
+          && request.auth.uid == userId
+          && getAfter(roomPath(roomId)).data.status == 'active'
+          && validMember(roomId, userId);
+        allow update: if hasCompleteProfile()
+          && request.auth.uid == userId
+          && validMemberRefresh(userId);
+        allow delete: if false;
+      }
+
+      match /moderationEvents/{eventId} {
+        allow read, write: if false;
+      }
+    }
+  }
+}

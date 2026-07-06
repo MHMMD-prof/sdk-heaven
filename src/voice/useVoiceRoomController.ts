@@ -5,6 +5,7 @@ import { VoiceRoom } from '../types/voice';
 import { createMockVoiceConnectOptions } from './createMockVoiceConnectOptions';
 import { requestLiveKitConnectOptions } from './requestLiveKitConnectOptions';
 import { VoiceRoomCommandType } from './types';
+import { useRoomHostControls } from './useRoomHostControls';
 import { useVoiceProviderConfig } from './useVoiceProviderConfig';
 import { useVoiceRoom } from './useVoiceRoom';
 
@@ -17,15 +18,13 @@ type VoiceRoomModerationAction = {
 
 export function useVoiceRoomController(room: VoiceRoom) {
   const providerConfig = useVoiceProviderConfig();
+  const hostControls = useRoomHostControls(room);
   const voiceRoom = useVoiceRoom();
   const {
-    blockParticipant,
     connect,
     connectionState,
     disconnect,
-    kickParticipant,
     listeners,
-    muteParticipant,
     reconnect,
     reportParticipant,
     setConnectionError,
@@ -100,42 +99,57 @@ export function useVoiceRoomController(room: VoiceRoom) {
     return 'جاهز للاتصال';
   }, [connectionState]);
 
-  const liveKitModerationUnsupported = providerConfig.provider === 'livekit';
-  const moderationTarget = listeners[0] ?? speakers.find((participant) => participant.role !== 'host');
+  const liveKitModeration = providerConfig.provider === 'livekit';
+  const removableTarget = listeners[0] ?? speakers.find((participant) => participant.role !== 'host');
+  const promotableTarget = listeners[0];
+  const demotableTarget = speakers.find((participant) => participant.role === 'speaker');
+  const canUseHostControls = liveKitModeration && hostControls.isHost;
   const moderationActions: VoiceRoomModerationAction[] = useMemo(
     () => [
       {
-        key: 'mute',
-        label: 'كتم',
-        onPress: () => moderationTarget && muteParticipant(moderationTarget.id),
-        isDisabled: !moderationTarget || liveKitModerationUnsupported,
+        key: 'promote',
+        label: 'ترقية',
+        onPress: () => promotableTarget && hostControls.promoteToSpeaker(promotableTarget.id),
+        isDisabled: !canUseHostControls || !promotableTarget || hostControls.hostControlStatus === 'loading',
       },
       {
-        key: 'kick',
-        label: 'طرد',
-        onPress: () => moderationTarget && kickParticipant(moderationTarget.id),
-        isDisabled: !moderationTarget || liveKitModerationUnsupported,
+        key: 'demote',
+        label: 'إنزال',
+        onPress: () => demotableTarget && hostControls.demoteToListener(demotableTarget.id),
+        isDisabled: !canUseHostControls || !demotableTarget || hostControls.hostControlStatus === 'loading',
+      },
+      {
+        key: 'remove',
+        label: 'إزالة',
+        onPress: () => removableTarget && hostControls.removeMember(removableTarget.id),
+        isDisabled: !canUseHostControls || !removableTarget || hostControls.hostControlStatus === 'loading',
       },
       {
         key: 'report',
         label: 'إبلاغ',
-        onPress: () => moderationTarget && reportParticipant(moderationTarget.id),
-        isDisabled: !moderationTarget || liveKitModerationUnsupported,
+        onPress: () =>
+          removableTarget
+            ? liveKitModeration
+              ? hostControls.reportMember(removableTarget.id)
+              : reportParticipant(removableTarget.id)
+            : undefined,
+        isDisabled: !removableTarget || (liveKitModeration && hostControls.hostControlStatus === 'loading'),
       },
       {
-        key: 'block',
-        label: 'حظر',
-        onPress: () => moderationTarget && blockParticipant(moderationTarget.id),
-        isDisabled: !moderationTarget || liveKitModerationUnsupported,
+        key: 'close',
+        label: 'إغلاق',
+        onPress: () => hostControls.closeRoom(),
+        isDisabled: !canUseHostControls || hostControls.hostControlStatus === 'loading',
       },
     ],
     [
-      blockParticipant,
-      kickParticipant,
-      liveKitModerationUnsupported,
-      moderationTarget,
-      muteParticipant,
+      canUseHostControls,
+      demotableTarget,
+      hostControls,
+      liveKitModeration,
+      promotableTarget,
       reportParticipant,
+      removableTarget,
     ],
   );
 

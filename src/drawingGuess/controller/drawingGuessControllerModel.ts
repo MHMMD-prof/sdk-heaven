@@ -4,6 +4,7 @@ import {
   drawingGuessReducer,
 } from '../model/drawingGuessReducer';
 import { DrawingGuessState } from '../model/types';
+import { drawingGuessPromptCategoryLabels } from '../model/wordBank';
 import {
   drawingGuessBrushColors,
   drawingGuessBrushWidths,
@@ -212,6 +213,7 @@ export const createDrawingGuessViewModel = ({
     promptOptions: state.promptOptions.map((prompt) => ({
       id: prompt.id,
       text: prompt.text,
+      categoryLabel: drawingGuessPromptCategoryLabels[prompt.category],
     })),
     canStart:
       isHost &&

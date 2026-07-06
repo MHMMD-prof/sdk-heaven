@@ -65,13 +65,26 @@ const CARROM_POCKET_TUNING = {
   fastCaptureRadius: CARROM_POCKET_RADIUS + 14,
   fastCaptureSpeed: 14,
   mouthRadius: CARROM_POCKET_RADIUS + 18,
+  pullMaxAcceleration: 0.55,
+  pullRadius: CARROM_POCKET_RADIUS + 52,
+  pullStrength: 0.72,
 };
+const CARROM_POCKET_CAPTURE_RADIUS_SQ =
+  CARROM_POCKET_TUNING.captureRadius * CARROM_POCKET_TUNING.captureRadius;
+const CARROM_POCKET_DIRECTED_CAPTURE_RADIUS_SQ =
+  CARROM_POCKET_TUNING.directedCaptureRadius * CARROM_POCKET_TUNING.directedCaptureRadius;
+const CARROM_POCKET_FAST_CAPTURE_RADIUS_SQ =
+  CARROM_POCKET_TUNING.fastCaptureRadius * CARROM_POCKET_TUNING.fastCaptureRadius;
+const CARROM_POCKET_PULL_RADIUS_SQ =
+  CARROM_POCKET_TUNING.pullRadius * CARROM_POCKET_TUNING.pullRadius;
 const CARROM_SOLVER_TUNING = {
   collisionPasses: 2,
   substeps: 2,
 };
 const STOP_SPEED = CARROM_STOP_TUNING.stopSpeed;
 const SLEEP_SPEED = CARROM_STOP_TUNING.sleepSpeed;
+const STOP_SPEED_SQ = STOP_SPEED * STOP_SPEED;
+const SLEEP_SPEED_SQ = SLEEP_SPEED * SLEEP_SPEED;
 const SLEEP_FRAMES = CARROM_STOP_TUNING.sleepFrames;
 const MAX_SHOT_SPEED = CARROM_SHOT_TUNING.maxShotSpeed;
 const MAX_DISC_SPEED = CARROM_SHOT_TUNING.maxDiscSpeed;
@@ -87,6 +100,8 @@ const RESTING_CONTACT_SPEED = CARROM_COLLISION_TUNING.restingContactSpeed;
 const TANGENTIAL_DAMPING = CARROM_COLLISION_TUNING.tangentialDamping;
 const MAX_TANGENTIAL_IMPULSE =
   MAX_COLLISION_IMPULSE * CARROM_COLLISION_TUNING.tangentialImpulseLimitRatio;
+const COLLISION_CANDIDATE_PADDING =
+  MAX_DISC_SPEED / PHYSICS_SUBSTEPS + CARROM_DISC_TUNING.maxRadius * POSITION_CORRECTION;
 const TINY_COMPONENT_SPEED = CARROM_STOP_TUNING.tinyComponentSpeed;
 const STRIKER_MASS = CARROM_DISC_TUNING.strikerMass;
 const PIECE_MASS = CARROM_DISC_TUNING.pieceMass;
@@ -171,48 +186,37 @@ export const applyShot = (
 });
 
 export const stepCarrom = (state: CarromGameState): CarromGameState => {
-  const discs = sanitizeDiscs(state.discs).map((disc) => {
-    if (disc.pocketed) {
-      return disc;
-    }
-
-    const damped = applyRollingDrag(disc);
-    const clamped = clampVelocity(damped.vx, damped.vy, MAX_DISC_SPEED);
-    const clampedSpeed = Math.hypot(clamped.vx, clamped.vy);
-    const nextSleepFrames =
-      clampedSpeed < SLEEP_SPEED ? (disc.sleepFrames ?? 0) + 1 : 0;
-    const sleeping = nextSleepFrames >= SLEEP_FRAMES;
-    const vx = sleeping ? 0 : zeroTinyVelocity(clamped.vx);
-    const vy = sleeping ? 0 : zeroTinyVelocity(clamped.vy);
-
-    return {
-      ...disc,
-      vx,
-      vy,
-      sleepFrames: sleeping ? SLEEP_FRAMES : nextSleepFrames,
-    };
-  });
+  const discs = sanitizeAndPrepareDiscs(state.discs);
 
   const pocketedThisStep: CarromDisc[] = [];
+  const previousMotionRecords = createEmptySubstepMotionRecords(discs.length);
+  const collisionCandidates = createCollisionCandidateScratch();
 
   for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep += 1) {
-    const motionRecords = createSubstepMotionRecords(discs);
+    for (let index = 0; index < discs.length; index += 1) {
+      const disc = discs[index]!;
 
-    discs.forEach((disc) => {
       if (disc.pocketed) {
-        return;
+        continue;
       }
 
+      previousMotionRecords[index].x = disc.x;
+      previousMotionRecords[index].y = disc.y;
+      previousMotionRecords[index].speedSq = getSpeedSquared(disc.vx, disc.vy);
       disc.x += disc.vx / PHYSICS_SUBSTEPS;
       disc.y += disc.vy / PHYSICS_SUBSTEPS;
-    });
+    }
 
     resolveWallCollisions(discs);
-    pocketedThisStep.push(...resolvePockets(discs, motionRecords));
-    resolveCollisionImpulses(discs);
+    pocketedThisStep.push(...resolvePockets(discs, previousMotionRecords));
+    const collisionCandidateCount = collectCollisionCandidatePairs(discs, collisionCandidates);
 
-    for (let pass = 0; pass < SEPARATION_PASSES; pass += 1) {
-      separateOverlappingDiscs(discs);
+    if (collisionCandidateCount > 0) {
+      resolveCollisionImpulses(discs, collisionCandidates, collisionCandidateCount);
+
+      for (let pass = 0; pass < SEPARATION_PASSES; pass += 1) {
+        separateOverlappingDiscs(discs, collisionCandidates, collisionCandidateCount);
+      }
     }
 
     clampDiscsInsideBoard(discs);
@@ -221,19 +225,13 @@ export const stepCarrom = (state: CarromGameState): CarromGameState => {
   settleTinyVelocities(discs);
   const pocketedThisTurn = mergePocketedDiscs(state.pocketedThisTurn, pocketedThisStep);
 
-  const hasActiveMotion = discs.some(
-    (disc) => !disc.pocketed && Math.hypot(disc.vx, disc.vy) > STOP_SPEED,
-  );
-
-  if (!hasActiveMotion) {
-    relaxSettledOverlaps(discs);
+  if (hasMovingDiscs(discs)) {
+    return { ...state, discs, pocketedThisTurn };
   }
 
-  const moving = discs.some(
-    (disc) => !disc.pocketed && Math.hypot(disc.vx, disc.vy) > STOP_SPEED,
-  );
+  relaxSettledOverlaps(discs);
 
-  if (moving) {
+  if (hasMovingDiscs(discs)) {
     return { ...state, discs, pocketedThisTurn };
   }
 
@@ -337,6 +335,42 @@ const finalizeSettledCarromState = (state: CarromGameState): CarromGameState => 
   };
 };
 
+const getPocketedTurnSummary = (
+  pocketedThisFrame: CarromDisc[],
+  ownKind: CarromCoinKind,
+  currentPlayer: CarromPlayer,
+) => {
+  let opponentCount = 0;
+  let ownCount = 0;
+  let queenPocketed = false;
+  let strikerPocketed = false;
+
+  for (let index = 0; index < pocketedThisFrame.length; index += 1) {
+    const disc = pocketedThisFrame[index];
+
+    if (disc.kind === 'striker') {
+      strikerPocketed = true;
+    }
+
+    if (disc.kind === 'queen') {
+      queenPocketed = true;
+    }
+
+    if (disc.kind === ownKind) {
+      ownCount += 1;
+    } else if (disc.owner && disc.owner !== currentPlayer) {
+      opponentCount += 1;
+    }
+  }
+
+  return {
+    opponentCount,
+    ownCount,
+    queenPocketed,
+    strikerPocketed,
+  };
+};
+
 const resolveTurnEnd = (
   state: CarromGameState,
   pocketedThisFrame: CarromDisc[],
@@ -344,18 +378,19 @@ const resolveTurnEnd = (
   const currentPlayer = state.currentPlayer;
   const ownKind = state.playerCoins[currentPlayer];
   const opponent = currentPlayer === 1 ? 2 : 1;
-  const strikerPocketed = pocketedThisFrame.some((disc) => disc.kind === 'striker');
-  const ownPocketed = pocketedThisFrame.filter((disc) => disc.kind === ownKind);
-  const opponentPocketed = pocketedThisFrame.filter(
-    (disc) => disc.owner && disc.owner !== currentPlayer,
+  const pocketedSummary = getPocketedTurnSummary(
+    pocketedThisFrame,
+    ownKind,
+    currentPlayer,
   );
-  const queenPocketed = pocketedThisFrame.some((disc) => disc.kind === 'queen');
   let discs = state.discs;
   let queen = { ...state.queen };
   let message = 'انتهت الضربة';
-  let keepTurn = ownPocketed.length > 0 && !strikerPocketed;
+  let keepTurn = pocketedSummary.ownCount > 0 && !pocketedSummary.strikerPocketed;
   const ownCoinsRemaining = countRemainingCoins(discs, ownKind);
-  const canCoverQueen = (ownPocketed.length > 0 || ownCoinsRemaining === 0) && !strikerPocketed;
+  const canCoverQueen =
+    (pocketedSummary.ownCount > 0 || ownCoinsRemaining === 0) &&
+    !pocketedSummary.strikerPocketed;
 
   if (queen.pendingBy === currentPlayer && canCoverQueen) {
     queen = {
@@ -366,7 +401,7 @@ const resolveTurnEnd = (
     message = 'تمت تغطية الملكة';
   }
 
-  if (queenPocketed) {
+  if (pocketedSummary.queenPocketed) {
     if (canCoverQueen) {
       queen = {
         coveredBy: currentPlayer,
@@ -374,7 +409,7 @@ const resolveTurnEnd = (
         pocketed: true,
       };
       message =
-        ownPocketed.length > 0
+        pocketedSummary.ownCount > 0
           ? 'دخلت الملكة وتمت تغطيتها'
           : 'دخلت الملكة بعد إنهاء القطع';
       keepTurn = true;
@@ -389,35 +424,38 @@ const resolveTurnEnd = (
     }
   }
 
-  if (strikerPocketed) {
-    const queenReturn = queenPocketed
+  if (pocketedSummary.strikerPocketed) {
+    const queenReturn = pocketedSummary.queenPocketed
       ? returnQueenToCenter(discs)
       : returnPendingQueenIfNeeded(discs, queen);
-    const penalty = queenPocketed
+    const penalty = pocketedSummary.queenPocketed
       ? { discs: queenReturn.discs, returned: false }
       : returnPocketedOwnCoin(queenReturn.discs, currentPlayer);
 
     discs = penalty.discs;
     queen = queenReturn.queen;
-    message = queenPocketed
+    message = pocketedSummary.queenPocketed
       ? 'خطأ: دخلت الملكة مع حجر الضربة، عادت الملكة'
       : penalty.returned
       ? 'خطأ: دخل حجر الضربة وتمت إعادة قطعة'
       : 'خطأ: دخل حجر الضربة';
     keepTurn = false;
-  } else if (queen.pendingBy === currentPlayer && ownPocketed.length === 0) {
+  } else if (queen.pendingBy === currentPlayer && pocketedSummary.ownCount === 0) {
     const returned = returnQueenToCenter(discs);
 
     discs = returned.discs;
     queen = { pocketed: false };
     message = 'لم تتم تغطية الملكة، عادت للوسط';
     keepTurn = false;
-  } else if (ownPocketed.length > 0) {
-    message = ownPocketed.length > 1 ? 'تسجيل ناجح، تستمر الجولة' : 'قطعة ناجحة، العب مجدداً';
-  } else if (opponentPocketed.length > 0) {
+  } else if (pocketedSummary.ownCount > 0) {
+    message =
+      pocketedSummary.ownCount > 1
+        ? 'تسجيل ناجح، تستمر الجولة'
+        : 'تسجيل ناجح، العب مجدداً';
+  } else if (pocketedSummary.opponentCount > 0) {
     message = 'دخلت قطعة الخصم، ينتقل الدور';
     keepTurn = false;
-  } else if (!queenPocketed) {
+  } else if (!pocketedSummary.queenPocketed) {
     message = 'لم تدخل أي قطعة';
     keepTurn = false;
   }
@@ -453,23 +491,47 @@ const resolveTurnEnd = (
 };
 
 const mergePocketedDiscs = (existing: CarromDisc[], next: CarromDisc[]) => {
-  const seen = new Set(existing.map((disc) => disc.id));
-  const merged = [...existing];
+  if (next.length === 0) {
+    return existing;
+  }
 
-  next.forEach((disc) => {
-    if (!seen.has(disc.id)) {
-      seen.add(disc.id);
+  let merged = existing;
+
+  for (let index = 0; index < next.length; index += 1) {
+    const disc = next[index];
+    let alreadySeen = false;
+
+    for (let existingIndex = 0; existingIndex < merged.length; existingIndex += 1) {
+      if (merged[existingIndex].id === disc.id) {
+        alreadySeen = true;
+        break;
+      }
+    }
+
+    if (!alreadySeen) {
+      if (merged === existing) {
+        merged = [...existing];
+      }
       merged.push(disc);
     }
-  });
+  }
 
   return merged;
 };
 
-const calculateScores = (discs: CarromDisc[]): Record<CarromPlayer, number> => ({
-  1: discs.filter((disc) => disc.owner === 1 && disc.pocketed).length,
-  2: discs.filter((disc) => disc.owner === 2 && disc.pocketed).length,
-});
+const calculateScores = (discs: CarromDisc[]): Record<CarromPlayer, number> => {
+  const scores: Record<CarromPlayer, number> = { 1: 0, 2: 0 };
+
+  for (let index = 0; index < discs.length; index += 1) {
+    const disc = discs[index];
+
+    if (disc.pocketed && disc.owner) {
+      scores[disc.owner] += 1;
+    }
+  }
+
+  return scores;
+};
 
 const getWinner = (
   discs: CarromDisc[],
@@ -496,9 +558,16 @@ const getWinner = (
 };
 
 const returnPocketedOwnCoin = (discs: CarromDisc[], player: CarromPlayer) => {
-  const discToReturn = [...discs]
-    .reverse()
-    .find((disc) => disc.owner === player && disc.pocketed);
+  let discToReturn: CarromDisc | undefined;
+
+  for (let index = discs.length - 1; index >= 0; index -= 1) {
+    const disc = discs[index];
+
+    if (disc.owner === player && disc.pocketed) {
+      discToReturn = disc;
+      break;
+    }
+  }
 
   if (!discToReturn) {
     return { discs, returned: false };
@@ -551,13 +620,15 @@ const returnQueenToCenter = (discs: CarromDisc[]) => ({
 });
 
 const resolveWallCollisions = (discs: CarromDisc[]) => {
-  discs.forEach((disc) => {
+  for (let index = 0; index < discs.length; index += 1) {
+    const disc = discs[index]!;
+
     if (disc.pocketed) {
-      return;
+      continue;
     }
 
     if (isNearPocket(disc)) {
-      return;
+      continue;
     }
 
     if (disc.x - disc.radius < CARROM_EDGE_LEFT) {
@@ -585,7 +656,7 @@ const resolveWallCollisions = (discs: CarromDisc[]) => {
     }
 
     clampDiscInsideBoard(disc);
-  });
+  }
 };
 
 type CollisionContact = {
@@ -600,14 +671,23 @@ type CollisionContact = {
   totalInverseMass: number;
 };
 
+type CollisionCandidateScratch = {
+  aIndices: number[];
+  bIndices: number[];
+};
+
 type SubstepMotionRecord = {
-  speed: number;
+  speedSq: number;
   x: number;
   y: number;
 };
 
-const resolveCollisionImpulses = (discs: CarromDisc[]) => {
-  forEachCollisionContact(discs, (contact) => {
+const resolveCollisionImpulses = (
+  discs: CarromDisc[],
+  candidatePairs?: CollisionCandidateScratch,
+  candidateCount = 0,
+) => {
+  forEachCollisionContact(discs, candidatePairs, candidateCount, (contact) => {
     if (contact.exactOverlap || contact.overlap <= 0) {
       return;
     }
@@ -656,8 +736,12 @@ const resolveCollisionImpulses = (discs: CarromDisc[]) => {
   });
 };
 
-const separateOverlappingDiscs = (discs: CarromDisc[]) => {
-  forEachCollisionContact(discs, (contact) => {
+const separateOverlappingDiscs = (
+  discs: CarromDisc[],
+  candidatePairs?: CollisionCandidateScratch,
+  candidateCount = 0,
+) => {
+  forEachCollisionContact(discs, candidatePairs, candidateCount, (contact) => {
     const { a, b, inverseMassA, inverseMassB, nx, ny, overlap, totalInverseMass } = contact;
     const correction = Math.max(overlap - POSITION_SLOP, 0) * POSITION_CORRECTION;
 
@@ -676,52 +760,126 @@ const separateOverlappingDiscs = (discs: CarromDisc[]) => {
 
 const forEachCollisionContact = (
   discs: CarromDisc[],
+  candidatePairs: CollisionCandidateScratch | undefined,
+  candidateCount: number,
   visit: (contact: CollisionContact) => void,
 ) => {
+  if (candidatePairs) {
+    for (let index = 0; index < candidateCount; index += 1) {
+      const contact = createCollisionContact(
+        discs,
+        candidatePairs.aIndices[index]!,
+        candidatePairs.bIndices[index]!,
+      );
+
+      if (contact) {
+        visit(contact);
+      }
+    }
+
+    return;
+  }
+
   for (let i = 0; i < discs.length; i += 1) {
     for (let j = i + 1; j < discs.length; j += 1) {
-      const a = discs[i];
+      const contact = createCollisionContact(discs, i, j);
+
+      if (contact) {
+        visit(contact);
+      }
+    }
+  }
+};
+
+const createCollisionCandidateScratch = (): CollisionCandidateScratch => ({
+  aIndices: [],
+  bIndices: [],
+});
+
+const collectCollisionCandidatePairs = (
+  discs: CarromDisc[],
+  scratch: CollisionCandidateScratch,
+) => {
+  let count = 0;
+
+  for (let i = 0; i < discs.length; i += 1) {
+    const a = discs[i];
+
+    if (a.pocketed) {
+      continue;
+    }
+
+    for (let j = i + 1; j < discs.length; j += 1) {
       const b = discs[j];
 
-      if (a.pocketed || b.pocketed) {
+      if (b.pocketed) {
         continue;
       }
 
       const dx = b.x - a.x;
       const dy = b.y - a.y;
-      const rawDistance = Math.hypot(dx, dy);
-      const minDistance = a.radius + b.radius;
-      const exactOverlap = rawDistance === 0;
+      const candidateDistance = a.radius + b.radius + COLLISION_CANDIDATE_PADDING;
 
-      if (rawDistance >= minDistance) {
-        continue;
+      if (dx * dx + dy * dy <= candidateDistance * candidateDistance) {
+        scratch.aIndices[count] = i;
+        scratch.bIndices[count] = j;
+        count += 1;
       }
-
-      const fallbackNormal = getFallbackCollisionNormal(a, b, i, j);
-      const nx = exactOverlap ? fallbackNormal.nx : dx / rawDistance;
-      const ny = exactOverlap ? fallbackNormal.ny : dy / rawDistance;
-      const overlap = minDistance - rawDistance;
-      const inverseMassA = 1 / getDiscMass(a);
-      const inverseMassB = 1 / getDiscMass(b);
-      const totalInverseMass = inverseMassA + inverseMassB;
-
-      if (totalInverseMass === 0) {
-        continue;
-      }
-
-      visit({
-        a,
-        b,
-        exactOverlap,
-        inverseMassA,
-        inverseMassB,
-        nx,
-        ny,
-        overlap,
-        totalInverseMass,
-      });
     }
   }
+
+  scratch.aIndices.length = count;
+  scratch.bIndices.length = count;
+
+  return count;
+};
+
+const createCollisionContact = (
+  discs: CarromDisc[],
+  aIndex: number,
+  bIndex: number,
+): CollisionContact | undefined => {
+  const a = discs[aIndex];
+  const b = discs[bIndex];
+
+  if (a.pocketed || b.pocketed) {
+    return undefined;
+  }
+
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const minDistance = a.radius + b.radius;
+  const rawDistanceSq = dx * dx + dy * dy;
+  const exactOverlap = rawDistanceSq === 0;
+
+  if (rawDistanceSq >= minDistance * minDistance) {
+    return undefined;
+  }
+
+  const rawDistance = exactOverlap ? 0 : Math.sqrt(rawDistanceSq);
+  const fallbackNormal = getFallbackCollisionNormal(a, b, aIndex, bIndex);
+  const nx = exactOverlap ? fallbackNormal.nx : dx / rawDistance;
+  const ny = exactOverlap ? fallbackNormal.ny : dy / rawDistance;
+  const overlap = minDistance - rawDistance;
+  const inverseMassA = 1 / getDiscMass(a);
+  const inverseMassB = 1 / getDiscMass(b);
+  const totalInverseMass = inverseMassA + inverseMassB;
+
+  if (totalInverseMass === 0) {
+    return undefined;
+  }
+
+  return {
+    a,
+    b,
+    exactOverlap,
+    inverseMassA,
+    inverseMassB,
+    nx,
+    ny,
+    overlap,
+    totalInverseMass,
+  };
 };
 
 const relaxSettledOverlaps = (discs: CarromDisc[]) => {
@@ -744,7 +902,11 @@ const hasResolvableOverlap = (discs: CarromDisc[]) => {
         continue;
       }
 
-      if (a.radius + b.radius - Math.hypot(b.x - a.x, b.y - a.y) > POSITION_SLOP) {
+      const minDistance = a.radius + b.radius - POSITION_SLOP;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+
+      if (dx * dx + dy * dy < minDistance * minDistance) {
         return true;
       }
     }
@@ -753,14 +915,37 @@ const hasResolvableOverlap = (discs: CarromDisc[]) => {
   return false;
 };
 
-const countRemainingCoins = (discs: CarromDisc[], kind: CarromCoinKind) =>
-  discs.filter((disc) => disc.kind === kind && !disc.pocketed).length;
+const hasMovingDiscs = (discs: CarromDisc[]) => {
+  for (let index = 0; index < discs.length; index += 1) {
+    const disc = discs[index];
 
-const createSubstepMotionRecords = (discs: CarromDisc[]) =>
-  discs.map((disc) => ({
-    speed: Math.hypot(disc.vx, disc.vy),
-    x: disc.x,
-    y: disc.y,
+    if (!disc.pocketed && getSpeedSquared(disc.vx, disc.vy) > STOP_SPEED_SQ) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const countRemainingCoins = (discs: CarromDisc[], kind: CarromCoinKind) => {
+  let count = 0;
+
+  for (let index = 0; index < discs.length; index += 1) {
+    const disc = discs[index];
+
+    if (disc.kind === kind && !disc.pocketed) {
+      count += 1;
+    }
+  }
+
+  return count;
+};
+
+const createEmptySubstepMotionRecords = (count: number) =>
+  Array.from({ length: count }, () => ({
+    speedSq: 0,
+    x: 0,
+    y: 0,
   }));
 
 const resolvePockets = (
@@ -769,13 +954,22 @@ const resolvePockets = (
 ) => {
   const pocketed: CarromDisc[] = [];
 
-  discs.forEach((disc, index) => {
+  for (let index = 0; index < discs.length; index += 1) {
+    const disc = discs[index]!;
+
     if (disc.pocketed) {
-      return;
+      continue;
     }
 
     const motion = motionRecords[index];
-    const captured = CARROM_POCKETS.some((pocket) => isCapturedByPocket(disc, pocket, motion));
+    let captured = false;
+
+    for (let pocketIndex = 0; pocketIndex < CARROM_POCKETS.length; pocketIndex += 1) {
+      if (isCapturedByPocket(disc, CARROM_POCKETS[pocketIndex]!, motion)) {
+        captured = true;
+        break;
+      }
+    }
 
     if (captured) {
       disc.pocketed = true;
@@ -784,67 +978,82 @@ const resolvePockets = (
       disc.sleepFrames = SLEEP_FRAMES;
       pocketed.push(disc);
     }
-  });
+  }
 
   return pocketed;
 };
 
-const isNearPocket = (disc: CarromDisc) =>
-  CARROM_POCKETS.some(
-    (pocket) =>
-      Math.hypot(disc.x - pocket.x, disc.y - pocket.y) <
-      CARROM_POCKET_TUNING.mouthRadius + disc.radius,
-  );
+const isNearPocket = (disc: CarromDisc) => {
+  const mouthDistance = CARROM_POCKET_TUNING.mouthRadius + disc.radius;
+  const mouthDistanceSq = mouthDistance * mouthDistance;
+
+  for (let index = 0; index < CARROM_POCKETS.length; index += 1) {
+    const pocket = CARROM_POCKETS[index]!;
+
+    if (getDistanceSquared(disc.x, disc.y, pocket.x, pocket.y) < mouthDistanceSq) {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 const isCapturedByPocket = (
   disc: CarromDisc,
   pocket: { x: number; y: number },
   motion: SubstepMotionRecord | undefined,
 ) => {
-  const distance = Math.hypot(disc.x - pocket.x, disc.y - pocket.y);
+  const dx = pocket.x - disc.x;
+  const dy = pocket.y - disc.y;
+  const distanceSq = dx * dx + dy * dy;
 
-  if (distance < CARROM_POCKET_TUNING.captureRadius) {
+  if (distanceSq < CARROM_POCKET_CAPTURE_RADIUS_SQ) {
     return true;
   }
 
-  const movingTowardPocket =
-    (pocket.x - disc.x) * disc.vx + (pocket.y - disc.y) * disc.vy > 0;
+  const movingTowardPocket = dx * disc.vx + dy * disc.vy > 0;
 
   if (
     movingTowardPocket &&
-    distance < CARROM_POCKET_TUNING.directedCaptureRadius
+    distanceSq < CARROM_POCKET_DIRECTED_CAPTURE_RADIUS_SQ
   ) {
     return true;
   }
 
-  if (!motion || motion.speed < CARROM_POCKET_TUNING.fastCaptureSpeed) {
+  if (
+    !motion ||
+    motion.speedSq <
+      CARROM_POCKET_TUNING.fastCaptureSpeed * CARROM_POCKET_TUNING.fastCaptureSpeed
+  ) {
     return false;
   }
 
   return (
-    getDistanceFromPointToSegment(
+    getDistanceSquaredFromPointToSegment(
       pocket.x,
       pocket.y,
       motion.x,
       motion.y,
       disc.x,
       disc.y,
-    ) < CARROM_POCKET_TUNING.fastCaptureRadius
+    ) < CARROM_POCKET_FAST_CAPTURE_RADIUS_SQ
   );
 };
 
 const settleTinyVelocities = (discs: CarromDisc[]) => {
-  discs.forEach((disc) => {
+  for (let index = 0; index < discs.length; index += 1) {
+    const disc = discs[index]!;
+
     if (disc.pocketed) {
-      return;
+      continue;
     }
 
-    if (Math.hypot(disc.vx, disc.vy) < SLEEP_SPEED && (disc.sleepFrames ?? 0) >= SLEEP_FRAMES) {
+    if (getSpeedSquared(disc.vx, disc.vy) < SLEEP_SPEED_SQ && (disc.sleepFrames ?? 0) >= SLEEP_FRAMES) {
       disc.vx = 0;
       disc.vy = 0;
       disc.sleepFrames = SLEEP_FRAMES;
     }
-  });
+  }
 };
 
 const applyRollingDrag = (disc: CarromDisc) => {
@@ -874,7 +1083,99 @@ const applyRollingDrag = (disc: CarromDisc) => {
   };
 };
 
+const applyPocketPull = (
+  disc: CarromDisc,
+  velocity: { vx: number; vy: number },
+) => {
+  if (disc.kind === 'striker' || !isFiniteVector(velocity.vx, velocity.vy)) {
+    return velocity;
+  }
+
+  const speed = Math.hypot(velocity.vx, velocity.vy);
+
+  if (!Number.isFinite(speed) || speed <= 0) {
+    return velocity;
+  }
+
+  let pullX = 0;
+  let pullY = 0;
+  let strongestPull = 0;
+
+  for (let index = 0; index < CARROM_POCKETS.length; index += 1) {
+    const pocket = CARROM_POCKETS[index]!;
+    const dx = pocket.x - disc.x;
+    const dy = pocket.y - disc.y;
+    const distanceSq = dx * dx + dy * dy;
+
+    if (
+      !Number.isFinite(distanceSq) ||
+      distanceSq <= 0 ||
+      distanceSq >= CARROM_POCKET_PULL_RADIUS_SQ
+    ) {
+      continue;
+    }
+
+    const distance = Math.sqrt(distanceSq);
+    const nx = dx / distance;
+    const ny = dy / distance;
+    const radialSpeed = velocity.vx * nx + velocity.vy * ny;
+
+    if (radialSpeed <= 0) {
+      continue;
+    }
+
+    const pullWindow =
+      CARROM_POCKET_TUNING.pullRadius - CARROM_POCKET_TUNING.directedCaptureRadius;
+    const closeness = clamp(
+      (CARROM_POCKET_TUNING.pullRadius - distance) / pullWindow,
+      0,
+      1,
+    );
+    const alignment = clamp(radialSpeed / speed, 0, 1);
+    const pull = Math.min(
+      CARROM_POCKET_TUNING.pullMaxAcceleration,
+      CARROM_POCKET_TUNING.pullStrength * closeness * closeness * alignment,
+    );
+
+    if (pull > strongestPull) {
+      strongestPull = pull;
+      pullX = nx * pull;
+      pullY = ny * pull;
+    }
+  }
+
+  return {
+    vx: velocity.vx + pullX,
+    vy: velocity.vy + pullY,
+  };
+};
+
 const sanitizeDiscs = (discs: CarromDisc[]) => discs.map(sanitizeDisc);
+
+const sanitizeAndPrepareDiscs = (discs: CarromDisc[]) =>
+  discs.map((disc) => prepareDiscForStep(sanitizeDisc(disc)));
+
+const prepareDiscForStep = (disc: CarromDisc): CarromDisc => {
+  if (disc.pocketed) {
+    return disc;
+  }
+
+  const damped = applyRollingDrag(disc);
+  const pulled = applyPocketPull(disc, damped);
+  const clamped = clampVelocity(pulled.vx, pulled.vy, MAX_DISC_SPEED);
+  const clampedSpeedSq = getSpeedSquared(clamped.vx, clamped.vy);
+  const nextSleepFrames =
+    clampedSpeedSq < SLEEP_SPEED_SQ ? (disc.sleepFrames ?? 0) + 1 : 0;
+  const sleeping = nextSleepFrames >= SLEEP_FRAMES;
+  const vx = sleeping ? 0 : zeroTinyVelocity(clamped.vx);
+  const vy = sleeping ? 0 : zeroTinyVelocity(clamped.vy);
+
+  disc.vx = vx;
+  disc.vy = vy;
+  disc.sleepFrames = sleeping ? SLEEP_FRAMES : nextSleepFrames;
+
+  return disc;
+};
 
 const sanitizeDisc = (disc: CarromDisc): CarromDisc => {
   const radius = getDiscRadius(disc);
@@ -956,12 +1257,14 @@ const clampVelocity = (vx: number, vy: number, maxSpeed: number) => {
   const sanitizedVx = sanitizeVelocityComponent(vx);
   const sanitizedVy = sanitizeVelocityComponent(vy);
   const sanitizedMaxSpeed = Math.max(0, sanitizeNumber(maxSpeed, 0));
-  const speed = Math.hypot(sanitizedVx, sanitizedVy);
+  const speedSq = getSpeedSquared(sanitizedVx, sanitizedVy);
+  const maxSpeedSq = sanitizedMaxSpeed * sanitizedMaxSpeed;
 
-  if (speed <= sanitizedMaxSpeed || speed === 0) {
+  if (speedSq <= maxSpeedSq || speedSq === 0) {
     return { vx: sanitizedVx, vy: sanitizedVy };
   }
 
+  const speed = Math.sqrt(speedSq);
   const scale = sanitizedMaxSpeed / speed;
 
   return {
@@ -980,7 +1283,16 @@ const smoothStep = (edge0: number, edge1: number, value: number) => {
   return t * t * (3 - 2 * t);
 };
 
-const getDistanceFromPointToSegment = (
+const getDistanceSquared = (ax: number, ay: number, bx: number, by: number) => {
+  const dx = ax - bx;
+  const dy = ay - by;
+
+  return dx * dx + dy * dy;
+};
+
+const getSpeedSquared = (vx: number, vy: number) => vx * vx + vy * vy;
+
+const getDistanceSquaredFromPointToSegment = (
   px: number,
   py: number,
   ax: number,
@@ -993,14 +1305,14 @@ const getDistanceFromPointToSegment = (
   const lengthSquared = abx * abx + aby * aby;
 
   if (lengthSquared === 0) {
-    return Math.hypot(px - ax, py - ay);
+    return getDistanceSquared(px, py, ax, ay);
   }
 
   const t = clamp(((px - ax) * abx + (py - ay) * aby) / lengthSquared, 0, 1);
   const closestX = ax + abx * t;
   const closestY = ay + aby * t;
 
-  return Math.hypot(px - closestX, py - closestY);
+  return getDistanceSquared(px, py, closestX, closestY);
 };
 
 const zeroTinyVelocity = (value: number) =>
@@ -1052,5 +1364,7 @@ const clampDiscInsideBoard = (disc: CarromDisc) => {
 };
 
 const clampDiscsInsideBoard = (discs: CarromDisc[]) => {
-  discs.forEach(clampDiscInsideBoard);
+  for (let index = 0; index < discs.length; index += 1) {
+    clampDiscInsideBoard(discs[index]!);
+  }
 };

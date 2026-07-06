@@ -13,6 +13,12 @@ import { DrawingGuessGuessPanel } from './DrawingGuessGuessPanel';
 import { DrawingGuessLobbyPanel } from './DrawingGuessLobbyPanel';
 import { DrawingGuessRoundResults } from './DrawingGuessRoundResults';
 import { DrawingGuessScorePanel } from './DrawingGuessScorePanel';
+import { triggerDrawingGuessHaptic } from './drawingGuessHaptics';
+import {
+  drawingGuessShowcaseHelpBody,
+  drawingGuessShowcaseHelpSteps,
+  drawingGuessShowcaseHelpTitle,
+} from './drawingGuessShowcaseHelp';
 
 type DrawingGuessScreenProps = NativeStackScreenProps<RootStackParamList, 'DrawingGuess'>;
 
@@ -20,16 +26,40 @@ export function DrawingGuessScreen({ navigation, route }: DrawingGuessScreenProp
   const controller = useDrawingGuessController(route.params, () => navigation.goBack());
   const { actions, viewModel } = controller;
   const [localStatus, setLocalStatus] = useState('');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const localStatusTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showLocalStatus = (label: string) => {
+    if (localStatusTimeout.current) {
+      clearTimeout(localStatusTimeout.current);
+    }
+
     setLocalStatus(label);
-    setTimeout(() => setLocalStatus(''), 1500);
+    localStatusTimeout.current = setTimeout(() => setLocalStatus(''), 1500);
   };
+
+  useEffect(
+    () => () => {
+      if (localStatusTimeout.current) {
+        clearTimeout(localStatusTimeout.current);
+      }
+    },
+    [],
+  );
 
   return (
     <ScreenContainer>
       <View style={styles.header}>
-        <Pressable onPress={actions.leaveGame} style={styles.closeButton}>
+        <Pressable
+          accessibilityHint="Leave Drawing Guess and return to the previous screen."
+          accessibilityLabel="Close Drawing Guess"
+          accessibilityRole="button"
+          onPress={() => {
+            void triggerDrawingGuessHaptic('selection');
+            actions.leaveGame();
+          }}
+          style={styles.closeButton}
+        >
           <Text style={styles.closeIcon}>x</Text>
         </Pressable>
         <View style={styles.headerCopy}>
@@ -40,10 +70,56 @@ export function DrawingGuessScreen({ navigation, route }: DrawingGuessScreenProp
             <Text style={styles.headerPill}>{viewModel.connectedPlayerCount} players</Text>
             {viewModel.drawerName ? <Text style={styles.headerPill}>Drawer: {viewModel.drawerName}</Text> : null}
           </View>
+          {viewModel.isShowcaseMode ? (
+            <Pressable
+              accessibilityHint="Open a short guide to the local drawing game."
+              accessibilityLabel={drawingGuessShowcaseHelpTitle}
+              accessibilityRole="button"
+              onPress={() => {
+                void triggerDrawingGuessHaptic('selection');
+                setIsHelpOpen(true);
+              }}
+              style={styles.helpButton}
+            >
+              <Text style={styles.helpButtonText}>{drawingGuessShowcaseHelpTitle}</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
       <DrawingGuessConnectionBanner label={viewModel.connectionLabel} />
+
+      {isHelpOpen ? (
+        <FadeInPanel animationKey="drawing-guess-help">
+          <View
+            accessibilityLabel={`${drawingGuessShowcaseHelpTitle}. ${drawingGuessShowcaseHelpBody}`}
+            accessibilityRole="summary"
+            style={styles.helpCard}
+          >
+            <Text style={styles.promptEyebrow}>{drawingGuessShowcaseHelpTitle}</Text>
+            <View style={styles.helpStepList}>
+              {drawingGuessShowcaseHelpSteps.map((step, index) => (
+                <View key={step} style={styles.helpStep}>
+                  <Text style={styles.helpStepNumber}>{index + 1}</Text>
+                  <Text style={styles.helpStepText}>{step}</Text>
+                </View>
+              ))}
+            </View>
+            <Pressable
+              accessibilityHint="Close the gameplay guide."
+              accessibilityLabel="Got it"
+              accessibilityRole="button"
+              onPress={() => {
+                void triggerDrawingGuessHaptic('selection');
+                setIsHelpOpen(false);
+              }}
+              style={styles.helpCloseButton}
+            >
+              <Text style={styles.helpCloseButtonText}>Got it</Text>
+            </Pressable>
+          </View>
+        </FadeInPanel>
+      ) : null}
 
       {localStatus ? (
         <View style={styles.localStatus}>
@@ -69,10 +145,12 @@ export function DrawingGuessScreen({ navigation, route }: DrawingGuessScreenProp
             actions={{
               ...actions,
               clearCanvas: () => {
+                void triggerDrawingGuessHaptic('warning');
                 actions.clearCanvas();
                 showLocalStatus('Canvas cleared.');
               },
               undoLatestStroke: () => {
+                void triggerDrawingGuessHaptic('selection');
                 actions.undoLatestStroke();
                 showLocalStatus('Stroke undone.');
               },
@@ -145,7 +223,9 @@ function PromptSelectPanel({ actions, viewModel }: DrawingGuessPanelProps) {
       <View style={styles.promptCard}>
         <Text style={styles.promptEyebrow}>Secret prompt</Text>
         <Text style={styles.promptTitle}>Waiting for {viewModel.drawerName ?? 'the drawer'}</Text>
-        <Text style={styles.promptBody}>The drawer is choosing a prompt. The secret stays hidden until results.</Text>
+        <Text style={styles.promptBody}>
+          They are picking a secret card. Watch the canvas, then jump in with your guess.
+        </Text>
       </View>
     );
   }
@@ -156,14 +236,19 @@ function PromptSelectPanel({ actions, viewModel }: DrawingGuessPanelProps) {
       <Text style={styles.promptTitle}>Choose your prompt</Text>
       <Text style={styles.promptBody}>Pick one card. Only you can see it while drawing.</Text>
       <View style={styles.promptGrid}>
-        {viewModel.promptOptions.map((prompt, index) => (
+        {viewModel.promptOptions.map((prompt) => (
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={`Choose ${prompt.text}, ${prompt.categoryLabel}`}
+            accessibilityHint="Select this secret prompt and start drawing."
             key={prompt.id}
-            onPress={() => actions.choosePrompt(prompt.id)}
+            onPress={() => {
+              void triggerDrawingGuessHaptic('selection');
+              actions.choosePrompt(prompt.id);
+            }}
             style={({ pressed }) => [styles.promptOption, pressed && styles.promptOptionPressed]}
           >
-            <Text style={styles.promptCategory}>Choice {index + 1}</Text>
+            <Text style={styles.promptCategory}>{prompt.categoryLabel}</Text>
             <Text style={styles.promptOptionText}>{prompt.text}</Text>
           </Pressable>
         ))}
@@ -201,7 +286,14 @@ function MatchResultsPanel({ actions, viewModel }: DrawingGuessPanelProps) {
         ))}
       </View>
       <LuxuryButton
-        onPress={viewModel.isOnlineRoom ? actions.createOnlineRoom : actions.createLocalRoom}
+        onPress={() => {
+          void triggerDrawingGuessHaptic('success');
+          if (viewModel.isOnlineRoom) {
+            actions.createOnlineRoom();
+            return;
+          }
+          actions.createLocalRoom();
+        }}
         title={viewModel.isOnlineRoom ? 'New online room' : 'New local match'}
       />
     </View>
@@ -232,6 +324,7 @@ const styles = StyleSheet.create({
   },
   headerCopy: {
     flex: 1,
+    minWidth: 0,
   },
   eyebrow: {
     color: colors.gold,
@@ -241,12 +334,14 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.title,
     fontWeight: typography.weights.black,
     textAlign: 'right',
   },
   subtitle: {
     color: colors.textMuted,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     lineHeight: 22,
     marginTop: spacing.sm,
@@ -267,9 +362,80 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
+    maxWidth: '100%',
     overflow: 'hidden',
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
+  },
+  helpButton: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(232,190,97,0.12)',
+    borderColor: colors.borderGold,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  helpButtonText: {
+    color: colors.gold,
+    fontSize: typography.sizes.caption,
+    fontWeight: typography.weights.black,
+    textAlign: 'center',
+  },
+  helpCard: {
+    backgroundColor: 'rgba(255,255,255,0.075)',
+    borderColor: colors.borderGold,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginBottom: spacing.md,
+    padding: spacing.lg,
+  },
+  helpStepList: {
+    gap: spacing.sm,
+  },
+  helpStep: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  helpStepNumber: {
+    backgroundColor: 'rgba(232,190,97,0.14)',
+    borderColor: colors.borderGold,
+    borderRadius: 999,
+    borderWidth: 1,
+    color: colors.gold,
+    fontSize: typography.sizes.caption,
+    fontWeight: typography.weights.black,
+    minWidth: 28,
+    overflow: 'hidden',
+    paddingVertical: 4,
+    textAlign: 'center',
+  },
+  helpStepText: {
+    color: colors.text,
+    flex: 1,
+    fontSize: typography.sizes.body,
+    lineHeight: 22,
+    textAlign: 'right',
+  },
+  helpCloseButton: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(232,190,97,0.14)',
+    borderColor: colors.borderGold,
+    borderRadius: 999,
+    borderWidth: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  helpCloseButtonText: {
+    color: colors.gold,
+    fontSize: typography.sizes.body,
+    fontWeight: typography.weights.black,
   },
   localStatus: {
     backgroundColor: 'rgba(43,203,136,0.12)',
@@ -292,6 +458,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: spacing.md,
     marginBottom: spacing.md,
+    overflow: 'hidden',
     padding: spacing.lg,
   },
   promptEyebrow: {
@@ -302,12 +469,14 @@ const styles = StyleSheet.create({
   },
   promptTitle: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.title,
     fontWeight: typography.weights.black,
     textAlign: 'right',
   },
   promptBody: {
     color: colors.textMuted,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     lineHeight: 22,
     textAlign: 'right',
@@ -321,6 +490,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     minHeight: 82,
+    minWidth: 0,
     justifyContent: 'center',
     padding: spacing.md,
   },
@@ -336,6 +506,7 @@ const styles = StyleSheet.create({
   },
   promptOptionText: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.bodyLarge,
     fontWeight: typography.weights.black,
     marginTop: spacing.xs,
@@ -350,6 +521,7 @@ const styles = StyleSheet.create({
   },
   winnerName: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.headline,
     fontWeight: typography.weights.black,
     textAlign: 'right',
@@ -402,6 +574,7 @@ const styles = StyleSheet.create({
   rankingName: {
     color: colors.text,
     flex: 1,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.bold,
     textAlign: 'right',
@@ -411,5 +584,6 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.bodyLarge,
     fontWeight: typography.weights.black,
     minWidth: 44,
+    textAlign: 'left',
   },
 });

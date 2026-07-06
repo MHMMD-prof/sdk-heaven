@@ -21,6 +21,7 @@ const tokenRequestTimeoutMs = 10000;
 export async function requestDrawingGuessLiveKitConnectOptions(
   options: DrawingGuessConnectOptions,
   tokenEndpoint = getDrawingGuessLiveKitTokenEndpoint(),
+  getIdToken = getDefaultFirebaseIdToken,
 ): Promise<DrawingGuessLiveKitConnectOptions> {
   if (!tokenEndpoint) {
     throw new Error('Drawing Guess LiveKit token endpoint is not configured.');
@@ -31,16 +32,16 @@ export async function requestDrawingGuessLiveKitConnectOptions(
   let response: Response;
 
   try {
+    const idToken = await getIdToken();
     response = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: {
+        Authorization: `Bearer ${idToken}`,
         'Content-Type': 'application/json',
       },
       signal: controller.signal,
       body: JSON.stringify({
         roomId: options.roomId,
-        userId: options.playerId,
-        displayName: options.displayName,
         canPublishAudio: false,
       }),
     });
@@ -79,4 +80,10 @@ export const getDrawingGuessLiveKitTokenEndpoint = () => {
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+async function getDefaultFirebaseIdToken() {
+  const { getCurrentFirebaseIdToken } = await import('../../auth/getCurrentFirebaseIdToken');
+
+  return getCurrentFirebaseIdToken();
 }

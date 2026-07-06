@@ -5,6 +5,7 @@ import { LuxuryButton } from '../../components/LuxuryButton';
 import { colors, radius, spacing, typography } from '../../theme';
 import { DrawingGuessActions, DrawingGuessViewModel } from '../controller/drawingGuessControllerTypes';
 import { DrawingCanvas } from '../rendering/DrawingCanvas';
+import { triggerDrawingGuessHaptic } from './drawingGuessHaptics';
 
 type DrawingGuessCanvasStageProps = {
   viewModel: DrawingGuessViewModel;
@@ -107,8 +108,14 @@ export function DrawingGuessCanvasStage({ actions, viewModel }: DrawingGuessCanv
         <View style={styles.toolbar}>
           <View style={styles.toolRow}>
             <Pressable
+              accessibilityHint="Use the brush for the next stroke."
+              accessibilityLabel="Brush tool"
               accessibilityRole="button"
-              onPress={() => actions.setTool('brush')}
+              accessibilityState={{ selected: viewModel.selectedTool === 'brush' }}
+              onPress={() => {
+                void triggerDrawingGuessHaptic('selection');
+                actions.setTool('brush');
+              }}
               style={[
                 styles.toolButton,
                 viewModel.selectedTool === 'brush' && styles.activeToolButton,
@@ -118,8 +125,14 @@ export function DrawingGuessCanvasStage({ actions, viewModel }: DrawingGuessCanv
               <Text style={styles.toolText}>Brush</Text>
             </Pressable>
             <Pressable
+              accessibilityHint="Use the eraser for the next stroke."
+              accessibilityLabel="Eraser tool"
               accessibilityRole="button"
-              onPress={() => actions.setTool('eraser')}
+              accessibilityState={{ selected: viewModel.selectedTool === 'eraser' }}
+              onPress={() => {
+                void triggerDrawingGuessHaptic('selection');
+                actions.setTool('eraser');
+              }}
               style={[
                 styles.toolButton,
                 viewModel.selectedTool === 'eraser' && styles.activeToolButton,
@@ -132,9 +145,15 @@ export function DrawingGuessCanvasStage({ actions, viewModel }: DrawingGuessCanv
           <View style={styles.swatchRow}>
             {viewModel.availableBrushColors.map((brushColor) => (
               <Pressable
+                accessibilityHint="Use this color for the next brush stroke."
+                accessibilityLabel={`Brush color ${brushColor}`}
                 accessibilityRole="button"
+                accessibilityState={{ selected: viewModel.brushColor === brushColor }}
                 key={brushColor}
-                onPress={() => actions.setBrushColor(brushColor)}
+                onPress={() => {
+                  void triggerDrawingGuessHaptic('selection');
+                  actions.setBrushColor(brushColor);
+                }}
                 style={[
                   styles.swatch,
                   { backgroundColor: brushColor },
@@ -147,9 +166,15 @@ export function DrawingGuessCanvasStage({ actions, viewModel }: DrawingGuessCanv
           <View style={styles.sizeRow}>
             {viewModel.availableBrushWidths.map((brushWidth) => (
               <Pressable
+                accessibilityHint="Use this width for the next brush stroke."
+                accessibilityLabel={`Brush size ${brushWidth}`}
                 accessibilityRole="button"
+                accessibilityState={{ selected: viewModel.brushWidth === brushWidth }}
                 key={brushWidth}
-                onPress={() => actions.setBrushWidth(brushWidth)}
+                onPress={() => {
+                  void triggerDrawingGuessHaptic('selection');
+                  actions.setBrushWidth(brushWidth);
+                }}
                 style={[
                   styles.widthButton,
                   viewModel.brushWidth === brushWidth && styles.activeToolButton,
@@ -169,22 +194,48 @@ export function DrawingGuessCanvasStage({ actions, viewModel }: DrawingGuessCanv
             ))}
           </View>
           <View style={styles.actionRow}>
-            <Pressable accessibilityRole="button" onPress={actions.undoLatestStroke} style={styles.secondaryAction}>
+            <Pressable
+              accessibilityHint="Remove your latest stroke from the canvas."
+              accessibilityLabel="Undo latest stroke"
+              accessibilityRole="button"
+              onPress={actions.undoLatestStroke}
+              style={styles.secondaryAction}
+            >
               <Text style={styles.secondaryActionText}>Undo</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={actions.clearCanvas} style={styles.dangerAction}>
+            <Pressable
+              accessibilityHint="Clear the current canvas."
+              accessibilityLabel="Clear canvas"
+              accessibilityRole="button"
+              onPress={actions.clearCanvas}
+              style={styles.dangerAction}
+            >
               <Text style={styles.dangerActionText}>Clear</Text>
             </Pressable>
           </View>
           {viewModel.canEndRound ? (
-            <LuxuryButton onPress={actions.endRound} title="Reveal results" />
+            <LuxuryButton
+              accessibilityHint="End this round and show the prompt and scores."
+              onPress={() => {
+                void triggerDrawingGuessHaptic('success');
+                actions.endRound();
+              }}
+              title="Reveal results"
+            />
           ) : null}
         </View>
       ) : (
         <View style={styles.waitingPanel}>
           <Text style={styles.helper}>Waiting for the drawer to sketch the prompt.</Text>
           {viewModel.canEndRound ? (
-            <LuxuryButton onPress={actions.endRound} title="Reveal results" />
+            <LuxuryButton
+              accessibilityHint="End this round and show the prompt and scores."
+              onPress={() => {
+                void triggerDrawingGuessHaptic('success');
+                actions.endRound();
+              }}
+              title="Reveal results"
+            />
           ) : null}
         </View>
       )}
@@ -210,6 +261,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     flexGrow: 1,
+    flexShrink: 1,
     minHeight: 54,
     minWidth: 92,
     paddingHorizontal: spacing.md,
@@ -226,6 +278,7 @@ const styles = StyleSheet.create({
   },
   badgeValue: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.black,
     marginTop: 2,
@@ -289,6 +342,7 @@ const styles = StyleSheet.create({
   paperHeader: {
     alignItems: 'center',
     flexDirection: 'row',
+    gap: spacing.sm,
     justifyContent: 'space-between',
     paddingBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
@@ -296,6 +350,7 @@ const styles = StyleSheet.create({
   paperTitle: {
     color: '#3D2E1F',
     flex: 1,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.black,
     textAlign: 'right',
@@ -306,6 +361,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(61,46,31,0.18)',
     borderRadius: radius.full,
     borderWidth: 1,
+    flexShrink: 1,
     flexDirection: 'row',
     gap: spacing.xs,
     paddingHorizontal: spacing.sm,
@@ -318,6 +374,7 @@ const styles = StyleSheet.create({
   },
   currentToolText: {
     color: '#3D2E1F',
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
   },
@@ -351,6 +408,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     flex: 1,
+    flexShrink: 1,
     minHeight: 42,
     justifyContent: 'center',
     flexDirection: 'row',
@@ -373,6 +431,7 @@ const styles = StyleSheet.create({
   },
   toolText: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
   },

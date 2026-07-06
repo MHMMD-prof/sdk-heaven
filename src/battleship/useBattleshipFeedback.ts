@@ -3,6 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 
 import { SoundKey, soundSources } from './constants';
+import { safePlayBattleshipSound, safeRunBattleshipHaptic } from './BattleshipFeedbackSafety';
 
 export function useBattleshipFeedback() {
   const [soundMuted, setSoundMuted] = useState(false);
@@ -23,28 +24,15 @@ export function useBattleshipFeedback() {
   };
 
   const playSound = (soundKey: SoundKey) => {
-    if (soundMuted) {
-      return;
-    }
-
-    const player = soundPlayers[soundKey];
-
-    try {
-      void player
-        .seekTo(0)
-        .then(() => player.play())
-        .catch(() => player.play());
-    } catch {
-      // Audio can be unavailable on some test/simulator targets; gameplay should continue.
-    }
+    void safePlayBattleshipSound(soundPlayers[soundKey], soundMuted);
   };
 
   const impact = (style: Haptics.ImpactFeedbackStyle) => {
-    void Haptics.impactAsync(style).catch(() => undefined);
+    void safeRunBattleshipHaptic(() => Haptics.impactAsync(style));
   };
 
   const notify = (type: Haptics.NotificationFeedbackType) => {
-    void Haptics.notificationAsync(type).catch(() => undefined);
+    void safeRunBattleshipHaptic(() => Haptics.notificationAsync(type));
   };
 
   const toggleSound = () => {

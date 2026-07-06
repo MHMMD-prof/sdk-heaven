@@ -6,6 +6,7 @@ import { LuxuryButton } from '../../components/LuxuryButton';
 import { LuxuryInput } from '../../components/LuxuryInput';
 import { colors, spacing, typography } from '../../theme';
 import { DrawingGuessActions, DrawingGuessViewModel } from '../controller/drawingGuessControllerTypes';
+import { triggerDrawingGuessHaptic } from './drawingGuessHaptics';
 
 type DrawingGuessLobbyPanelProps = {
   viewModel: DrawingGuessViewModel;
@@ -60,8 +61,28 @@ export function DrawingGuessLobbyPanel({ actions, viewModel }: DrawingGuessLobby
       ) : null}
 
       <View style={styles.actions}>
-        <LuxuryButton onPress={actions.startMatch} disabled={!viewModel.canStart} title="Start match" />
-        <Pressable accessibilityRole="button" onPress={actions.createLocalRoom} style={styles.secondaryAction}>
+        <LuxuryButton
+          accessibilityHint="Begin the local drawing match."
+          onPress={() => {
+            void triggerDrawingGuessHaptic(viewModel.canStart ? 'success' : 'warning');
+            actions.startMatch();
+          }}
+          disabled={!viewModel.canStart}
+          title="Start match"
+        />
+        {!viewModel.canStart && !viewModel.isShowcaseMode ? (
+          <Text style={styles.disabledHelp}>Waiting for enough ready players.</Text>
+        ) : null}
+        <Pressable
+          accessibilityHint="Reset this local game and return to setup."
+          accessibilityLabel="New local match"
+          accessibilityRole="button"
+          onPress={() => {
+            void triggerDrawingGuessHaptic('selection');
+            actions.createLocalRoom();
+          }}
+          style={styles.secondaryAction}
+        >
           <Text style={styles.secondaryActionText}>New local match</Text>
         </Pressable>
         {viewModel.showOnlineControls ? (
@@ -113,12 +134,14 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.headline,
     fontWeight: typography.weights.black,
     textAlign: 'right',
   },
   body: {
     color: colors.textMuted,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     lineHeight: 22,
     textAlign: 'right',
@@ -129,11 +152,13 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(43,203,136,0.38)',
     borderRadius: 999,
     borderWidth: 1,
+    maxWidth: '100%',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },
   readyText: {
     color: colors.emerald,
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
   },
@@ -169,15 +194,18 @@ const styles = StyleSheet.create({
   },
   playerCopy: {
     flex: 1,
+    minWidth: 0,
   },
   playerName: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.bold,
     textAlign: 'right',
   },
   playerMeta: {
     color: colors.textSubtle,
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     marginTop: 2,
     textAlign: 'right',
@@ -190,6 +218,7 @@ const styles = StyleSheet.create({
     color: colors.gold,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
+    maxWidth: 86,
     overflow: 'hidden',
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
@@ -215,5 +244,10 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.bold,
+  },
+  disabledHelp: {
+    color: colors.textSubtle,
+    fontSize: typography.sizes.caption,
+    textAlign: 'center',
   },
 });

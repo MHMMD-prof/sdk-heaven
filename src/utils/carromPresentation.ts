@@ -1,9 +1,15 @@
-import { colors } from '../theme';
-import { CarromCoinKind, CarromGameState, CarromPlayer } from '../types/carrom';
+import { CarromCoinKind, CarromDisc, CarromGameState, CarromPlayer } from '../types/carrom';
 
 export type CarromSparkleTone = 'queen' | 'coin' | 'striker';
 export type CarromEventTone = 'neutral' | 'success' | 'foul' | 'queen';
 export type ShotHistoryTone = CarromEventTone | 'win';
+export type CarromRemainingCounts = Record<CarromPlayer, number>;
+export type CarromPocketSparklePayload = {
+  id: string;
+  tone: CarromSparkleTone;
+  x: number;
+  y: number;
+};
 
 export type ShotHistoryItem = {
   id: string;
@@ -12,12 +18,15 @@ export type ShotHistoryItem = {
   tone: ShotHistoryTone;
 };
 
+const MAX_SHOT_HISTORY_ITEMS = 8;
+
 export function createShotHistoryItem(
   game: CarromGameState,
   shotPlayer: CarromPlayer,
+  pocketedOverride?: CarromDisc[],
 ): ShotHistoryItem {
   const tone = getHistoryTone(game);
-  const pocketSummary = getPocketSummary(game, shotPlayer);
+  const pocketSummary = getPocketSummary(game, shotPlayer, pocketedOverride);
   const message =
     game.status === 'gameOver' && game.winner
       ? `اللاعب ${game.winner} فاز - ضربة اللاعب ${shotPlayer} - ${pocketSummary}`
@@ -31,28 +40,109 @@ export function createShotHistoryItem(
   };
 }
 
-export function getPocketSummary(game: CarromGameState, shotPlayer: CarromPlayer) {
-  const pocketed = game.pocketedThisTurn;
+export function prependShotHistoryItem(
+  current: ShotHistoryItem[],
+  nextItem: ShotHistoryItem,
+  maxItems = MAX_SHOT_HISTORY_ITEMS,
+) {
+  const nextLength = Math.min(maxItems, current.length + 1);
+  const nextHistory: ShotHistoryItem[] = new Array(nextLength);
+  nextHistory[0] = nextItem;
+
+  for (let index = 1; index < nextLength; index += 1) {
+    nextHistory[index] = current[index - 1];
+  }
+
+  return nextHistory;
+}
+
+export function createPocketSparkles(discs: CarromDisc[]): CarromPocketSparklePayload[] {
+  if (discs.length === 0) {
+    return [];
+  }
+
+  const sparkles: CarromPocketSparklePayload[] = new Array(discs.length);
+
+  for (let index = 0; index < discs.length; index += 1) {
+    const disc = discs[index]!;
+    sparkles[index] = {
+      id: disc.id,
+      tone: disc.kind === 'queen' ? 'queen' : disc.kind === 'striker' ? 'striker' : 'coin',
+      x: disc.x,
+      y: disc.y,
+    };
+  }
+
+  return sparkles;
+}
+
+export function getPocketSummary(
+  game: CarromGameState,
+  shotPlayer: CarromPlayer,
+  pocketedOverride?: CarromDisc[],
+) {
+  const pocketed = pocketedOverride ?? game.pocketedThisTurn;
 
   if (pocketed.length === 0) {
     return 'لا توجد قطع داخلة';
   }
 
   const ownKind = game.playerCoins[shotPlayer];
-  const ownCount = pocketed.filter((disc) => disc.kind === ownKind).length;
-  const opponentCount = pocketed.filter(
-    (disc) => disc.owner && disc.kind !== ownKind,
-  ).length;
-  const queenCount = pocketed.filter((disc) => disc.kind === 'queen').length;
-  const strikerCount = pocketed.filter((disc) => disc.kind === 'striker').length;
-  const parts = [
-    ownCount > 0 ? `${ownCount} من قطع اللاعب` : undefined,
-    opponentCount > 0 ? `${opponentCount} من قطع الخصم` : undefined,
-    queenCount > 0 ? 'الملكة' : undefined,
-    strikerCount > 0 ? 'حجر الضربة' : undefined,
-  ].filter(Boolean);
+  let ownCount = 0;
+  let opponentCount = 0;
+  let queenCount = 0;
+  let strikerCount = 0;
+
+  for (const disc of pocketed) {
+    if (disc.kind === ownKind) {
+      ownCount += 1;
+    } else if (disc.owner) {
+      opponentCount += 1;
+    } else if (disc.kind === 'queen') {
+      queenCount += 1;
+    } else if (disc.kind === 'striker') {
+      strikerCount += 1;
+    }
+  }
+  const parts: string[] = [];
+  if (ownCount > 0) {
+    parts.push(`${ownCount} من قطع اللاعب`);
+  }
+
+  if (opponentCount > 0) {
+    parts.push(`${opponentCount} من قطع الخصم`);
+  }
+
+  if (queenCount > 0) {
+    parts.push('الملكة');
+  }
+
+  if (strikerCount > 0) {
+    parts.push('حجر الضربة');
+  }
 
   return parts.join('، ');
+}
+
+export function getRemainingCoinCounts(game: CarromGameState): CarromRemainingCounts {
+  const remaining: CarromRemainingCounts = {
+    1: 0,
+    2: 0,
+  };
+
+  for (const disc of game.discs) {
+    if (disc.pocketed) {
+      continue;
+    }
+
+    if (disc.kind === game.playerCoins[1]) {
+      remaining[1] += 1;
+    } else if (disc.kind === game.playerCoins[2]) {
+      remaining[2] += 1;
+    }
+  }
+
+  return remaining;
 }
 
 export function getHistoryTone(game: CarromGameState): ShotHistoryTone {
@@ -162,18 +252,6 @@ export function getSparkleColor(tone: CarromSparkleTone) {
 
   if (tone === 'striker') {
     return '#FF8E9F';
-  }
-
-  return '#63F4C4';
-}
-
-export function getPowerTone(powerPercent: number) {
-  if (powerPercent > 0.72) {
-    return '#FF7B6E';
-  }
-
-  if (powerPercent > 0.42) {
-    return colors.goldSoft;
   }
 
   return '#63F4C4';

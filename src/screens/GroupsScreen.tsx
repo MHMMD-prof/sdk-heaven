@@ -16,13 +16,39 @@ type GroupsScreenProps = {
 };
 
 export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps) {
+  const [errorMessage, setErrorMessage] = useState('');
   const [isCreateModalVisible, setCreateModalVisible] = useState(false);
+  const [pendingRoomId, setPendingRoomId] = useState<string | null>(null);
   const [selectedRoomType, setSelectedRoomType] = useState<VoiceRoomType>('voice');
-  const { createDraftRoom, rooms } = useVoiceRooms();
+  const { createRoom, joinRoom, rooms, roomsStatus } = useVoiceRooms();
 
-  const handleCreateDraftRoom = () => {
-    createDraftRoom(selectedRoomType);
-    setCreateModalVisible(false);
+  const handleCreateRoom = async () => {
+    setErrorMessage('');
+    setPendingRoomId('create');
+
+    try {
+      const room = await createRoom({ type: selectedRoomType });
+      setCreateModalVisible(false);
+      navigation.navigate('VoiceRoom', { roomId: room.id });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to create room.');
+    } finally {
+      setPendingRoomId(null);
+    }
+  };
+
+  const handleJoinRoom = async (roomId: string) => {
+    setErrorMessage('');
+    setPendingRoomId(roomId);
+
+    try {
+      const room = await joinRoom(roomId);
+      navigation.navigate('VoiceRoom', { roomId: room.id });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to join room.');
+    } finally {
+      setPendingRoomId(null);
+    }
   };
 
   return (
@@ -35,6 +61,17 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
           التطوير الحالي.
         </Text>
       </View>
+
+      {roomsStatus === 'error' ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>Room sync failed. Showing local rooms.</Text>
+        </View>
+      ) : null}
+      {errorMessage ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
 
       <Pressable
         onPress={() => setCreateModalVisible(true)}
@@ -51,8 +88,9 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
       <View style={styles.roomList}>
         {rooms.map((room) => (
           <GroupCard
+            isPending={pendingRoomId === room.id}
             key={room.id}
-            onPress={() => navigation.navigate('VoiceRoom', { roomId: room.id })}
+            onPress={() => handleJoinRoom(room.id)}
             room={room}
           />
         ))}
@@ -60,8 +98,9 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
 
       <CreateGroupModal
         isVisible={isCreateModalVisible}
+        isCreating={pendingRoomId === 'create'}
         onClose={() => setCreateModalVisible(false)}
-        onCreate={handleCreateDraftRoom}
+        onCreate={handleCreateRoom}
         onSelectType={setSelectedRoomType}
         selectedType={selectedRoomType}
       />
@@ -71,6 +110,7 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
 
 type CreateGroupModalProps = {
   isVisible: boolean;
+  isCreating: boolean;
   selectedType: VoiceRoomType;
   onClose: () => void;
   onCreate: () => void;
@@ -79,6 +119,7 @@ type CreateGroupModalProps = {
 
 function CreateGroupModal({
   isVisible,
+  isCreating,
   onClose,
   onCreate,
   onSelectType,
@@ -114,7 +155,11 @@ function CreateGroupModal({
             />
           </View>
 
-          <Pressable onPress={onCreate} style={styles.modalCreateButton}>
+          <Pressable
+            disabled={isCreating}
+            onPress={onCreate}
+            style={[styles.modalCreateButton, isCreating && styles.disabledButton]}
+          >
             <Text style={styles.modalCreateText}>إنشاء مجموعة تجريبية</Text>
           </Pressable>
         </View>
@@ -145,14 +190,19 @@ function TypeChoice({ isSelected, label, onPress }: TypeChoiceProps) {
 
 type GroupCardProps = {
   room: VoiceRoom;
+  isPending: boolean;
   onPress: () => void;
 };
 
-function GroupCard({ room, onPress }: GroupCardProps) {
+function GroupCard({ isPending, room, onPress }: GroupCardProps) {
   const host = room.speakers.find((speaker) => speaker.id === room.hostId) ?? room.speakers[0];
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
+    <Pressable
+      disabled={isPending}
+      onPress={onPress}
+      style={({ pressed }) => [pressed && styles.pressed, isPending && styles.disabledCard]}
+    >
       <GlassCard style={styles.roomCard}>
         <View style={styles.roomTop}>
           <View style={styles.roomMeta}>
@@ -238,6 +288,27 @@ const styles = StyleSheet.create({
   },
   createCopy: {
     flex: 1,
+  },
+  disabledButton: {
+    opacity: 0.62,
+  },
+  disabledCard: {
+    opacity: 0.62,
+  },
+  errorBanner: {
+    backgroundColor: 'rgba(235,87,87,0.12)',
+    borderColor: 'rgba(235,87,87,0.35)',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+  },
+  errorText: {
+    color: colors.ruby,
+    fontSize: typography.sizes.caption,
+    fontWeight: typography.weights.bold,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   createTitle: {
     color: colors.goldSoft,

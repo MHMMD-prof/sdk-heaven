@@ -75,6 +75,7 @@ export type DrawingGuessViewModel = {
   promptOptions: {
     id: string;
     text: string;
+    categoryLabel: string;
   }[];
   canStart: boolean;
   canChoosePrompt: boolean;

@@ -1,6 +1,4 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View, ViewProps } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../theme';
 import { CarromCoinKind, CarromPlayer } from '../types/carrom';
@@ -138,71 +136,6 @@ export function CarromSettingsRail({
   );
 }
 
-type CarromStrikerSliderProps = {
-  panHandlers: ViewProps;
-  progress: number;
-  width: number;
-};
-
-export type CarromStrikerSliderHandle = {
-  setProgress: (progress: number) => void;
-};
-
-export const CarromStrikerSlider = forwardRef<CarromStrikerSliderHandle, CarromStrikerSliderProps>(
-  function CarromStrikerSlider({ panHandlers, progress, width }, ref) {
-  const progressValue = useRef(new Animated.Value(progress)).current;
-  const fillWidth = progressValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, width],
-  });
-  const thumbX = progressValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-17, width - 17],
-  });
-
-  useEffect(() => {
-    progressValue.setValue(progress);
-  }, [progress, progressValue]);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      setProgress(nextProgress) {
-        progressValue.setValue(Math.min(1, Math.max(0, nextProgress)));
-      },
-    }),
-    [progressValue],
-  );
-
-  return (
-    <View style={[styles.strikerSlider, { width }]} {...panHandlers}>
-      <View pointerEvents="none" style={styles.strikerSliderTrack} />
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.strikerSliderFillClip,
-          {
-            width: fillWidth,
-          },
-        ]}
-      >
-        <LinearGradient
-          colors={[colors.goldSoft, colors.gold]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={styles.strikerSliderFill}
-        />
-      </Animated.View>
-      <Animated.View
-        pointerEvents="none"
-        style={[styles.strikerSliderThumb, { transform: [{ translateX: thumbX }] }]}
-      >
-        <View style={styles.strikerSliderThumbCore} />
-      </Animated.View>
-    </View>
-  );
-});
-
 type CarromControlDockProps = {
   compact: boolean;
   statusSubtitle: string;
@@ -244,6 +177,8 @@ export function CarromShotHistoryPanel({
   items,
   onToggle,
 }: CarromShotHistoryPanelProps) {
+  const visibleItemCount = expanded ? 5 : 1;
+
   return (
     <Pressable
       onPress={onToggle}
@@ -255,14 +190,16 @@ export function CarromShotHistoryPanel({
       </View>
       {items.length > 0 ? (
         <View style={styles.historyList}>
-          {(expanded ? items.slice(0, 5) : items.slice(0, 1)).map((item) => (
-            <View key={item.id} style={styles.historyItem}>
-              <View style={[styles.historyDot, styles[getHistoryToneStyle(item.tone)]]} />
-              <Text numberOfLines={expanded ? 2 : 1} style={styles.historyText}>
-                {item.message}
-              </Text>
-            </View>
-          ))}
+          {items.map((item, index) =>
+            index < visibleItemCount ? (
+              <View key={item.id} style={styles.historyItem}>
+                <View style={[styles.historyDot, styles[getHistoryToneStyle(item.tone)]]} />
+                <Text numberOfLines={expanded ? 2 : 1} style={styles.historyText}>
+                  {item.message}
+                </Text>
+              </View>
+            ) : null,
+          )}
         </View>
       ) : (
         <Text numberOfLines={1} style={styles.historyEmpty}>
@@ -680,52 +617,6 @@ const styles = StyleSheet.create({
   strikerDotCompact: {
     height: 24,
     width: 24,
-  },
-  strikerSlider: {
-    alignSelf: 'center',
-    height: 38,
-    justifyContent: 'center',
-    marginTop: spacing.xs,
-  },
-  strikerSliderFill: {
-    borderRadius: radius.full,
-    height: '100%',
-    width: '100%',
-  },
-  strikerSliderFillClip: {
-    borderRadius: radius.full,
-    height: 10,
-    left: 0,
-    overflow: 'hidden',
-    position: 'absolute',
-  },
-  strikerSliderThumb: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(8,5,15,0.78)',
-    borderColor: colors.goldSoft,
-    borderRadius: radius.full,
-    borderWidth: 2,
-    height: 34,
-    justifyContent: 'center',
-    position: 'absolute',
-    width: 34,
-  },
-  strikerSliderThumbCore: {
-    backgroundColor: '#CF6334',
-    borderColor: 'rgba(255,255,255,0.24)',
-    borderRadius: radius.full,
-    borderWidth: 1,
-    height: 20,
-    width: 20,
-  },
-  strikerSliderTrack: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderColor: 'rgba(232,190,97,0.24)',
-    borderRadius: radius.full,
-    borderWidth: 1,
-    height: 10,
-    overflow: 'hidden',
-    width: '100%',
   },
   strikerText: {
     color: colors.textSubtle,

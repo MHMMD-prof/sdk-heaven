@@ -65,16 +65,19 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     flexDirection: 'row',
+    gap: spacing.sm,
     justifyContent: 'space-between',
   },
   title: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.bodyLarge,
     fontWeight: typography.weights.black,
     textAlign: 'right',
   },
   phase: {
     color: colors.gold,
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
   },
@@ -108,15 +111,18 @@ const styles = StyleSheet.create({
   },
   copy: {
     flex: 1,
+    minWidth: 0,
   },
   name: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.bold,
     textAlign: 'right',
   },
   meta: {
     color: colors.textSubtle,
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     textAlign: 'right',
   },
@@ -135,6 +141,7 @@ const styles = StyleSheet.create({
     color: colors.gold,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
+    maxWidth: '100%',
     overflow: 'hidden',
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,

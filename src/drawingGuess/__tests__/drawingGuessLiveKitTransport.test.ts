@@ -49,7 +49,7 @@ describe('requestDrawingGuessLiveKitConnectOptions', () => {
     );
 
     await expect(
-      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test'),
+      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test', async () => 'id-token-1'),
     ).resolves.toEqual({
       ...connectOptions,
       serverUrl: 'wss://livekit.example.test',
@@ -60,10 +60,12 @@ describe('requestDrawingGuessLiveKitConnectOptions', () => {
       'https://token.example.test',
       expect.objectContaining({
         method: 'POST',
+        headers: {
+          Authorization: 'Bearer id-token-1',
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           roomId: 'DG-ROOM',
-          userId: 'local-user',
-          displayName: 'Local User',
           canPublishAudio: false,
         }),
       }),
@@ -81,7 +83,11 @@ describe('requestDrawingGuessLiveKitConnectOptions', () => {
         }),
     );
 
-    const request = requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test');
+    const request = requestDrawingGuessLiveKitConnectOptions(
+      connectOptions,
+      'https://token.example.test',
+      async () => 'id-token-1',
+    );
     const expectation = expect(request).rejects.toThrow('Drawing Guess token request timed out.');
     await vi.advanceTimersByTimeAsync(10000);
     await expectation;
@@ -89,17 +95,17 @@ describe('requestDrawingGuessLiveKitConnectOptions', () => {
     vi.useRealTimers();
     vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('nope'));
     await expect(
-      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test'),
+      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test', async () => 'id-token-1'),
     ).rejects.toThrow('Drawing Guess token request failed.');
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 500 }));
     await expect(
-      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test'),
+      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test', async () => 'id-token-1'),
     ).rejects.toThrow('Drawing Guess token request failed with status 500.');
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 200 }));
     await expect(
-      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test'),
+      requestDrawingGuessLiveKitConnectOptions(connectOptions, 'https://token.example.test', async () => 'id-token-1'),
     ).rejects.toThrow('Drawing Guess token response must include serverUrl and token.');
   });
 });

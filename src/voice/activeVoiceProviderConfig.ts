@@ -8,6 +8,9 @@ declare const process:
 
 const env = typeof process === 'undefined' ? {} : process.env ?? {};
 const liveKitTokenEndpoint = env.EXPO_PUBLIC_LIVEKIT_TOKEN_ENDPOINT;
+const roomCommandEndpoint =
+  env.EXPO_PUBLIC_ROOM_COMMAND_ENDPOINT ??
+  liveKitTokenEndpoint?.replace(/livekitToken(?:\/)?$/, 'roomCommand');
 
 export const mockVoiceProviderConfig: VoiceProviderConfig = {
   provider: 'mock',
@@ -17,8 +20,7 @@ export const liveKitVoiceProviderConfig: VoiceProviderConfig = {
   provider: 'livekit',
   liveKit: {
     tokenEndpoint: liveKitTokenEndpoint ?? '',
-    userId: env.EXPO_PUBLIC_VOICE_USER_ID ?? 'local-user',
-    displayName: env.EXPO_PUBLIC_VOICE_DISPLAY_NAME ?? 'أنت',
+    roomCommandEndpoint,
     canPublishAudio: env.EXPO_PUBLIC_VOICE_CAN_PUBLISH_AUDIO !== 'false',
   },
 };

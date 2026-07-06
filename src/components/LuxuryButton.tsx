@@ -12,6 +12,8 @@ import { colors, radius, spacing, typography } from '../theme';
 type LuxuryButtonProps = {
   title: string;
   onPress: () => void;
+  accessibilityHint?: string;
+  accessibilityLabel?: string;
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
@@ -20,13 +22,16 @@ type LuxuryButtonProps = {
 export function LuxuryButton({
   title,
   onPress,
+  accessibilityHint,
+  accessibilityLabel,
   disabled = false,
   loading = false,
   style,
 }: LuxuryButtonProps) {
   return (
     <Pressable
-      accessibilityLabel={title}
+      accessibilityHint={accessibilityHint}
+      accessibilityLabel={accessibilityLabel ?? title}
       accessibilityRole="button"
       accessibilityState={{ busy: loading, disabled: disabled || loading }}
       disabled={disabled || loading}

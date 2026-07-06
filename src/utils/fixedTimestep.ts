@@ -10,6 +10,7 @@ export type FixedTimestepTiming = {
 
 type AdvanceFixedTimestepOptions<TState> = {
   isComplete: (state: TState) => boolean;
+  maxStepsPerFrame?: number;
   step: (state: TState) => TState;
   state: TState;
   timestamp: number;
@@ -30,6 +31,7 @@ export const createFixedTimestepTiming = (): FixedTimestepTiming => ({
 
 export function advanceFixedTimestep<TState>({
   isComplete,
+  maxStepsPerFrame = MAX_STEPS_PER_FRAME,
   state,
   step,
   timestamp,
@@ -66,7 +68,7 @@ export function advanceFixedTimestep<TState>({
 
   while (
     accumulatorMs + TIMESTEP_EPSILON_MS >= FIXED_STEP_MS &&
-    steps < MAX_STEPS_PER_FRAME &&
+    steps < maxStepsPerFrame &&
     !isComplete(nextState)
   ) {
     nextState = step(nextState);
@@ -74,7 +76,7 @@ export function advanceFixedTimestep<TState>({
     steps += 1;
   }
 
-  if (steps >= MAX_STEPS_PER_FRAME && accumulatorMs >= FIXED_STEP_MS) {
+  if (steps >= maxStepsPerFrame && accumulatorMs >= FIXED_STEP_MS) {
     accumulatorMs = accumulatorMs % FIXED_STEP_MS;
   }
 

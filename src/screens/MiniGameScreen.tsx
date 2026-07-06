@@ -6,6 +6,7 @@ import {
 import { LuxuryButton } from '../components/LuxuryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { BattleshipBoardCard } from '../battleship/BattleshipBoardCard';
+import { BattleshipConfirmDialog } from '../battleship/BattleshipConfirmDialog';
 import { BattleshipFleetPanel } from '../battleship/BattleshipFleetPanel';
 import { BattleshipHandoffPanel } from '../battleship/BattleshipHandoffPanel';
 import { BattleshipHeader } from '../battleship/BattleshipHeader';
@@ -27,7 +28,11 @@ export function MiniGameScreen({ navigation, route }: MiniGameScreenProps) {
   if (screenModel.phase === 'handoff-to-player-2' || screenModel.phase === 'turn-handoff') {
     return (
       <ScreenContainer>
-        <BattleshipHandoffPanel {...screenModel.handoffProps} />
+        <BattleshipHandoffPanel
+          key={`${screenModel.phase}-${screenModel.handoffProps.player}`}
+          {...screenModel.handoffProps}
+        />
+        <BattleshipConfirmDialog {...screenModel.confirmDialogProps} />
       </ScreenContainer>
     );
   }
@@ -36,6 +41,7 @@ export function MiniGameScreen({ navigation, route }: MiniGameScreenProps) {
     return (
       <ScreenContainer>
         <BattleshipPreMatchPanel {...screenModel.preMatchProps} />
+        <BattleshipConfirmDialog {...screenModel.confirmDialogProps} />
       </ScreenContainer>
     );
   }
@@ -44,6 +50,7 @@ export function MiniGameScreen({ navigation, route }: MiniGameScreenProps) {
     return (
       <ScreenContainer>
         <BattleshipVictoryPanel {...screenModel.victoryProps} />
+        <BattleshipConfirmDialog {...screenModel.confirmDialogProps} />
       </ScreenContainer>
     );
   }
@@ -54,6 +61,7 @@ export function MiniGameScreen({ navigation, route }: MiniGameScreenProps) {
       <BattleshipBoardCard {...screenModel.boardCardProps} />
       <BattleshipFleetPanel {...screenModel.fleetPanelProps} />
       {screenModel.footerAction ? <LuxuryButton {...screenModel.footerAction} /> : null}
+      <BattleshipConfirmDialog {...screenModel.confirmDialogProps} />
     </ScreenContainer>
   );
 }

@@ -50,7 +50,8 @@
       ],
       "usesCleartextTraffic": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.mangobadger.sdkheaven"
+      "googleServicesFile": "./google-services.json",
+      "package": "com.mh.games"
     },
     "web": {
       "favicon": "./assets/favicon.png"

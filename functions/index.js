@@ -1,6 +1,12 @@
+const admin = require('firebase-admin');
 const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { AccessToken, TrackSource } = require('livekit-server-sdk');
+
+const { extractBearerToken, resolveTokenRequest } = require('./livekitTokenCore');
+const { normalizeRoomCommandBody, resolveRoomCommand } = require('./roomCommandCore');
+
+admin.initializeApp();
 
 const liveKitUrl = defineSecret('LIVEKIT_URL');
 const liveKitApiKey = defineSecret('LIVEKIT_API_KEY');
@@ -19,29 +25,66 @@ exports.livekitToken = onRequest(
       return;
     }
 
-    try {
-      const { roomId, userId, displayName, canPublishAudio = true } = request.body ?? {};
+    const idToken = extractBearerToken(request.headers);
 
-      if (!roomId || !userId) {
-        response.status(400).json({ error: 'roomId and userId are required.' });
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error('Invalid Firebase ID token:', error);
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    try {
+      const requestedRoomId = typeof request.body?.roomId === 'string' ? request.body.roomId.trim() : '';
+      const db = admin.firestore();
+      const [profileSnapshot, roomSnapshot, membershipSnapshot] = await Promise.all([
+        db.doc(`users/${decodedToken.uid}`).get(),
+        requestedRoomId ? db.doc(`rooms/${requestedRoomId}`).get() : Promise.resolve(undefined),
+        requestedRoomId ? db.doc(`rooms/${requestedRoomId}/members/${decodedToken.uid}`).get() : Promise.resolve(undefined),
+      ]);
+      const tokenRequest = resolveTokenRequest({
+        body: request.body,
+        decodedToken,
+        membership: membershipSnapshot?.exists ? membershipSnapshot.data() : undefined,
+        profile: profileSnapshot.exists ? profileSnapshot.data() : undefined,
+        room: roomSnapshot?.exists ? roomSnapshot.data() : undefined,
+      });
+
+      if (!tokenRequest.ok) {
+        response.status(tokenRequest.status).json({ error: tokenRequest.error });
         return;
       }
 
-      const participantId = String(userId);
-      const participantName = displayName ? String(displayName) : participantId;
-      const canPublish = canPublishAudio !== false;
+      const {
+        avatarLabel,
+        canPublish,
+        displayName,
+        participantId,
+        role,
+        roomId,
+      } = tokenRequest.value;
       const token = new AccessToken(liveKitApiKey.value(), liveKitApiSecret.value(), {
         identity: participantId,
-        name: participantName,
+        name: displayName,
         ttl: '1h',
         metadata: JSON.stringify({
-          displayName: participantName,
-          role: canPublish ? 'speaker' : 'listener',
+          avatarLabel,
+          displayName,
+          role,
+          uid: participantId,
         }),
       });
 
       token.addGrant({
-        room: String(roomId),
+        room: roomId,
         roomJoin: true,
         canSubscribe: true,
         canPublish,
@@ -57,6 +100,141 @@ exports.livekitToken = onRequest(
     } catch (error) {
       console.error('Failed to create LiveKit token:', error);
       response.status(500).json({ error: 'Failed to create LiveKit token.' });
+    }
+  },
+);
+
+exports.roomCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+
+    const idToken = extractBearerToken(request.headers);
+
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error('Invalid Firebase ID token:', error);
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const commandBody = normalizeRoomCommandBody(request.body);
+
+    if (!commandBody.roomId) {
+      response.status(400).json({ error: 'roomId is required.' });
+      return;
+    }
+
+    try {
+      const db = admin.firestore();
+      const result = await db.runTransaction(async (transaction) => {
+        const profileRef = db.doc(`users/${decodedToken.uid}`);
+        const roomRef = db.doc(`rooms/${commandBody.roomId}`);
+        const actorMemberRef = db.doc(`rooms/${commandBody.roomId}/members/${decodedToken.uid}`);
+        const targetMemberRef = commandBody.targetUid
+          ? db.doc(`rooms/${commandBody.roomId}/members/${commandBody.targetUid}`)
+          : undefined;
+        const [profileSnapshot, roomSnapshot, actorMemberSnapshot, targetMemberSnapshot] = await Promise.all([
+          transaction.get(profileRef),
+          transaction.get(roomRef),
+          transaction.get(actorMemberRef),
+          targetMemberRef ? transaction.get(targetMemberRef) : Promise.resolve(undefined),
+        ]);
+        const command = resolveRoomCommand({
+          actorMembership: actorMemberSnapshot.exists ? actorMemberSnapshot.data() : undefined,
+          body: request.body,
+          decodedToken,
+          profile: profileSnapshot.exists ? profileSnapshot.data() : undefined,
+          room: roomSnapshot.exists ? roomSnapshot.data() : undefined,
+          targetMembership: targetMemberSnapshot?.exists ? targetMemberSnapshot.data() : undefined,
+        });
+
+        if (!command.ok) {
+          return command;
+        }
+
+        const eventRef = roomRef.collection('moderationEvents').doc();
+        const eventPayload = {
+          action: command.value.action,
+          actorUid: decodedToken.uid,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          reason: command.value.reason || '',
+          roomId: command.value.roomId,
+          targetUid: command.value.targetUid || '',
+        };
+
+        if (command.value.action === 'promote-speaker' && targetMemberRef) {
+          transaction.update(targetMemberRef, {
+            role: 'speaker',
+            status: 'active',
+            canPublishAudio: true,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedBy: decodedToken.uid,
+          });
+        }
+
+        if (command.value.action === 'demote-listener' && targetMemberRef) {
+          transaction.update(targetMemberRef, {
+            role: 'listener',
+            status: 'active',
+            canPublishAudio: false,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedBy: decodedToken.uid,
+          });
+        }
+
+        if (command.value.action === 'remove-member' && targetMemberRef) {
+          transaction.update(targetMemberRef, {
+            status: 'removed',
+            canPublishAudio: false,
+            removedAt: admin.firestore.FieldValue.serverTimestamp(),
+            removedBy: decodedToken.uid,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedBy: decodedToken.uid,
+          });
+          transaction.update(roomRef, {
+            participantCount: admin.firestore.FieldValue.increment(-1),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        if (command.value.action === 'close-room') {
+          transaction.update(roomRef, {
+            status: 'closed',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedBy: decodedToken.uid,
+          });
+        }
+
+        transaction.set(eventRef, eventPayload);
+
+        return command;
+      });
+
+      if (!result.ok) {
+        response.status(result.status).json({ error: result.error });
+        return;
+      }
+
+      response.json({ ok: true, action: result.value.action });
+    } catch (error) {
+      console.error('Failed to execute room command:', error);
+      response.status(500).json({ error: 'Failed to execute room command.' });
     }
   },
 );

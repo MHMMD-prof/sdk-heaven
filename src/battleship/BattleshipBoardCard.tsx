@@ -65,6 +65,7 @@ export function BattleshipBoardCard({
         <View style={styles.setupActions}>
           <Pressable
             accessibilityLabel={labels.rotate}
+            accessibilityHint={labels.rotateHint}
             accessibilityRole="button"
             accessibilityState={{ disabled: !selectedTargetId }}
             disabled={!selectedTargetId}
@@ -76,6 +77,7 @@ export function BattleshipBoardCard({
           </Pressable>
           <Pressable
             accessibilityLabel={labels.randomize}
+            accessibilityHint={labels.randomizeHint}
             accessibilityRole="button"
             onPress={onRandomizeSetup}
             style={styles.toolButton}
@@ -85,6 +87,7 @@ export function BattleshipBoardCard({
           </Pressable>
           <Pressable
             accessibilityLabel={labels.clear}
+            accessibilityHint={labels.confirmClearSetupMessage}
             accessibilityRole="button"
             onPress={onClearSetup}
             style={styles.toolButton}
@@ -187,6 +190,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flex: 1,
     minWidth: 82,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingVertical: spacing.sm,
   },
   toolButtonDisabled: {
@@ -196,6 +201,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
+    paddingHorizontal: spacing.xs,
     writingDirection: 'rtl',
   },
   statsRow: {

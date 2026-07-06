@@ -2,7 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../theme';
-import { CarromDisc, CarromGameState, CarromPlayer, CarromShotGuide } from '../types/carrom';
+import { CarromGameState, CarromPlayer } from '../types/carrom';
 import {
   CarromEventTone,
   CarromSparkleTone,
@@ -10,6 +10,9 @@ import {
   getEventGradient,
   getSparkleColor,
 } from '../utils/carromPresentation';
+
+const SPARKLE_DOT_INDICES = Array.from({ length: 8 }, (_, index) => index);
+const WIN_RAY_ROTATIONS = Array.from({ length: 12 }, (_, index) => `${index * 30}deg`);
 
 export type PocketSparkle = {
   id: string;
@@ -25,20 +28,7 @@ export type TurnBanner = {
   progress: Animated.Value;
 };
 
-export type AimDot = {
-  opacity: number;
-  x: number;
-  y: number;
-};
-
 type CarromBoardOverlaysProps = {
-  aimAngle: number;
-  aimAssistEnabled: boolean;
-  aimDots: AimDot[];
-  aimLength: number;
-  aimReach: number;
-  baselineY: number;
-  boardSize: number;
   compact: boolean;
   effectsEnabled: boolean;
   eventTone: CarromEventTone;
@@ -47,29 +37,22 @@ type CarromBoardOverlaysProps = {
   onBackToGames: () => void;
   onNewRound: () => void;
   pocketSparkles: PocketSparkle[];
-  powerPercent: number;
-  powerTone: string;
   scale: number;
-  shotGuide?: CarromShotGuide;
   showEventBanner: boolean;
   showPerfOverlay: boolean;
-  striker?: CarromDisc;
   turnBanner?: TurnBanner;
   winProgress: Animated.Value;
   winActionsEnabled: boolean;
+  perfDurationMs?: number;
   perfFps?: number;
+  perfFrames?: number;
+  perfMaxSteps?: number;
+  perfPhase?: 'live' | 'last';
   perfSteps?: number;
   perfWorstFrameMs?: number;
 };
 
 export function CarromBoardOverlays({
-  aimAngle,
-  aimAssistEnabled,
-  aimDots,
-  aimLength,
-  aimReach,
-  baselineY,
-  boardSize,
   compact,
   effectsEnabled,
   eventTone,
@@ -78,17 +61,17 @@ export function CarromBoardOverlays({
   onBackToGames,
   onNewRound,
   pocketSparkles,
-  powerPercent,
-  powerTone,
   scale,
-  shotGuide,
   showEventBanner,
   showPerfOverlay,
-  striker,
   turnBanner,
   winProgress,
   winActionsEnabled,
+  perfDurationMs,
   perfFps,
+  perfFrames,
+  perfMaxSteps,
+  perfPhase,
   perfSteps,
   perfWorstFrameMs,
 }: CarromBoardOverlaysProps) {
@@ -96,9 +79,12 @@ export function CarromBoardOverlays({
     <>
       {showPerfOverlay && perfFps !== undefined ? (
         <View pointerEvents="none" style={styles.perfOverlay}>
-          <Text style={styles.perfOverlayText}>{perfFps} FPS</Text>
+          <Text style={styles.perfOverlayText}>{perfPhase ?? 'live'} {perfFps} FPS</Text>
           <Text style={styles.perfOverlayMeta}>
-            {perfSteps ?? 0} steps / {perfWorstFrameMs ?? 0}ms worst
+            worst {perfWorstFrameMs ?? 0}ms / steps {perfSteps ?? 0} / max {perfMaxSteps ?? 0}
+          </Text>
+          <Text style={styles.perfOverlayMeta}>
+            frames {perfFrames ?? 0} / duration {perfDurationMs ?? 0}ms
           </Text>
         </View>
       ) : null}
@@ -197,7 +183,7 @@ export function CarromBoardOverlays({
                     },
                   ]}
                 />
-                {Array.from({ length: 8 }, (_, index) => {
+                {SPARKLE_DOT_INDICES.map((index) => {
                   const angle = (Math.PI * 2 * index) / 8;
                   const distance = (sparkle.tone === 'queen' ? 54 : 42) * scale;
 
@@ -261,14 +247,14 @@ export function CarromBoardOverlays({
         >
           {effectsEnabled ? (
             <View style={styles.winBurst}>
-              {Array.from({ length: 12 }, (_, index) => (
+              {WIN_RAY_ROTATIONS.map((rotation, index) => (
                 <Animated.View
                   key={`win-ray-${index}`}
                   style={[
                     styles.winRay,
                     {
                       transform: [
-                        { rotate: `${index * 30}deg` },
+                        { rotate: rotation },
                         {
                           scaleY: winProgress.interpolate({
                             inputRange: [0, 1],

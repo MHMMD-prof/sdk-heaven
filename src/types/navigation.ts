@@ -4,6 +4,8 @@ export type MainTabKey = 'home' | 'games' | 'groups';
 
 export type RootStackParamList = {
   Login: undefined;
+  EmailVerification: undefined;
+  ProfileSetup: undefined;
   Main: undefined;
   MiniGame: {
     initialMode?: MiniGameModeId;

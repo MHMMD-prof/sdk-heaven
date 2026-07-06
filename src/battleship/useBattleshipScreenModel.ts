@@ -1,6 +1,15 @@
+import { useState } from 'react';
+
 import { MiniGameModeId } from '../types/miniGame';
 import { MAX_ATTEMPTS } from '../utils/miniGameEngine';
 import { labels } from './constants';
+import {
+  BattleshipConfirmAction,
+  BattleshipConfirmDialogState,
+  createBattleshipConfirmDialogState,
+  getBattleshipPersistenceScreenState,
+  getSavedMatchSummary,
+} from './BattleshipReleasePolish';
 import { useBattleshipGame } from './useBattleshipGame';
 
 type UseBattleshipScreenModelOptions = {
@@ -15,14 +24,52 @@ export function useBattleshipScreenModel({
   screenWidth,
 }: UseBattleshipScreenModelOptions) {
   const game = useBattleshipGame({ initialMode, screenWidth });
+  const [confirmDialog, setConfirmDialog] = useState<BattleshipConfirmDialogState | undefined>();
   const handoffPlayer: 1 | 2 =
     game.phase === 'handoff-to-player-2' ? 2 : game.currentPlayer === 1 ? 2 : 1;
+  const savedMatchSummary = getSavedMatchSummary(game.savedMatch);
+  const persistenceState = getBattleshipPersistenceScreenState({
+    hasSavedMatch: Boolean(game.savedMatch),
+    persistenceReady: game.persistenceReady,
+  });
+  const closeConfirmDialog = () => setConfirmDialog(undefined);
+  const requestConfirmation = (
+    action: BattleshipConfirmAction,
+    onConfirm: () => void,
+  ) => {
+    setConfirmDialog(createBattleshipConfirmDialogState({
+      action,
+      onClose: closeConfirmDialog,
+      onConfirm,
+    }));
+  };
+  const confirmIfActiveMatch = (
+    action: BattleshipConfirmAction,
+    onConfirm: () => void,
+  ) => {
+    if (game.phase === 'pre-match' && !game.savedMatch) {
+      onConfirm();
+      return;
+    }
+
+    requestConfirmation(action, onConfirm);
+  };
 
   return {
+    confirmDialog,
+    confirmDialogProps: {
+      dialog: confirmDialog,
+      onCancel: closeConfirmDialog,
+    },
     phase: game.phase,
     isBattleGameOver: game.phase === 'battle' && game.isGameOver,
     scrollEnabled: !game.isSetupPhase || !game.selectedTarget,
     handoffProps: {
+      confirmHint: labels.passConfirmHint,
+      continueLabel:
+        game.phase === 'handoff-to-player-2' ? labels.passSetupReady : labels.passTurnReady,
+      message:
+        game.phase === 'handoff-to-player-2' ? labels.passSetupText : labels.passTurnText,
       onContinue:
         game.phase === 'handoff-to-player-2'
           ? game.startPlayerTwoSetup
@@ -31,13 +78,24 @@ export function useBattleshipScreenModel({
     },
     preMatchProps: {
       attemptsEnabled: game.attemptsEnabled,
+      canResumeSavedMatch: persistenceState.canResumeSavedMatch,
+      canStartNewMatch: persistenceState.canStartNewMatch,
+      hasSavedMatch: persistenceState.canResumeSavedMatch,
+      isPersistenceLoading: persistenceState.isPersistenceLoading,
       mode: game.mode,
-      onStartMatch: game.startMatch,
+      onResumeMatch: game.resumeSavedMatch,
+      onStartMatch: () =>
+        !persistenceState.canStartNewMatch
+          ? undefined
+          : game.savedMatch
+          ? requestConfirmation('new-match', game.startMatch)
+          : game.startMatch(),
       onToggleAttempts: game.toggleAttemptsEnabled,
+      savedMatchLabel: savedMatchSummary?.line,
     },
     victoryProps: {
       mode: game.mode,
-      onReset: () => game.resetGame(),
+      onReset: () => requestConfirmation('reset-victory', () => game.resetGame()),
       playerOneHits: game.playerOneHits,
       playerOneShots: game.playerOneGuesses.size,
       playerTwoHits: game.playerTwoHits,
@@ -49,7 +107,13 @@ export function useBattleshipScreenModel({
       mode: game.mode,
       modeId: game.modeId,
       onBack,
-      onModeChange: (nextModeId: MiniGameModeId) => game.resetGame(nextModeId, true),
+      onModeChange: (nextModeId: MiniGameModeId) => {
+        if (nextModeId === game.modeId) {
+          return;
+        }
+
+        confirmIfActiveMatch('mode-change', () => game.resetGame(nextModeId, true));
+      },
       onToggleSound: game.toggleSound,
       soundMuted: game.soundMuted,
     },
@@ -59,7 +123,7 @@ export function useBattleshipScreenModel({
       isSetupPhase: game.isSetupPhase,
       lastShot: game.lastShot,
       mode: game.mode,
-      onClearSetup: game.handleClearSetup,
+      onClearSetup: () => requestConfirmation('clear-setup', game.handleClearSetup),
       onRandomizeSetup: game.handleRandomizeSetup,
       onRotateSelected: game.handleRotateSelected,
       ownBoardProps: {
@@ -127,7 +191,15 @@ export function useBattleshipScreenModel({
       game.phase !== 'battle'
         ? undefined
         : game.pendingTurnPass
-          ? { onPress: game.passTurn, title: labels.passTurn }
-          : { onPress: () => game.resetGame(), title: labels.newRound },
+          ? {
+              accessibilityHint: labels.passTurnHint,
+              onPress: game.passTurn,
+              title: labels.passTurn,
+            }
+          : {
+              accessibilityHint: labels.newRoundHint,
+              onPress: () => requestConfirmation('reset-battle', () => game.resetGame()),
+              title: labels.newRound,
+            },
   };
 }

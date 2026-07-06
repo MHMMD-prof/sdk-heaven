@@ -33,6 +33,8 @@ export function BattleshipFleetPanel({
   totalTargetCells,
 }: BattleshipFleetPanelProps) {
   if (isSetupPhase) {
+    const selectedTarget = setupTargets.find((target) => target.id === selectedTargetId);
+
     return (
       <View style={styles.panel} testID="battleship-setup-fleet-panel">
         <View style={styles.header}>
@@ -41,9 +43,15 @@ export function BattleshipFleetPanel({
           </Text>
           <Text style={styles.title}>{labels.setupFleet}</Text>
         </View>
+        {selectedTarget ? (
+          <Text style={styles.selectedText}>
+            {labels.selectedShip}: {selectedTarget.name}
+          </Text>
+        ) : null}
         {setupTargets.map((target) => (
           <Pressable
             accessibilityLabel={`${target.name} ${target.isPlaced ? labels.placed : labels.unplaced}`}
+            accessibilityHint={labels.setupShipHint}
             accessibilityRole="button"
             accessibilityState={{ selected: selectedTargetId === target.id }}
             key={target.id}
@@ -75,6 +83,7 @@ export function BattleshipFleetPanel({
           </Pressable>
         ))}
         <LuxuryButton
+          accessibilityHint={labels.passSetupReady}
           disabled={!setupFleetReady}
           onPress={onConfirmFleet}
           title={labels.confirmFleet}
@@ -158,6 +167,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    minHeight: 48,
     padding: spacing.sm,
   },
   progress: {
@@ -200,5 +210,12 @@ const styles = StyleSheet.create({
   },
   complete: {
     color: colors.emerald,
+  },
+  selectedText: {
+    color: colors.goldSoft,
+    fontSize: typography.sizes.caption,
+    fontWeight: typography.weights.bold,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
 });

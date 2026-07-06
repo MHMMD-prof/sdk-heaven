@@ -5,8 +5,9 @@ import {
   drawingGuessReducer,
   shouldAutoEndRound,
 } from '../model/drawingGuessReducer';
+import { getPromptAnswers, normalizeGuess } from '../model/guessNormalization';
 import { chunkSnapshot, DrawingGuessSnapshotReassembler } from '../model/snapshot';
-import { DrawingGuessSnapshot, DrawingPoint, DrawingStroke } from '../model/types';
+import { DrawingGuessPrompt, DrawingGuessSnapshot, DrawingPoint, DrawingStroke } from '../model/types';
 import { getPromptById } from '../model/wordBank';
 import { DrawingTool } from '../rendering/drawingTools';
 import {
@@ -681,7 +682,7 @@ export function useDrawingGuessController(
     showcaseAutomationRef.current = automationKey;
 
     if (state.drawerId === localPlayerId) {
-      submitSimulatedGuess('dg-player-sim-1', 'not sure yet');
+      submitSimulatedGuess('dg-player-sim-1', getLocalShowcaseWrongGuess(state.privatePrompt));
       return;
     }
 
@@ -986,3 +987,22 @@ const createInitialState = (roomCode: string, mode: DrawingGuessRouteParams['mod
         matchId: createDrawingGuessMatchId(),
         now: Date.now(),
       });
+
+const localShowcaseWrongGuesses: Record<DrawingGuessPrompt['category'], string[]> = {
+  objects: ['Clock', 'Backpack', 'Phone'],
+  food: ['Banana', 'Cake', 'Pizza'],
+  places: ['School', 'Park', 'Market'],
+  actions: ['Running', 'Dancing', 'Swimming'],
+  animals: ['Dog', 'Rabbit', 'Bird'],
+  household: ['Lamp', 'Sofa', 'Mirror'],
+};
+
+export const getLocalShowcaseWrongGuess = (prompt: DrawingGuessPrompt) => {
+  const promptAnswers = new Set(getPromptAnswers(prompt));
+  const categoryGuesses = localShowcaseWrongGuesses[prompt.category];
+  const guess =
+    categoryGuesses.find((candidate) => !promptAnswers.has(normalizeGuess(candidate))) ??
+    'Almost got it';
+
+  return guess;
+};

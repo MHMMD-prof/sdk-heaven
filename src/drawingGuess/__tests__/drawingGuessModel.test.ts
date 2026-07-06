@@ -9,6 +9,7 @@ import {
 } from '../model/drawingGuessReducer';
 import { isCorrectGuessForPrompt, normalizeGuess } from '../model/guessNormalization';
 import { DrawingGuessPrompt, DrawingGuessState, DrawingStroke } from '../model/types';
+import { drawingGuessWordBank } from '../model/wordBank';
 
 const prompt: DrawingGuessPrompt = {
   id: 'apple',
@@ -54,6 +55,28 @@ const startDrawingRound = () => {
 };
 
 describe('Drawing Guess model', () => {
+  it('has a showcase-ready safe prompt bank', () => {
+    const promptIds = new Set(drawingGuessWordBank.map((item) => item.id));
+    const validCategories = new Set([
+      'objects',
+      'food',
+      'places',
+      'actions',
+      'animals',
+      'household',
+    ]);
+
+    expect(drawingGuessWordBank.length).toBeGreaterThanOrEqual(60);
+    expect(promptIds.size).toBe(drawingGuessWordBank.length);
+    drawingGuessWordBank.forEach((item) => {
+      expect(item.id.trim()).toBe(item.id);
+      expect(item.text.trim()).toBe(item.text);
+      expect(validCategories.has(item.category)).toBe(true);
+      expect(Array.isArray(item.aliases)).toBe(true);
+      expect(item.aliases.length).toBeGreaterThan(0);
+    });
+  });
+
   it('creates initial lobby state and handles player join/leave', () => {
     let state = createInitialDrawingGuessState({ roomId: 'room-1' });
 

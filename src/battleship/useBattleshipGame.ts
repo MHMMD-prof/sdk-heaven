@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated } from 'react-native';
 
 import { miniGameModes } from '../data/miniGameModes';
@@ -15,6 +15,12 @@ import {
   isBattleCellDisabled,
 } from './BattleshipGameHelpers';
 import { GamePhase, LastShot, ShotAnimation } from './BattleshipGameTypes';
+import {
+  BattleshipSaveState,
+  clearSavedBattleshipMatch,
+  loadSavedBattleshipMatch,
+  saveBattleshipMatch,
+} from './BattleshipPersistence';
 import { useBattleshipMatchState } from './useBattleshipMatchState';
 import { useBattleshipSetupActions } from './useBattleshipSetupActions';
 import { useBattleshipShipFrames } from './useBattleshipShipFrames';
@@ -46,6 +52,8 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
   const [currentPlayer, setCurrentPlayer] = useState<1 | 2>(1);
   const [pendingTurnPass, setPendingTurnPass] = useState(false);
   const [lastShot, setLastShot] = useState<LastShot | undefined>();
+  const [savedMatch, setSavedMatch] = useState<BattleshipSaveState | undefined>();
+  const [persistenceReady, setPersistenceReady] = useState(false);
   const [shotAnimation, setShotAnimation] = useState<ShotAnimation | undefined>();
   const [explodingShipIds, setExplodingShipIds] = useState<Set<string>>(() => new Set());
   const [darkenedShipIds, setDarkenedShipIds] = useState<Set<string>>(() => new Set());
@@ -160,9 +168,97 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
     winner,
   });
 
+  useEffect(() => {
+    let isMounted = true;
+
+    void loadSavedBattleshipMatch()
+      .then((nextSavedMatch) => {
+        if (isMounted) {
+          setSavedMatch(nextSavedMatch);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setPersistenceReady(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!persistenceReady || phase === 'pre-match') {
+      return;
+    }
+
+    void saveBattleshipMatch({
+      attemptsEnabled,
+      currentPlayer,
+      lastShot,
+      modeId,
+      pendingTurnPass,
+      phase,
+      playerOneGuesses: Array.from(playerOneGuesses),
+      playerOneTargets,
+      playerTwoGuesses: Array.from(playerTwoGuesses),
+      playerTwoTargets,
+      savedAt: Date.now(),
+      selectedTargetId,
+    });
+  }, [
+    attemptsEnabled,
+    currentPlayer,
+    lastShot,
+    modeId,
+    pendingTurnPass,
+    persistenceReady,
+    phase,
+    playerOneGuesses,
+    playerOneTargets,
+    playerTwoGuesses,
+    playerTwoTargets,
+    selectedTargetId,
+  ]);
+
+  const applySavedMatch = (match: BattleshipSaveState) => {
+    const nextMode = miniGameModes.find((item) => item.id === match.modeId) ?? initialModeConfig;
+
+    clearShotAnimation();
+    clearSunkEffects();
+    setModeId(nextMode.id);
+    setPhase(match.phase);
+    setSelectedTargetId(match.selectedTargetId);
+    setPreviewCellId(undefined);
+    setAttemptsEnabled(match.attemptsEnabled);
+    setPlayerOneTargets(match.playerOneTargets);
+    setPlayerTwoTargets(match.playerTwoTargets);
+    setPlayerOneGuesses(new Set(match.playerOneGuesses));
+    setPlayerTwoGuesses(new Set(match.playerTwoGuesses));
+    setCurrentPlayer(match.currentPlayer);
+    setPendingTurnPass(match.pendingTurnPass);
+    setLastShot(match.lastShot);
+    setSavedMatch(undefined);
+  };
+
+  const resumeSavedMatch = () => {
+    if (persistenceReady && savedMatch) {
+      playSound('tap');
+      impactLight();
+      applySavedMatch(savedMatch);
+    }
+  };
+
   const startMatch = () => {
+    if (!persistenceReady) {
+      return;
+    }
+
     playSound('tap');
     impactMedium();
+    setSavedMatch(undefined);
+    void clearSavedBattleshipMatch();
     resetGame(modeId, false);
   };
 
@@ -182,6 +278,8 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
   const resetGame = (nextModeId = modeId, showPreMatch = false) => {
     const nextMode = miniGameModes.find((item) => item.id === nextModeId) ?? miniGameModes[0];
 
+    setSavedMatch(undefined);
+    void clearSavedBattleshipMatch();
     clearShotAnimation();
     clearSunkEffects();
     setModeId(nextMode.id);
@@ -325,6 +423,9 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
     previewCells,
     previewIsValid,
     resetGame,
+    resumeSavedMatch,
+    savedMatch,
+    persistenceReady,
     selectedGhostHeight,
     selectedGhostVisual,
     selectedGhostWidth,

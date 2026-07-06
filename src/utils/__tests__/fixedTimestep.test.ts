@@ -78,6 +78,33 @@ describe('fixed timestep accumulator', () => {
     expect(result.timing.lastTimestamp).toBe(1000);
   });
 
+  it('keeps the default catch-up cap when no override is provided', () => {
+    const result = advanceFixedTimestep({
+      isComplete: isCounterComplete,
+      state: { value: 0 },
+      step: stepCounter,
+      timestamp: 1000,
+      timing: { accumulatorMs: 0, lastTimestamp: 0 },
+    });
+
+    expect(result.steps).toBe(MAX_STEPS_PER_FRAME);
+  });
+
+  it('supports a lower per-call catch-up cap', () => {
+    const result = advanceFixedTimestep({
+      isComplete: isCounterComplete,
+      maxStepsPerFrame: 3,
+      state: { value: 0 },
+      step: stepCounter,
+      timestamp: 1000,
+      timing: { accumulatorMs: 0, lastTimestamp: 0 },
+    });
+
+    expect(result.steps).toBe(3);
+    expect(result.state.value).toBe(3);
+    expect(result.timing.accumulatorMs).toBeLessThan(FIXED_STEP_MS);
+  });
+
   it('uses the maximum frame delta when catching up', () => {
     const result = advanceFixedTimestep({
       isComplete: isCounterComplete,

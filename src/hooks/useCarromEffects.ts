@@ -12,7 +12,6 @@ type UseCarromEffectsOptions = {
 export function useCarromEffects({ effectsEnabled, gameStatus }: UseCarromEffectsOptions) {
   const [pocketSparkles, setPocketSparkles] = useState<PocketSparkle[]>([]);
   const [turnBanner, setTurnBanner] = useState<TurnBanner | undefined>();
-  const queenPulse = useRef(new Animated.Value(0)).current;
   const winProgress = useRef(new Animated.Value(0)).current;
   const mountedRef = useRef(true);
 
@@ -25,19 +24,36 @@ export function useCarromEffects({ effectsEnabled, gameStatus }: UseCarromEffect
 
   const showPocketSparkles = useCallback(
     (sparkles: Array<Omit<PocketSparkle, 'progress'>>) => {
-      if (!effectsEnabled) {
+      if (!effectsEnabled || sparkles.length === 0) {
         return;
       }
 
-      const nextSparkles = sparkles.map((sparkle) => ({
-        ...sparkle,
-        id: `${sparkle.id}-${Date.now()}`,
-        progress: new Animated.Value(0),
-      }));
+      const nextSparkles: PocketSparkle[] = new Array(sparkles.length);
 
-      setPocketSparkles((current) => [...current, ...nextSparkles]);
+      for (let index = 0; index < sparkles.length; index += 1) {
+        const sparkle = sparkles[index]!;
+        nextSparkles[index] = {
+          ...sparkle,
+          id: `${sparkle.id}-${Date.now()}`,
+          progress: new Animated.Value(0),
+        };
+      }
 
-      nextSparkles.forEach((sparkle) => {
+      setPocketSparkles((current) => {
+        const mergedSparkles: PocketSparkle[] = new Array(current.length + nextSparkles.length);
+
+        for (let index = 0; index < current.length; index += 1) {
+          mergedSparkles[index] = current[index]!;
+        }
+
+        for (let index = 0; index < nextSparkles.length; index += 1) {
+          mergedSparkles[current.length + index] = nextSparkles[index]!;
+        }
+
+        return mergedSparkles;
+      });
+
+      for (const sparkle of nextSparkles) {
         Animated.timing(sparkle.progress, {
           duration: 720,
           easing: Easing.out(Easing.cubic),
@@ -48,9 +64,34 @@ export function useCarromEffects({ effectsEnabled, gameStatus }: UseCarromEffect
             return;
           }
 
-          setPocketSparkles((current) => current.filter((item) => item.id !== sparkle.id));
+          setPocketSparkles((current) => {
+            let sparkleIndex = -1;
+
+            for (let index = 0; index < current.length; index += 1) {
+              if (current[index]?.id === sparkle.id) {
+                sparkleIndex = index;
+                break;
+              }
+            }
+
+            if (sparkleIndex < 0) {
+              return current;
+            }
+
+            const remainingSparkles: PocketSparkle[] = new Array(current.length - 1);
+
+            for (let index = 0; index < sparkleIndex; index += 1) {
+              remainingSparkles[index] = current[index]!;
+            }
+
+            for (let index = sparkleIndex + 1; index < current.length; index += 1) {
+              remainingSparkles[index - 1] = current[index]!;
+            }
+
+            return remainingSparkles;
+          });
         });
-      });
+      }
     },
     [effectsEnabled],
   );
@@ -93,41 +134,6 @@ export function useCarromEffects({ effectsEnabled, gameStatus }: UseCarromEffect
     [effectsEnabled],
   );
 
-  const resetEffects = useCallback(() => {
-    setPocketSparkles([]);
-    setTurnBanner(undefined);
-    queenPulse.setValue(0);
-    winProgress.setValue(0);
-  }, [queenPulse, winProgress]);
-
-  useEffect(() => {
-    if (!effectsEnabled || gameStatus === 'moving') {
-      queenPulse.setValue(0);
-      return undefined;
-    }
-
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(queenPulse, {
-          duration: 1100,
-          easing: Easing.inOut(Easing.quad),
-          toValue: 1,
-          useNativeDriver: true,
-        }),
-        Animated.timing(queenPulse, {
-          duration: 1100,
-          easing: Easing.inOut(Easing.quad),
-          toValue: 0,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    loop.start();
-
-    return () => loop.stop();
-  }, [effectsEnabled, gameStatus, queenPulse]);
-
   useEffect(() => {
     if (gameStatus === 'gameOver') {
       winProgress.setValue(0);
@@ -150,8 +156,6 @@ export function useCarromEffects({ effectsEnabled, gameStatus }: UseCarromEffect
 
   return {
     pocketSparkles,
-    queenPulse,
-    resetEffects,
     showPocketSparkles,
     showTurnBanner,
     turnBanner,

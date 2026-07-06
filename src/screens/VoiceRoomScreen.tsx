@@ -1,5 +1,5 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GlassCard } from '../components/GlassCard';
@@ -39,6 +39,13 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
     await leaveRoom();
     navigation.goBack();
   };
+
+  useEffect(() => {
+    if (room.status === 'closed' || room.localMember?.status === 'removed') {
+      void handleLeave();
+    }
+  }, [room.localMember?.status, room.status]);
+
   const isMicControlDisabled = !isConnected || !canPublishAudio;
   const isSpeakerControlDisabled = !isConnected;
 

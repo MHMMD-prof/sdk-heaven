@@ -265,6 +265,46 @@ describe('Battleship setup actions', () => {
     ]);
     expect(previewCellId.get()).toBeUndefined();
   });
+
+  it('clears setup preview when drag is canceled', () => {
+    const setupTargets = createEmptyTargets(navalMode);
+    const selectedTarget = setupTargets.find((target) => target.id === 'ship-four')!;
+    const previewCellId = createSetter<string | undefined>('3-3');
+
+    const actions = useBattleshipSetupActions({
+      clearSunkEffects: noop,
+      getCellIdFromBoardEvent: () => undefined,
+      impactLight: noop,
+      impactMedium: noop,
+      mode: navalMode,
+      notifyError: noop,
+      notifySuccess: noop,
+      phase: 'setup-player-1',
+      playInvalidSound: noop,
+      playTapSound: noop,
+      previewCellId: previewCellId.get(),
+      selectedTarget,
+      selectedTargetId: selectedTarget.id,
+      setCurrentPlayer: createSetter<1 | 2>(1).set,
+      setLastShot: createSetter<LastShot | undefined>(undefined).set,
+      setPendingTurnPass: createSetter(false).set,
+      setPhase: createSetter<GamePhase>('setup-player-1').set,
+      setPlayerOneGuesses: createSetter(new Set<string>()).set,
+      setPlayerOneTargets: createSetter<MiniGameTarget[]>(setupTargets).set,
+      setPlayerTwoGuesses: createSetter(new Set<string>()).set,
+      setPlayerTwoTargets: createSetter<MiniGameTarget[]>(createEmptyTargets(navalMode)).set,
+      setPreviewCellId: previewCellId.set,
+      setSelectedTargetId: createSetter<string | undefined>(selectedTarget.id).set,
+      setupFleetReady: false,
+      setupPlayer: 1,
+      setupTargets,
+      playerTwoTargets: createEmptyTargets(navalMode),
+    });
+
+    actions.handleDragCancel();
+
+    expect(previewCellId.get()).toBeUndefined();
+  });
 });
 
 describe('Battleship battle actions', () => {
@@ -365,6 +405,51 @@ describe('Battleship battle actions', () => {
     expect(pendingTurnPass.get()).toBe(false);
     expect(lastShot.get()).toBeUndefined();
     expect(phase.get()).toBe('battle');
+  });
+
+  it.each([
+    'shot animation',
+    'pending pass',
+    'game over',
+  ])('ignores battle cell press while locked by %s', () => {
+    const target = {
+      ...createEmptyTargets(navalMode).find((item) => item.id === 'ship-four')!,
+      cells: ['0-0'],
+      isPlaced: true,
+    };
+    const guesses = createSetter(new Set<string>());
+    const tapSound = vi.fn();
+
+    const actions = useBattleshipBattleActions({
+      activeGuesses: guesses.get(),
+      activeTargets: [target],
+      attemptsEnabled: true,
+      currentPlayer: 1,
+      defendingPlayer: 2,
+      handleSetupCellPress: noop,
+      impactHeavy: noop,
+      impactLight: noop,
+      isCellDisabled: () => true,
+      isSetupPhase: false,
+      playHitSound: noop,
+      playMissSound: noop,
+      playTapSound: tapSound,
+      scheduleShotResolution: (onResolve) => onResolve(),
+      setCurrentPlayer: createSetter<1 | 2>(1).set,
+      setLastShot: createSetter<LastShot | undefined>(undefined).set,
+      setPendingTurnPass: createSetter(false).set,
+      setPhase: createSetter<GamePhase>('battle').set,
+      setPlayerOneGuesses: guesses.set,
+      setPlayerTwoGuesses: createSetter(new Set<string>()).set,
+      setShotAnimation: createSetter<ShotAnimation | undefined>(undefined).set,
+      totalTargetCells: 1,
+      triggerSunkEffect: noop,
+    });
+
+    actions.handleCellPress('0-0');
+
+    expect(guesses.get().size).toBe(0);
+    expect(tapSound).not.toHaveBeenCalled();
   });
 });
 

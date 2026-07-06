@@ -11,6 +11,7 @@ export function LuxuryInput({ label, ...props }: LuxuryInputProps) {
     <View style={styles.wrapper}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
+        accessibilityLabel={props.accessibilityLabel ?? label}
         placeholderTextColor={colors.textSubtle}
         selectionColor={colors.gold}
         style={styles.input}

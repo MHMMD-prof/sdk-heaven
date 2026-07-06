@@ -12,6 +12,7 @@ const liveKitTokenRequestTimeoutMs = 10000;
 export async function requestLiveKitConnectOptions(
   room: VoiceRoom,
   config?: VoiceProviderConfig['liveKit'],
+  getIdToken = getDefaultFirebaseIdToken,
 ): Promise<VoiceConnectOptions> {
   if (!config?.tokenEndpoint) {
     throw new Error('LiveKit token endpoint is not configured.');
@@ -19,20 +20,21 @@ export async function requestLiveKitConnectOptions(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), liveKitTokenRequestTimeoutMs);
+  const requestedCanPublishAudio = room.localMember?.canPublishAudio ?? config.canPublishAudio ?? true;
   let response: Response;
 
   try {
+    const idToken = await getIdToken();
     response = await fetch(config.tokenEndpoint, {
       method: 'POST',
       headers: {
+        Authorization: `Bearer ${idToken}`,
         'Content-Type': 'application/json',
       },
       signal: controller.signal,
       body: JSON.stringify({
         roomId: room.id,
-        userId: config.userId,
-        displayName: config.displayName,
-        canPublishAudio: config.canPublishAudio ?? true,
+        canPublishAudio: requestedCanPublishAudio,
       }),
     });
   } catch (error) {
@@ -59,7 +61,7 @@ export async function requestLiveKitConnectOptions(
     roomId: room.id,
     serverUrl: payload.serverUrl,
     token: payload.token,
-    canPublishAudio: payload.canPublishAudio ?? config.canPublishAudio ?? true,
+    canPublishAudio: payload.canPublishAudio ?? requestedCanPublishAudio,
     metadata: {
       source: 'livekit',
     },
@@ -68,4 +70,10 @@ export async function requestLiveKitConnectOptions(
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+async function getDefaultFirebaseIdToken() {
+  const { getCurrentFirebaseIdToken } = await import('../auth/getCurrentFirebaseIdToken');
+
+  return getCurrentFirebaseIdToken();
 }

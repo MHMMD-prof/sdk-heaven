@@ -8,6 +8,14 @@ import {
   createOnlineDrawingGuessState,
 } from '../controller/drawingGuessControllerModel';
 import { resolveDrawingGuessLaunch } from '../controller/resolveDrawingGuessLaunch';
+import { getLocalShowcaseWrongGuess } from '../controller/useDrawingGuessController';
+import { getPromptAnswers, normalizeGuess } from '../model/guessNormalization';
+import { triggerDrawingGuessHaptic } from '../screens/drawingGuessHaptics';
+import {
+  drawingGuessShowcaseHelpBody,
+  drawingGuessShowcaseHelpSteps,
+  drawingGuessShowcaseHelpTitle,
+} from '../screens/drawingGuessShowcaseHelp';
 
 const localPlayerId = 'dg-player-local';
 
@@ -84,6 +92,51 @@ describe('Drawing Guess controller model', () => {
     expect(viewModel.connectionLabel).toBe('Local game ready');
   });
 
+  it('keeps Games showcase copy free of online and debug terms', () => {
+    const state = createState();
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'DG-TEST',
+      localPlayerId,
+      now: 1000,
+      launchSource: 'games',
+    });
+    const visibleShowcaseCopy = [
+      viewModel.connectionLabel,
+      viewModel.launchTitle,
+      viewModel.launchSubtitle,
+      viewModel.onlineStatusLabel,
+      viewModel.phaseLabel,
+    ].join(' ');
+
+    expect(visibleShowcaseCopy).not.toMatch(
+      /\b(online|LiveKit|token|simulation|debug|future|wave)\b/i,
+    );
+  });
+
+  it('keeps local showcase help concise and free of online and debug terms', () => {
+    const helpCopy = [drawingGuessShowcaseHelpTitle, drawingGuessShowcaseHelpBody].join(' ');
+
+    expect(drawingGuessShowcaseHelpSteps.length).toBeGreaterThanOrEqual(4);
+    expect(helpCopy).toContain('secret prompt');
+    expect(helpCopy).toContain('final score wins');
+    expect(helpCopy).not.toMatch(/\b(online|LiveKit|token|simulation|debug|future|wave)\b/i);
+  });
+
+  it('keeps haptic feedback best-effort when native feedback rejects', async () => {
+    const hapticsModule = async () => ({
+      selectionAsync: async () => {
+        throw new Error('no haptics');
+      },
+      notificationAsync: async () => {
+        throw new Error('no haptics');
+      },
+    });
+
+    await expect(triggerDrawingGuessHaptic('selection', hapticsModule)).resolves.toBeUndefined();
+    await expect(triggerDrawingGuessHaptic('success', hapticsModule)).resolves.toBeUndefined();
+  });
+
   it('creates an online room without simulated players', () => {
     const state = createOnlineDrawingGuessState({
       roomCode: 'voice-room-1',
@@ -147,6 +200,79 @@ describe('Drawing Guess controller model', () => {
 
     expect(state.phase).toBe('prompt-select');
     expect(state.promptOptions.length).toBeGreaterThan(0);
+
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'DG-TEST',
+      localPlayerId,
+      now: 2000,
+    });
+
+    expect(viewModel.promptOptions[0].categoryLabel).toBeTruthy();
+  });
+
+  it('keeps prompt category labels and long text available in the view model', () => {
+    const longPromptText =
+      'A very long showcase prompt that should remain available for wrapping inside a prompt card';
+    const state = {
+      ...drawingGuessReducer(createState(), {
+        type: 'start-match',
+        actorId: localPlayerId,
+        now: 2000,
+        matchId: 'match-2',
+      }),
+      promptOptions: [
+        {
+          id: 'long-showcase-prompt',
+          text: longPromptText,
+          category: 'objects' as const,
+          aliases: ['long object'],
+        },
+      ],
+    };
+
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'DG-TEST',
+      localPlayerId,
+      now: 2000,
+      launchSource: 'games',
+    });
+
+    expect(viewModel.promptOptions[0]).toEqual({
+      id: 'long-showcase-prompt',
+      text: longPromptText,
+      categoryLabel: 'Object',
+    });
+  });
+
+  it('keeps long player names available for leaderboard and player rows', () => {
+    const longDisplayName =
+      'The Local Showcase Player With An Extra Long Display Name For Narrow Phones';
+    const state = {
+      ...createState(),
+      players: createState().players.map((player) =>
+        player.id === localPlayerId
+          ? {
+              ...player,
+              displayName: longDisplayName,
+            }
+          : player,
+      ),
+    };
+
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'DG-TEST',
+      localPlayerId,
+      now: 1000,
+      launchSource: 'games',
+    });
+
+    expect(viewModel.players[0].displayName).toBe(longDisplayName);
+    expect(viewModel.leaderboard.find((player) => player.playerId === localPlayerId)?.displayName).toBe(
+      longDisplayName,
+    );
   });
 
   it('ends a drawing round through existing host authority', () => {
@@ -521,5 +647,12 @@ describe('Drawing Guess controller model', () => {
       'dg-player-sim-2',
     ]);
     expect(viewModel.finalRankings[0].isWinner).toBe(true);
+  });
+
+  it('keeps local showcase wrong guesses away from prompt answers', () => {
+    const prompt = getPromptById('apple')!;
+    const wrongGuess = getLocalShowcaseWrongGuess(prompt);
+
+    expect(getPromptAnswers(prompt)).not.toContain(normalizeGuess(wrongGuess));
   });
 });

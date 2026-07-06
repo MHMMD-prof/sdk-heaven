@@ -1,21 +1,32 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useAuth } from '../auth/AuthProvider';
 import { colors, radius, spacing, typography } from '../theme';
 
 export function HomeHeader() {
+  const { authUser, signOut } = useAuth();
+
   return (
     <View style={styles.header}>
       <View style={styles.appBar}>
-        <View style={styles.infoButton}>
-          <Text style={styles.infoText}>i</Text>
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            void signOut();
+          }}
+          style={({ pressed }) => [styles.signOutButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.signOutText}>خروج</Text>
+        </Pressable>
         <View style={styles.titleBlock}>
-          <Text style={styles.kicker}>سكاي رويال</Text>
+          <Text numberOfLines={1} style={styles.kicker}>
+            {authUser?.displayName ?? 'سكاي رويال'}
+          </Text>
           <Text style={styles.title}>الرئيسية</Text>
         </View>
         <View style={styles.vipBadge}>
-          <Text style={styles.vipText}>VIP</Text>
+          <Text style={styles.vipText}>{authUser?.avatarLabel ?? 'VIP'}</Text>
         </View>
       </View>
 
@@ -88,20 +99,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: typography.weights.black,
   },
-  infoButton: {
+  signOutButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderColor: colors.border,
     borderRadius: radius.full,
     borderWidth: 1,
-    height: 40,
     justifyContent: 'center',
-    width: 40,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
   },
-  infoText: {
+  pressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.98 }],
+  },
+  signOutText: {
     color: colors.textMuted,
-    fontSize: 15,
-    fontWeight: typography.weights.black,
+    fontSize: typography.sizes.caption,
+    fontWeight: typography.weights.bold,
+    writingDirection: 'rtl',
   },
   statsRail: {
     alignItems: 'center',

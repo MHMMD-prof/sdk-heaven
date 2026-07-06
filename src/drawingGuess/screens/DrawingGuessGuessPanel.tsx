@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { GlassCard } from '../../components/GlassCard';
@@ -6,6 +6,7 @@ import { LuxuryButton } from '../../components/LuxuryButton';
 import { LuxuryInput } from '../../components/LuxuryInput';
 import { colors, spacing, typography } from '../../theme';
 import { DrawingGuessActions, DrawingGuessViewModel } from '../controller/drawingGuessControllerTypes';
+import { triggerDrawingGuessHaptic } from './drawingGuessHaptics';
 
 type DrawingGuessGuessPanelProps = {
   viewModel: DrawingGuessViewModel;
@@ -15,7 +16,14 @@ type DrawingGuessGuessPanelProps = {
 export function DrawingGuessGuessPanel({ actions, viewModel }: DrawingGuessGuessPanelProps) {
   const [guess, setGuess] = useState('');
 
+  useEffect(() => {
+    if (viewModel.hasLocalPlayerGuessedCorrectly) {
+      void triggerDrawingGuessHaptic('success');
+    }
+  }, [viewModel.hasLocalPlayerGuessedCorrectly]);
+
   const submitGuess = () => {
+    void triggerDrawingGuessHaptic('selection');
     actions.submitGuess(guess);
     setGuess('');
   };
@@ -24,18 +32,39 @@ export function DrawingGuessGuessPanel({ actions, viewModel }: DrawingGuessGuess
     <GlassCard style={styles.card}>
       <Text style={styles.title}>Guesses</Text>
       {viewModel.hasLocalPlayerGuessedCorrectly ? (
-        <View style={styles.solvedCard}>
+        <View
+          accessibilityLabel="Correct. Wait for the round reveal."
+          accessibilityRole="text"
+          style={styles.solvedCard}
+        >
           <Text style={styles.solved}>Correct! Wait for the round reveal.</Text>
         </View>
       ) : null}
       {viewModel.canSubmitGuess ? (
         <>
-          <LuxuryInput label="Your guess" onChangeText={setGuess} value={guess} />
-          <LuxuryButton disabled={!guess.trim()} onPress={submitGuess} title="Send guess" />
+          <LuxuryInput
+            blurOnSubmit={false}
+            accessibilityHint="Type your guess and submit it before time runs out."
+            accessibilityLabel="Your guess"
+            label="Your guess"
+            onChangeText={setGuess}
+            onSubmitEditing={() => {
+              if (guess.trim()) {
+                submitGuess();
+              }
+            }}
+            returnKeyType="send"
+            value={guess}
+          />
+          <LuxuryButton
+            accessibilityHint={
+              guess.trim() ? 'Submit your guess.' : 'Type a guess before submitting.'
+            }
+            disabled={!guess.trim()}
+            onPress={submitGuess}
+            title="Send guess"
+          />
         </>
-      ) : null}
-      {viewModel.isDrawer && viewModel.phase === 'drawing' && viewModel.canUseSimulatedGuessControls ? (
-        <LuxuryButton onPress={actions.submitSimulatedCorrectGuess} title="Simulate correct guess" />
       ) : null}
       <View style={styles.feed}>
         {viewModel.guesses.length === 0 ? (
@@ -92,7 +121,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   guessRow: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.055)',
     borderColor: colors.border,
     borderRadius: 14,
@@ -126,15 +155,18 @@ const styles = StyleSheet.create({
   },
   guessCopy: {
     flex: 1,
+    minWidth: 0,
   },
   guessName: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
     textAlign: 'right',
   },
   guess: {
     color: colors.textMuted,
+    flexShrink: 1,
     fontSize: typography.sizes.body,
     textAlign: 'right',
   },
@@ -150,6 +182,7 @@ const styles = StyleSheet.create({
     color: colors.emerald,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
+    maxWidth: 92,
     overflow: 'hidden',
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,

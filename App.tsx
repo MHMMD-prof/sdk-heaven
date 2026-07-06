@@ -8,6 +8,7 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { activeVoiceProviderConfig } from './src/voice/activeVoiceProviderConfig';
 import { VoiceProvider } from './src/voice/VoiceProvider';
 import { VoiceRoomsProvider } from './src/voice/VoiceRoomsProvider';
+import { AuthProvider } from './src/auth/AuthProvider';
 
 export default function App() {
   useEffect(() => {
@@ -18,11 +19,13 @@ export default function App() {
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        <VoiceProvider config={activeVoiceProviderConfig}>
-          <VoiceRoomsProvider>
-            <RootNavigator />
-          </VoiceRoomsProvider>
-        </VoiceProvider>
+        <AuthProvider>
+          <VoiceProvider config={activeVoiceProviderConfig}>
+            <VoiceRoomsProvider>
+              <RootNavigator />
+            </VoiceRoomsProvider>
+          </VoiceProvider>
+        </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

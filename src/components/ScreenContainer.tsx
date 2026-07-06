@@ -68,6 +68,7 @@ export function ScreenContainer({
           {scroll ? (
             <ScrollView
               contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
               scrollEnabled={scrollEnabled}
               showsVerticalScrollIndicator={false}
             >

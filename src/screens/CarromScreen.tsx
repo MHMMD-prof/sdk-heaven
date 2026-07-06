@@ -1,5 +1,5 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
   useWindowDimensions,
@@ -14,8 +14,6 @@ import {
   CarromPlayerRail,
   CarromSettingsRail,
   CarromShotHistoryPanel,
-  CarromStrikerSlider,
-  CarromStrikerSliderHandle,
 } from '../components/CarromHudControls';
 import { ReadyCountdownPanel, TableSelection } from '../components/CarromMatchFlow';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -24,16 +22,18 @@ import { useCarromEffects } from '../hooks/useCarromEffects';
 import { useCarromGameplay } from '../hooks/useCarromGameplay';
 import { useLocalCarromMatch } from '../hooks/useLocalCarromMatch';
 import { radius, spacing } from '../theme';
-import { CarromGameState, CarromPlayer } from '../types/carrom';
+import { CarromDisc, CarromGameState, CarromPlayer } from '../types/carrom';
 import { RootStackParamList } from '../types/navigation';
 import {
   ShotHistoryItem,
   createShotHistoryItem,
+  createPocketSparkles,
   getEventTone,
-  getPowerTone,
   getQueenLabel,
+  getRemainingCoinCounts,
   getStatusSubtitle,
   getStatusText,
+  prependShotHistoryItem,
   shouldShowEventBanner,
 } from '../utils/carromPresentation';
 import { CARROM_WORLD_SIZE } from '../utils/carromEngine';
@@ -55,7 +55,6 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
   );
   const scale = boardSize / CARROM_WORLD_SIZE;
   const boardRef = useRef<CarromSkiaBoardHandle>(null);
-  const sliderRef = useRef<CarromStrikerSliderHandle>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [aimAssistEnabled, setAimAssistEnabled] = useState(true);
   const [effectsEnabled, setEffectsEnabled] = useState(true);
@@ -80,84 +79,91 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
     submitShot,
   } = useLocalCarromMatch({ countdownSeconds: MATCH_COUNTDOWN_SECONDS });
   const lastShotPlayerRef = useRef<CarromPlayer>(1);
-  const handleShotStarted = useCallback((player: CarromPlayer) => {
-    lastShotPlayerRef.current = player;
+  const pocketedShotDiscsRef = useRef<CarromDisc[]>([]);
+  const pocketedShotIdsRef = useRef<Set<string>>(new Set());
+  const clearCollectedPocketedDiscs = useCallback(() => {
+    pocketedShotDiscsRef.current = [];
+    pocketedShotIdsRef.current.clear();
   }, []);
+  const handleShotStarted = useCallback((player: CarromPlayer) => {
+    clearCollectedPocketedDiscs();
+    lastShotPlayerRef.current = player;
+  }, [clearCollectedPocketedDiscs]);
   const {
-    aimAngle,
-    aimDots,
-    aimLength,
-    aimReach,
     baselineY,
     game,
     isMoving,
     panHandlers,
+    perfDurationMs,
     perfFps,
+    perfFrames,
+    perfMaxSteps,
+    perfPhase,
     perfSteps,
     perfWorstFrameMs,
-    powerPercent,
     reset: resetGameplay,
-    shotGuide,
-    sliderPanHandlers,
-    sliderProgress,
-    sliderWidth,
-    striker,
   } = useCarromGameplay({
     boardRef,
-    boardSize,
     clearPendingShot,
-    isCompactPhone,
     matchHealthy: !matchError,
     matchSessionRef,
     onShotStarted: handleShotStarted,
     playHit,
     scale,
-    screenWidth: width,
     showPerfOverlay: SHOW_CARROM_PERF_OVERLAY,
-    sliderRef,
     submitShot,
   });
   const {
     pocketSparkles,
-    queenPulse,
-    resetEffects,
     showPocketSparkles,
     showTurnBanner,
     turnBanner,
     winProgress,
   } = useCarromEffects({ effectsEnabled, gameStatus: game.status });
   const previousStatusRef = useRef<CarromGameState['status']>(game.status);
-  const pocketedSoundIdsRef = useRef<Set<string>>(new Set());
+  const collectPocketedDiscs = useCallback((pocketedDiscs: CarromDisc[]) => {
+    const pocketedShotIds = pocketedShotIdsRef.current;
+    const pocketedShotDiscs = pocketedShotDiscsRef.current;
+
+    for (let index = 0; index < pocketedDiscs.length; index += 1) {
+      const disc = pocketedDiscs[index]!;
+
+      if (pocketedShotIds.has(disc.id)) {
+        continue;
+      }
+
+      pocketedShotIds.add(disc.id);
+      pocketedShotDiscs.push(disc);
+    }
+  }, []);
 
   useEffect(() => {
     const previousStatus = previousStatusRef.current;
-    const newPocketedDiscs = game.pocketedThisTurn.filter(
-      (disc) => !pocketedSoundIdsRef.current.has(disc.id),
-    );
 
-    if (newPocketedDiscs.length > 0) {
-      game.pocketedThisTurn.forEach((disc) => pocketedSoundIdsRef.current.add(disc.id));
-      playPocket();
-      showPocketSparkles(
-        newPocketedDiscs.map((disc) => ({
-          id: disc.id,
-          tone: disc.kind === 'queen' ? 'queen' : disc.kind === 'striker' ? 'striker' : 'coin',
-          x: disc.x,
-          y: disc.y,
-        })),
-      );
+    if (game.status === 'moving' && game.pocketedThisTurn.length > 0) {
+      collectPocketedDiscs(game.pocketedThisTurn);
     }
 
     if (previousStatus === 'moving' && game.status !== 'moving') {
-      pocketedSoundIdsRef.current.clear();
+      const pocketedShotDiscs = pocketedShotDiscsRef.current;
+
+      if (pocketedShotDiscs.length > 0) {
+        playPocket();
+
+        if (effectsEnabled) {
+          showPocketSparkles(createPocketSparkles(pocketedShotDiscs));
+        }
+      }
+
       resolvePendingShot(game);
 
       setShotHistory((current) =>
-        [
-          createShotHistoryItem(game, lastShotPlayerRef.current),
-          ...current,
-        ].slice(0, 8),
+        prependShotHistoryItem(
+          current,
+          createShotHistoryItem(game, lastShotPlayerRef.current, pocketedShotDiscs),
+        ),
       );
+      clearCollectedPocketedDiscs();
 
       if (game.status === 'gameOver') {
         playWin();
@@ -174,6 +180,9 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
     game.message,
     game.pocketedThisTurn,
     game.status,
+    clearCollectedPocketedDiscs,
+    collectPocketedDiscs,
+    effectsEnabled,
     playFoul,
     playPocket,
     playWin,
@@ -185,7 +194,7 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
   const reset = () => {
     const next = resetGameplay();
 
-    pocketedSoundIdsRef.current.clear();
+    clearCollectedPocketedDiscs();
     lastShotPlayerRef.current = next.currentPlayer;
     previousStatusRef.current = next.status;
     setShotHistory([]);
@@ -193,6 +202,7 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
   };
 
   const prepareRound = () => {
+    clearCollectedPocketedDiscs();
     prepareMatchRound(reset);
   };
 
@@ -203,12 +213,7 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
   const statusText = getStatusText(game);
   const eventTone = getEventTone(game.message, game.status);
   const showEventBanner = !isMoving && shouldShowEventBanner(game);
-  const remaining = {
-    1: game.discs.filter((disc) => disc.kind === game.playerCoins[1] && !disc.pocketed).length,
-    2: game.discs.filter((disc) => disc.kind === game.playerCoins[2] && !disc.pocketed).length,
-  };
-
-  const powerTone = getPowerTone(powerPercent);
+  const remaining = useMemo(() => getRemainingCoinCounts(game), [game.discs, game.playerCoins]);
 
   return (
     <ScreenContainer
@@ -278,33 +283,18 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
         />
         <CarromSkiaBoard
           ref={boardRef}
-          aimAngle={aimAngle}
           aimAssistEnabled={aimAssistEnabled}
-          aimDots={aimDots}
-          aimLength={aimLength}
-          aimReach={aimReach}
           baselineY={baselineY}
           boardImage={boardImage}
           boardSize={boardSize}
           discs={game.discs}
           effectsEnabled={effectsEnabled}
           isMoving={isMoving}
-          powerPercent={powerPercent}
-          powerTone={powerTone}
           scale={scale}
-          shotGuide={shotGuide}
           showDebugOverlay={SHOW_CARROM_DEBUG_OVERLAY}
-          striker={striker}
           touchHandlers={panHandlers}
         >
           <CarromBoardOverlays
-            aimAngle={aimAngle}
-            aimAssistEnabled={aimAssistEnabled}
-            aimDots={aimDots}
-            aimLength={aimLength}
-            aimReach={aimReach}
-            baselineY={baselineY}
-            boardSize={boardSize}
             compact={isCompactPhone}
             effectsEnabled={effectsEnabled}
             eventTone={eventTone}
@@ -313,31 +303,22 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
             onBackToGames={() => navigation.goBack()}
             onNewRound={prepareRound}
             perfFps={perfFps}
+            perfDurationMs={perfDurationMs}
+            perfFrames={perfFrames}
+            perfMaxSteps={perfMaxSteps}
+            perfPhase={perfPhase}
             perfSteps={perfSteps}
             perfWorstFrameMs={perfWorstFrameMs}
             pocketSparkles={pocketSparkles}
-            powerPercent={powerPercent}
-            powerTone={powerTone}
             scale={scale}
-            shotGuide={shotGuide}
             showEventBanner={showEventBanner}
             showPerfOverlay={SHOW_CARROM_PERF_OVERLAY}
-            striker={striker}
             turnBanner={turnBanner}
             winProgress={winProgress}
             winActionsEnabled={matchPhase === 'settled'}
           />
         </CarromSkiaBoard>
       </View>
-
-      {game.status === 'placing' ? (
-        <CarromStrikerSlider
-          ref={sliderRef}
-          panHandlers={sliderPanHandlers}
-          progress={sliderProgress}
-          width={sliderWidth}
-        />
-      ) : null}
 
       <CarromControlDock
         compact={isCompactPhone}

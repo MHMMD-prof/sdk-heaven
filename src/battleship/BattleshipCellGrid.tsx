@@ -59,6 +59,7 @@ export function BattleshipTargetCellGrid({
         return (
           <Pressable
             accessibilityLabel={getBoardCellAccessibilityLabel(cellId)}
+            accessibilityHint={isSetupPhase ? labels.setupShipHint : labels.fireCellHint}
             accessibilityRole="button"
             accessibilityState={{ disabled }}
             key={cellId}

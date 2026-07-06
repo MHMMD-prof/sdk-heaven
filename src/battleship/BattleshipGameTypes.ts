@@ -15,8 +15,3 @@ export type ShotAnimation = {
   cellId: string;
   result: 'hit' | 'miss';
 };
-
-export type DragPoint = {
-  x: number;
-  y: number;
-};
