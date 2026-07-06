@@ -44,13 +44,14 @@ Review notes:
 - PASSED after fix: CLI argument parsing now rejects multiple modes, missing flag values, and unknown arguments.
 
 # Wave 1 - Firestore and Function access model
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint commit: d07b025da4e7c1f93a543b812bee4f59e2974e8f
+Implementation commit: 60e6b2ce2fb39f480590195c3f5958436a365c73
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: BLOCKED
+Commit: COMPLETE
 
 Add admin-only Firestore rules and callable Function guards for dashboard reads and privileged mutations. Keep existing owner profile and room membership rules intact, and route sensitive actions through backend code instead of direct client writes.
 
@@ -69,9 +70,6 @@ Review notes:
 - PASSED: `adminDashboard` requires a verified Firebase ID token with boolean `admin === true`.
 - PASSED: Firestore dashboard, audit, and admin profile paths are admin-read-only with client writes denied.
 - PASSED: Existing owner profile, room, membership, moderation, and presence rules were not broadened.
-
-Blocked commit notes:
-- BLOCKED: staging the Wave 1 implementation files was rejected by the app approval gate because the account usage limit was reached. Resume by staging only `dashboard.md`, `firestore.rules`, `functions/index.js`, `functions/package.json`, `functions/adminDashboardCore.js`, and `functions/adminDashboardCore.test.mjs`, then create the Wave 1 implementation commit and record its hash here.
 
 # Wave 2 - Vite React dashboard foundation
 Status: INCOMPLETE
