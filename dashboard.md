@@ -13,8 +13,34 @@ The Vite app may read only narrowly scoped admin dashboard documents allowed by 
 
 # Wave 0 - Admin authority foundation
 Status: INCOMPLETE
+Checkpoint commit: cbf0139f4561bee4da304bcc47e5bb47d2466573
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: NOT_STARTED
 
 Add Firebase custom claims as the only admin role authority, set through trusted backend tooling or a protected one-time bootstrap path. Optionally add read-only admin profile metadata for display and audit context, but never let a client-writable Firestore document grant access. Document the first-admin bootstrap process, required Firebase Auth state, and how to revoke an admin.
+
+Wave 0 implementation plan:
+- Touched files: add a focused Firebase Functions helper for admin custom claim validation/claim payload creation, add tests for that helper, add a trusted local admin-claim management script under `functions/`, add a root/admin docs page for bootstrap and revoke operations, and update `functions/package.json` scripts only if needed.
+- Risks: accidentally creating a public privilege-escalation path, overwriting existing custom claims, committing secrets, or coupling dashboard authority to Firestore metadata. Keep authority in Firebase Auth custom claims and make the script require trusted Firebase Admin credentials outside the client apps.
+- Required tests/checks: run the new helper tests, existing Functions core tests, `npm --prefix functions run lint`, and relevant root Vitest tests if shared code is touched.
+- Rollback considerations: revert the implementation commit to remove the helper, script, docs, and script entry; the checkpoint commit remains a clean restore point for the pre-dashboard state.
+
+Verification notes:
+- PASSED: `npx vitest run functions\adminClaimsCore.test.mjs`
+- PASSED: `npx vitest run functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED: `npm --prefix functions run lint`
+- PASSED: `npm test` after the in-progress auth Wave 6 room-presence fixture stopped blocking the suite.
+- PASSED after review fix: `npx vitest run functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED after review fix: `npm --prefix functions run lint`
+- PASSED after review fix: `npm test`
+
+Review notes:
+- PASSED: Admin authority remains Firebase custom claims only; no public grant endpoint was added.
+- PASSED: Claim updates preserve unrelated existing custom claims.
+- PASSED after fix: CLI argument parsing now rejects multiple modes, missing flag values, and unknown arguments.
 
 # Wave 1 - Firestore and Function access model
 Status: INCOMPLETE

@@ -7,7 +7,8 @@
     "node": "22"
   },
   "scripts": {
-    "lint": "node --check index.js",
+    "admin:claim": "node scripts/setAdminClaim.js",
+    "lint": "node --check index.js && node --check livekitTokenCore.js && node --check roomCommandCore.js && node --check adminClaimsCore.js && node --check scripts/setAdminClaim.js",
     "serve": "npx firebase-tools emulators:start --only functions",
     "deploy": "npx firebase-tools deploy --only functions",
     "logs": "npx firebase-tools functions:log"
