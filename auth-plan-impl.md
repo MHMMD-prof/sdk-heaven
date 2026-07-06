@@ -53,9 +53,25 @@ Wave 6 implementation plan:
 - Rollback: revert the implementation commit created after this checkpoint, or restore to checkpoint `cbf0139` if the full Wave 6 attempt must be discarded.
 
 # Wave 7 — Private rooms and invites
-Status: INCOMPLETE
+Status: COMPLETE
+Checkpoint: afb8482
+Implementation commit: a41bb031c55ac1aab5c9aa33a1c3cd444a1cb117
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: COMPLETE
 
 Add private room visibility, invite codes, invite/member validation, and discovery rules so private rooms are hidden unless the user is invited or already a member.
+
+Wave 7 implementation plan:
+- Extend room documents with `visibility: 'public' | 'private'` and optional invite codes, while keeping public rooms compatible with existing UI.
+- Add private room creation/join helpers that create host membership and allow invite-code joins without exposing private rooms in normal discovery.
+- Update room listing so active public rooms are listed, while joined private rooms are available through local membership overrides after creation/join.
+- Add Firestore rules for private room reads/joins: users can read public active rooms, hosts/members can read their private rooms, and invite-code joins can create listener membership without forging identity or role.
+- Add focused tests for private room payloads, invite normalization/validation, room visibility mapping, and private join behavior. Run `npx tsc --noEmit` and `npm test`.
+- Rollback: revert the Wave 7 implementation commit after checkpoint `afb8482`; full reset to `afb8482` is destructive and requires explicit approval.
+- Completed with implementation commit `a41bb031c55ac1aab5c9aa33a1c3cd444a1cb117`. Note: `firestore.rules` already contained the Wave 7 private-room rule shape at the checkpoint; this implementation commit contains the app model/provider/test pieces.
 
 # Wave 8 — Firebase rules emulator coverage
 Status: INCOMPLETE
