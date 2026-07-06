@@ -73,8 +73,36 @@ Review notes:
 
 # Wave 2 - Vite React dashboard foundation
 Status: INCOMPLETE
+Checkpoint commit: 60d77293e1ad882e61581db6404bf0a5b84dcc25
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: NOT_STARTED
 
 Create a separate Vite React website under `admin-dashboard/`, with isolated dependencies, package scripts, TypeScript config, routing, Firebase web client initialization, environment documentation, and a web-only auth gate. Keep web dependencies out of the Expo app unless they are already shared safely, and do not add dashboard routes, tabs, or screens to the mobile app.
+
+Wave 2 implementation plan:
+- Touched files: add an isolated `admin-dashboard/` Vite React package with package scripts, TypeScript config, Vite config, HTML entry, React source, Firebase web client setup, auth/admin route gate, environment example/docs, and root delegation scripts if useful.
+- Risks: leaking secrets through Vite env vars, importing Expo/React Native/mobile modules, coupling dashboard routing to the mobile app, or adding dependencies to the root app instead of the dashboard package. Keep all web code and dependencies inside `admin-dashboard/`.
+- Required tests/checks: run dashboard package install if needed, dashboard typecheck/build, any dashboard tests added, root `npm test`, and `npm --prefix functions run lint` to ensure prior waves still pass.
+- Rollback considerations: revert the Wave 2 implementation commit to remove `admin-dashboard/` and root script additions; checkpoint `60d77293e1ad882e61581db6404bf0a5b84dcc25` preserves the pre-Wave 2 state.
+
+Verification notes:
+- PASSED: `npm --prefix admin-dashboard install`
+- PASSED: `npm --prefix admin-dashboard run typecheck`
+- PASSED: `npm --prefix admin-dashboard run build` after sandbox denial was rerun with approved filesystem access.
+- PASSED: `npm test`
+- PASSED: `npm --prefix functions run lint`
+- PASSED after review routing/copy fixes: `npm --prefix admin-dashboard run typecheck`
+- PASSED after review routing/copy fixes: `npm --prefix admin-dashboard run build`
+- PASSED after review routing/copy fixes: `npm --prefix functions run lint`
+- PASSED after review routing/copy fixes: `npm test`
+
+Review notes:
+- PASSED: Dashboard remains isolated under `admin-dashboard/` and imports no Expo, React Native, mobile navigation, or mobile UI modules.
+- PASSED: Vite env example contains only public Firebase web config names and no secrets.
+- PASSED after fix: section navigation uses browser history routes and placeholder copy is operational empty-state text, not future-feature instructions.
 
 # Wave 3 - Admin overview metrics
 Status: INCOMPLETE
