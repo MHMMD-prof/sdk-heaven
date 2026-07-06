@@ -74,13 +74,14 @@ Wave 7 implementation plan:
 - Completed with implementation commit `a41bb031c55ac1aab5c9aa33a1c3cd444a1cb117`. Note: `firestore.rules` already contained the Wave 7 private-room rule shape at the checkpoint; this implementation commit contains the app model/provider/test pieces.
 
 # Wave 8 — Firebase rules emulator coverage
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint: 478a165
+Implementation commit: 15782a0
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Add emulator-backed tests for profile rules, room membership rules, presence rules, moderation write denial, and private invite access once Wave 7 lands.
 
@@ -91,6 +92,7 @@ Wave 8 implementation plan:
 - Update package scripts or config only as needed to run the rules tests.
 - Run `npx tsc --noEmit`, `npm test`, and the focused rules test command if available.
 - Rollback: revert the Wave 8 implementation commit after checkpoint `478a165`; full reset to `478a165` is destructive and requires explicit approval.
+- Completed with implementation commit `15782a0`.
 
 # Wave 9 — Account lifecycle and security UX
 Status: INCOMPLETE
