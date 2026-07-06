@@ -72,13 +72,14 @@ Review notes:
 - PASSED: Existing owner profile, room, membership, moderation, and presence rules were not broadened.
 
 # Wave 2 - Vite React dashboard foundation
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint commit: 60d77293e1ad882e61581db6404bf0a5b84dcc25
+Implementation commit: 586ca816cc0c21c1378908fab64f639e16edf7fa
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Create a separate Vite React website under `admin-dashboard/`, with isolated dependencies, package scripts, TypeScript config, routing, Firebase web client initialization, environment documentation, and a web-only auth gate. Keep web dependencies out of the Expo app unless they are already shared safely, and do not add dashboard routes, tabs, or screens to the mobile app.
 
