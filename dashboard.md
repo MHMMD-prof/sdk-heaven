@@ -12,13 +12,14 @@ Firebase custom claims are the source of truth for admin authority. Firestore ma
 The Vite app may read only narrowly scoped admin dashboard documents allowed by Firestore rules. Prefer backend-computed aggregates, paginated callable Function results, and explicit query limits over broad client collection scans. Environment variables must use Vite `VITE_` names and must contain only public Firebase web config, never service account credentials, private keys, LiveKit secrets, or admin bootstrap secrets.
 
 # Wave 0 - Admin authority foundation
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint commit: cbf0139f4561bee4da304bcc47e5bb47d2466573
+Implementation commit: 566c6955f7fbf0a838cc36efc185ec0218857748
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Add Firebase custom claims as the only admin role authority, set through trusted backend tooling or a protected one-time bootstrap path. Optionally add read-only admin profile metadata for display and audit context, but never let a client-writable Firestore document grant access. Document the first-admin bootstrap process, required Firebase Auth state, and how to revoke an admin.
 
