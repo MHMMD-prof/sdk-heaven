@@ -75,8 +75,22 @@ Wave 7 implementation plan:
 
 # Wave 8 — Firebase rules emulator coverage
 Status: INCOMPLETE
+Checkpoint: 478a165
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: NOT_STARTED
 
 Add emulator-backed tests for profile rules, room membership rules, presence rules, moderation write denial, and private invite access once Wave 7 lands.
+
+Wave 8 implementation plan:
+- Inspect existing Firebase/test tooling and prefer a lightweight emulator-test harness that can run from npm without changing production app code.
+- Add rules coverage for owner profile access, public/private room read behavior, membership invite validation, presence writes, and moderation/admin write denial.
+- Keep tests isolated from app unit tests when emulator tooling is unavailable; record any emulator startup requirement clearly.
+- Update package scripts or config only as needed to run the rules tests.
+- Run `npx tsc --noEmit`, `npm test`, and the focused rules test command if available.
+- Rollback: revert the Wave 8 implementation commit after checkpoint `478a165`; full reset to `478a165` is destructive and requires explicit approval.
 
 # Wave 9 — Account lifecycle and security UX
 Status: INCOMPLETE
