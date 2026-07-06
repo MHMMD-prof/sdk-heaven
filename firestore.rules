@@ -145,6 +145,47 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function validPresenceStatus(status) {
+      return status == 'online' || status == 'stale';
+    }
+
+    function canReadPresence(roomId) {
+      return hasCompleteProfile()
+        && get(roomPath(roomId)).data.status == 'active'
+        && exists(memberPath(roomId, request.auth.uid))
+        && get(memberPath(roomId, request.auth.uid)).data.status == 'active';
+    }
+
+    function validOwnPresence(roomId, userId) {
+      let data = request.resource.data;
+      let member = get(memberPath(roomId, userId)).data;
+      return hasCompleteProfile()
+        && request.auth.uid == userId
+        && get(roomPath(roomId)).data.status == 'active'
+        && exists(memberPath(roomId, userId))
+        && member.status == 'active'
+        && data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'avatarLabel',
+          'role',
+          'status',
+          'canPublishAudio',
+          'joinedAt',
+          'lastSeenAt',
+          'updatedAt',
+        ])
+        && data.uid == userId
+        && data.displayName == get(profilePath(request.auth.uid)).data.displayName
+        && data.avatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
+        && data.role == member.role
+        && data.canPublishAudio == member.canPublishAudio
+        && validPresenceStatus(data.status)
+        && data.joinedAt is timestamp
+        && data.lastSeenAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function validJoinCountUpdate(roomId) {
       return hasCompleteProfile()
         && resource.data.status == 'active'
@@ -178,6 +219,12 @@ service cloud.firestore {
 
       match /moderationEvents/{eventId} {
         allow read, write: if false;
+      }
+
+      match /presence/{userId} {
+        allow get, list: if canReadPresence(roomId);
+        allow create, update: if validOwnPresence(roomId, userId);
+        allow delete: if false;
       }
     }
   }

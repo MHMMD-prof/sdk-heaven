@@ -14,7 +14,7 @@ import { useVoiceRooms } from '../voice/useVoiceRooms';
 type VoiceRoomScreenProps = NativeStackScreenProps<RootStackParamList, 'VoiceRoom'>;
 
 export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
-  const { getRoomById } = useVoiceRooms();
+  const { getRoomById, startRoomPresence, stopRoomPresence } = useVoiceRooms();
   const room = getRoomById(route.params.roomId);
   const {
     canPublishAudio,
@@ -36,9 +36,18 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
   } = useVoiceRoomController(room);
 
   const handleLeave = async () => {
+    await stopRoomPresence(room.id);
     await leaveRoom();
     navigation.goBack();
   };
+
+  useEffect(() => {
+    startRoomPresence(room.id);
+
+    return () => {
+      void stopRoomPresence(room.id);
+    };
+  }, [room.id, startRoomPresence, stopRoomPresence]);
 
   useEffect(() => {
     if (room.status === 'closed' || room.localMember?.status === 'removed') {

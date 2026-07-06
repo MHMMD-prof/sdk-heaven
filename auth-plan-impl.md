@@ -34,8 +34,22 @@ Added the `roomCommand` Function, host-only role/status mutations, moderation au
 
 # Wave 6 — Live room presence
 Status: INCOMPLETE
+Checkpoint: cbf0139
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: NOT_STARTED
 
 Planned next. Add Firestore-backed room presence using client heartbeats, derive active speakers/listeners/counts from fresh presence docs, mark stale presence on leave, and keep membership as the authorization source.
+
+Wave 6 implementation plan:
+- Add a focused room presence module for validating/mapping `rooms/{roomId}/presence/{uid}` data, stale detection, and deriving speakers/listeners/counts from fresh presence while falling back to membership data.
+- Extend `VoiceRoomsProvider` to subscribe to joined-room presence, write local-user heartbeat docs while the room is open, and mark local presence stale on leave/unmount.
+- Extend Firestore rules with owner-only presence writes tied to active membership, active room status, and profile identity.
+- Keep LiveKit token authorization unchanged; membership remains the authorization source.
+- Add focused unit tests for presence mapping/staleness and room derivation. Run `npx tsc --noEmit` and `npm test`.
+- Rollback: revert the implementation commit created after this checkpoint, or restore to checkpoint `cbf0139` if the full Wave 6 attempt must be discarded.
 
 # Wave 7 — Private rooms and invites
 Status: INCOMPLETE

@@ -1,4 +1,4 @@
-import { PropsWithChildren, createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import { PropsWithChildren, createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   collection,
   doc,
@@ -7,6 +7,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  setDoc,
   where,
   writeBatch,
 } from 'firebase/firestore';
@@ -25,6 +26,7 @@ import {
   mapRoomDocumentToVoiceRoom,
   mapRoomMemberDocument,
 } from './roomProfile';
+import { applyRoomPresence, mapRoomPresenceDocument } from './roomPresence';
 
 type VoiceRoomsContextValue = {
   rooms: VoiceRoom[];
@@ -33,6 +35,8 @@ type VoiceRoomsContextValue = {
   createDraftRoom: (type: VoiceRoomType, title?: string) => Promise<VoiceRoom>;
   getRoomById: (roomId: string) => VoiceRoom;
   joinRoom: (roomId: string) => Promise<VoiceRoom>;
+  startRoomPresence: (roomId: string) => void;
+  stopRoomPresence: (roomId: string) => Promise<void>;
 };
 
 export const VoiceRoomsContext = createContext<VoiceRoomsContextValue | undefined>(undefined);
@@ -41,7 +45,11 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   const { authUser } = useAuth();
   const [firestoreRooms, setFirestoreRooms] = useState<VoiceRoom[]>([]);
   const [joinedRoomOverrides, setJoinedRoomOverrides] = useState<Record<string, VoiceRoom>>({});
+  const [activePresenceRoomIds, setActivePresenceRoomIds] = useState<string[]>([]);
   const [roomsStatus, setRoomsStatus] = useState<RoomsStatus>('loading');
+  const joinedRoomBaseRef = useRef<Record<string, VoiceRoom>>({});
+  const joinedRoomOverridesRef = useRef(joinedRoomOverrides);
+  const presenceJoinedRoomIdsRef = useRef<Set<string>>(new Set());
   const rooms = useMemo(
     () => {
       const sourceRooms = firestoreRooms.length > 0 ? firestoreRooms : mockVoiceRooms;
@@ -52,6 +60,11 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   );
   const joinedRoomIds = useMemo(() => Object.keys(joinedRoomOverrides).sort(), [joinedRoomOverrides]);
   const joinedRoomIdsKey = joinedRoomIds.join('|');
+  const activePresenceRoomIdsKey = activePresenceRoomIds.join('|');
+
+  useEffect(() => {
+    joinedRoomOverridesRef.current = joinedRoomOverrides;
+  }, [joinedRoomOverrides]);
 
   useEffect(() => {
     if (!authUser) {
@@ -104,12 +117,18 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
               return currentRooms;
             }
 
+            const nextBaseRoom = {
+              ...mapRoomDocumentToVoiceRoom(roomDocument),
+              localMember: currentRoom.localMember,
+            };
+            joinedRoomBaseRef.current = {
+              ...joinedRoomBaseRef.current,
+              [roomId]: nextBaseRoom,
+            };
+
             return {
               ...currentRooms,
-              [roomId]: {
-                ...mapRoomDocumentToVoiceRoom(roomDocument),
-                localMember: currentRoom.localMember,
-              },
+              [roomId]: nextBaseRoom,
             };
           });
         }),
@@ -127,19 +146,44 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
               return currentRooms;
             }
 
+            const baseRoom = joinedRoomBaseRef.current[roomId] ?? currentRoom;
+            const nextBaseRoom = {
+              ...baseRoom,
+              localMember: {
+                id: memberDocument.uid,
+                displayName: memberDocument.displayName,
+                avatarLabel: memberDocument.avatarLabel,
+                role: memberDocument.role,
+                status: memberDocument.status,
+                canPublishAudio: memberDocument.canPublishAudio,
+              },
+            };
+            joinedRoomBaseRef.current = {
+              ...joinedRoomBaseRef.current,
+              [roomId]: nextBaseRoom,
+            };
+
             return {
               ...currentRooms,
-              [roomId]: {
-                ...currentRoom,
-                localMember: {
-                  id: memberDocument.uid,
-                  displayName: memberDocument.displayName,
-                  avatarLabel: memberDocument.avatarLabel,
-                  role: memberDocument.role,
-                  status: memberDocument.status,
-                  canPublishAudio: memberDocument.canPublishAudio,
-                },
-              },
+              [roomId]: nextBaseRoom,
+            };
+          });
+        }),
+        onSnapshot(collection(firebaseDb, 'rooms', roomId, 'presence'), (snapshot) => {
+          const presenceDocuments = snapshot.docs
+            .map((presenceSnapshot) => mapRoomPresenceDocument(presenceSnapshot.data()))
+            .filter((presence): presence is NonNullable<typeof presence> => presence !== null);
+
+          setJoinedRoomOverrides((currentRooms) => {
+            const currentRoom = currentRooms[roomId];
+
+            if (!currentRoom) {
+              return currentRooms;
+            }
+
+            return {
+              ...currentRooms,
+              [roomId]: applyRoomPresence(joinedRoomBaseRef.current[roomId] ?? currentRoom, presenceDocuments),
             };
           });
         }),
@@ -150,6 +194,88 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
     };
   }, [authUser, authUser?.uid, joinedRoomIdsKey]);
+
+  const writeRoomPresence = useCallback(
+    async (room: VoiceRoom, status: 'online' | 'stale') => {
+      if (!authUser || room.status !== 'active' || room.localMember?.status === 'removed') {
+        return;
+      }
+
+      const member = room.localMember;
+
+      if (!member?.role || typeof member.canPublishAudio !== 'boolean') {
+        return;
+      }
+
+      const hasJoinedPresence = presenceJoinedRoomIdsRef.current.has(room.id);
+      const presencePayload = {
+        uid: authUser.uid,
+        displayName: member.displayName,
+        avatarLabel: member.avatarLabel,
+        role: member.role,
+        status,
+        canPublishAudio: member.canPublishAudio,
+        lastSeenAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        ...(hasJoinedPresence ? {} : { joinedAt: serverTimestamp() }),
+      };
+
+      await setDoc(doc(firebaseDb, 'rooms', room.id, 'presence', authUser.uid), presencePayload, { merge: true });
+      presenceJoinedRoomIdsRef.current.add(room.id);
+    },
+    [authUser],
+  );
+
+  useEffect(() => {
+    if (!authUser || activePresenceRoomIds.length === 0) {
+      return undefined;
+    }
+
+    if (!activePresenceRoomIds.some((roomId) => joinedRoomOverridesRef.current[roomId])) {
+      return undefined;
+    }
+
+    const heartbeat = () => {
+      activePresenceRoomIds
+        .map((roomId) => joinedRoomOverridesRef.current[roomId])
+        .filter((room): room is VoiceRoom => !!room)
+        .forEach((room) => {
+          void writeRoomPresence(room, 'online');
+        });
+    };
+    heartbeat();
+
+    const heartbeatId = setInterval(heartbeat, 20_000);
+
+    return () => {
+      clearInterval(heartbeatId);
+      activePresenceRoomIds
+        .map((roomId) => joinedRoomOverridesRef.current[roomId])
+        .filter((room): room is VoiceRoom => !!room)
+        .forEach((room) => {
+          void writeRoomPresence(room, 'stale');
+        });
+    };
+  }, [activePresenceRoomIds, activePresenceRoomIdsKey, authUser, writeRoomPresence]);
+
+  const startRoomPresence = useCallback((roomId: string) => {
+    setActivePresenceRoomIds((currentRoomIds) =>
+      currentRoomIds.includes(roomId) ? currentRoomIds : [...currentRoomIds, roomId].sort(),
+    );
+  }, []);
+
+  const stopRoomPresence = useCallback(
+    async (roomId: string) => {
+      setActivePresenceRoomIds((currentRoomIds) => currentRoomIds.filter((currentRoomId) => currentRoomId !== roomId));
+
+      const room = joinedRoomOverridesRef.current[roomId];
+
+      if (room) {
+        await writeRoomPresence(room, 'stale');
+      }
+    },
+    [writeRoomPresence],
+  );
 
   const createRoom = useCallback(
     async (input: CreateRoomInput) => {
@@ -189,6 +315,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       };
 
       setJoinedRoomOverrides((currentRooms) => ({ ...currentRooms, [room.id]: room }));
+      joinedRoomBaseRef.current = { ...joinedRoomBaseRef.current, [room.id]: room };
 
       return room;
     },
@@ -266,6 +393,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       });
 
       setJoinedRoomOverrides((currentRooms) => ({ ...currentRooms, [room.id]: room }));
+      joinedRoomBaseRef.current = { ...joinedRoomBaseRef.current, [room.id]: room };
 
       return room;
     },
@@ -301,8 +429,10 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       joinRoom,
       rooms,
       roomsStatus,
+      startRoomPresence,
+      stopRoomPresence,
     }),
-    [createDraftRoom, createRoom, getRoomById, joinRoom, rooms, roomsStatus],
+    [createDraftRoom, createRoom, getRoomById, joinRoom, rooms, roomsStatus, startRoomPresence, stopRoomPresence],
   );
 
   return <VoiceRoomsContext.Provider value={value}>{children}</VoiceRoomsContext.Provider>;
