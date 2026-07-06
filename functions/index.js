@@ -3,6 +3,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { AccessToken, TrackSource } = require('livekit-server-sdk');
 
+const { resolveAdminDashboardRequest } = require('./adminDashboardCore');
 const { extractBearerToken, resolveTokenRequest } = require('./livekitTokenCore');
 const { normalizeRoomCommandBody, resolveRoomCommand } = require('./roomCommandCore');
 
@@ -236,5 +237,54 @@ exports.roomCommand = onRequest(
       console.error('Failed to execute room command:', error);
       response.status(500).json({ error: 'Failed to execute room command.' });
     }
+  },
+);
+
+exports.adminDashboard = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+
+    const idToken = extractBearerToken(request.headers);
+
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error('Invalid Firebase ID token:', error);
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const dashboardRequest = resolveAdminDashboardRequest({
+      body: request.body,
+      decodedToken,
+    });
+
+    if (!dashboardRequest.ok) {
+      response.status(dashboardRequest.status).json({ error: dashboardRequest.error });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      action: dashboardRequest.value.action,
+      admin: true,
+      email: dashboardRequest.value.email,
+      uid: dashboardRequest.value.uid,
+    });
   },
 );

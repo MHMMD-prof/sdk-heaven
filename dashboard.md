@@ -45,8 +45,33 @@ Review notes:
 
 # Wave 1 - Firestore and Function access model
 Status: INCOMPLETE
+Checkpoint commit: d07b025da4e7c1f93a543b812bee4f59e2974e8f
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: BLOCKED
 
 Add admin-only Firestore rules and callable Function guards for dashboard reads and privileged mutations. Keep existing owner profile and room membership rules intact, and route sensitive actions through backend code instead of direct client writes.
+
+Wave 1 implementation plan:
+- Touched files: add a focused admin dashboard Function core guard, expose one minimal `adminDashboard` HTTP Function that verifies a Firebase ID token and requires `admin === true`, update Firestore rules with admin-only dashboard/audit metadata read paths and no client writes, add Function guard tests, and update Functions lint coverage.
+- Risks: accidentally allowing non-admin reads, allowing client writes to admin/audit collections, broadening existing `users` or `rooms` access, or coupling Wave 1 to later dashboard UI/metrics. Keep this wave to access boundaries only.
+- Required tests/checks: run new admin dashboard Function core tests, existing Functions core tests, `npm --prefix functions run lint`, and full `npm test`.
+- Rollback considerations: revert the Wave 1 implementation commit to remove the Function guard, rules additions, tests, and tracker updates; checkpoint `d07b025da4e7c1f93a543b812bee4f59e2974e8f` preserves the pre-Wave 1 state.
+
+Verification notes:
+- PASSED: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED: `npm --prefix functions run lint`
+- PASSED: `npm test`
+
+Review notes:
+- PASSED: `adminDashboard` requires a verified Firebase ID token with boolean `admin === true`.
+- PASSED: Firestore dashboard, audit, and admin profile paths are admin-read-only with client writes denied.
+- PASSED: Existing owner profile, room, membership, moderation, and presence rules were not broadened.
+
+Blocked commit notes:
+- BLOCKED: staging the Wave 1 implementation files was rejected by the app approval gate because the account usage limit was reached. Resume by staging only `dashboard.md`, `firestore.rules`, `functions/index.js`, `functions/package.json`, `functions/adminDashboardCore.js`, and `functions/adminDashboardCore.test.mjs`, then create the Wave 1 implementation commit and record its hash here.
 
 # Wave 2 - Vite React dashboard foundation
 Status: INCOMPLETE

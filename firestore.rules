@@ -14,6 +14,10 @@ service cloud.firestore {
       return verified() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return verified() && request.auth.token.admin == true;
+    }
+
     function profilePath(userId) {
       return /databases/$(database)/documents/users/$(userId);
     }
@@ -60,8 +64,34 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /adminDashboard/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /adminAuditEvents/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /adminProfiles/{userId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     function validRoomType(type) {
       return type == 'voice' || type == 'game';
+    }
+
+    function validRoomVisibility(visibility) {
+      return visibility == 'public' || visibility == 'private';
+    }
+
+    function validInviteCode(inviteCode) {
+      return inviteCode is string
+        && inviteCode.size() >= 6
+        && inviteCode.size() <= 12
+        && inviteCode.matches('^[A-Z0-9]+$');
     }
 
     function validActiveRoom(roomId) {
@@ -74,7 +104,9 @@ service cloud.firestore {
           'hostDisplayName',
           'hostAvatarLabel',
           'status',
+          'visibility',
           'participantCount',
+          'inviteCode',
           'currentGameId',
           'createdAt',
           'updatedAt',
@@ -88,7 +120,12 @@ service cloud.firestore {
         && data.hostDisplayName == get(profilePath(request.auth.uid)).data.displayName
         && data.hostAvatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
         && data.status == 'active'
+        && validRoomVisibility(data.visibility)
         && data.participantCount == 1
+        && (
+          (data.visibility == 'public' && !('inviteCode' in data)) ||
+          (data.visibility == 'private' && validInviteCode(data.inviteCode))
+        )
         && (!('currentGameId' in data) || data.currentGameId is string)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -116,6 +153,7 @@ service cloud.firestore {
           'role',
           'status',
           'canPublishAudio',
+          'inviteCodeUsed',
           'joinedAt',
           'updatedAt',
         ])
@@ -125,7 +163,15 @@ service cloud.firestore {
         && data.avatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
         && (
           (room.hostId == request.auth.uid && data.role == 'host' && data.canPublishAudio == true) ||
-          (room.hostId != request.auth.uid && data.role == 'listener' && data.canPublishAudio == false)
+          (
+            room.hostId != request.auth.uid
+            && data.role == 'listener'
+            && data.canPublishAudio == false
+            && (
+              (room.visibility == 'public' && !('inviteCodeUsed' in data)) ||
+              (room.visibility == 'private' && data.inviteCodeUsed == room.inviteCode)
+            )
+          )
         )
         && data.status == 'active'
         && data.joinedAt is timestamp
@@ -141,6 +187,10 @@ service cloud.firestore {
         && data.role == resource.data.role
         && data.status == resource.data.status
         && data.canPublishAudio == resource.data.canPublishAudio
+        && (
+          (!('inviteCodeUsed' in resource.data) && !('inviteCodeUsed' in data)) ||
+          data.inviteCodeUsed == resource.data.inviteCodeUsed
+        )
         && data.joinedAt == resource.data.joinedAt
         && data.updatedAt is timestamp;
     }
@@ -196,8 +246,20 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
     }
 
+    function canReadRoom(roomId) {
+      return hasCompleteProfile()
+        && resource.data.status == 'active'
+        && (
+          resource.data.visibility == 'public' ||
+          (exists(memberPath(roomId, request.auth.uid)) && get(memberPath(roomId, request.auth.uid)).data.status == 'active')
+        );
+    }
+
     match /rooms/{roomId} {
-      allow get, list: if hasCompleteProfile() && resource.data.status == 'active';
+      allow get: if canReadRoom(roomId);
+      allow list: if hasCompleteProfile()
+        && resource.data.status == 'active'
+        && resource.data.visibility == 'public';
       allow create: if hasCompleteProfile()
         && validActiveRoom(roomId)
         && getAfter(memberPath(roomId, request.auth.uid)).data.role == 'host';
