@@ -31,7 +31,34 @@ Remaining:
 Fix broken Arabic/mojibake text across reachable screens, data files, validation messages, and release-path copy. Keep existing UI behavior unchanged, prefer valid UTF-8 Arabic strings, and add or update targeted tests where release gates already check for broken copy.
 
 # Wave 1 — Room presence accuracy
-Status: INCOMPLETE
+Status: COMPLETE
+Checkpoint: 012ce98
+Implementation Commit: 69e48ff8336f16a82b4aa9a33d3b9a2f8bd62da9
+
+Phase Status:
+- Plan: COMPLETE
+- Implementation: COMPLETE
+- Verification: PASSED
+- Review: PASSED
+- Commit: COMPLETE
+
+Implementation Plan:
+- Touched files: review existing Firestore presence rules, `src/voice/roomPresence.ts`, `src/voice/VoiceRoomsProvider.tsx`, voice-room controller usage, and focused presence tests.
+- Risks: duplicating the earlier auth Wave 6 presence work, weakening membership authorization, or counting stale clients as live room participants.
+- Required tests: run focused voice presence tests and `npx tsc --noEmit`.
+- Rollback: revert tracker-only closure commit for this wave; revert implementation commit `69e48ff8336f16a82b4aa9a33d3b9a2f8bd62da9` only if the underlying presence implementation itself must be removed.
+
+Verification Notes:
+- PASSED: `npx vitest run src\voice\__tests__\roomPresence.test.ts src\voice\__tests__\mapVoiceRoomToMockParticipants.test.ts src\voice\__tests__\voiceRoomSessionReducer.test.ts`
+- PASSED: `npx tsc --noEmit`
+
+Review Notes:
+- PASSED: existing client code writes Firestore presence heartbeats with `online` status while active and stale cleanup on leave/unmount.
+- PASSED: fresh presence filtering drives live speaker/listener arrays and participant counts without replacing room membership as the authorization source.
+- PASSED: Firestore rules allow only active room members to read presence and only the signed-in active member to write their own presence.
+
+Remaining:
+- None.
 
 Add Firestore-backed room presence using client heartbeats, fresh presence filtering, leave cleanup, and active speaker/listener counts. Keep room membership as the authorization source and use presence only for live availability, counts, and UI freshness.
 
