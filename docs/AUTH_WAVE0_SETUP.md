@@ -103,3 +103,13 @@ Only active host memberships can promote, demote, remove, or close a room. Activ
 members can report another member. The Function writes moderation audit events under
 `rooms/{roomId}/moderationEvents/{eventId}`. Client Firestore rules intentionally do
 not allow direct role/status changes or moderation event writes.
+
+## Wave 10 iOS Firebase setup
+
+The iOS release identity is bundle ID `com.mh.games`. Expo config points
+`expo.ios.googleServicesFile` to `./GoogleService-Info.plist`.
+
+Before any native iOS release build, create the iOS app in Firebase project
+`yallgame-ebd19`, download the real `GoogleService-Info.plist`, and place it at
+the repository root. Use `docs/AUTH_IOS_FIREBASE_SETUP.md` as the iOS auth smoke
+test runbook.

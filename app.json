@@ -25,6 +25,8 @@
       ]
     ],
     "ios": {
+      "bundleIdentifier": "com.mh.games",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "نحتاج إلى الميكروفون لتشغيل مجالس الصوت داخل التطبيق."
