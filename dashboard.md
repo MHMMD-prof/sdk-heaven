@@ -111,7 +111,7 @@ Checkpoint commit: 192ec5947aa7310f1caa993eafe2deafe7dd2fec
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
-Review: IN_PROGRESS
+Review: PASSED
 Commit: NOT_STARTED
 
 Build the first web dashboard screen with operational summaries for users, active rooms, game sessions, moderation actions, and recent system health. Prefer aggregate documents or backend-computed summaries so the Vite site does not need broad collection scans.
@@ -133,6 +133,11 @@ Verification notes:
 - PASSED after resume: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
 - PASSED after resume: `npm --prefix functions run lint`
 - PASSED after resume: `npm test`
+
+Review notes:
+- PASSED: overview metrics are fetched through the admin-only Function, not direct client collection scans.
+- PASSED: the Vite dashboard remains isolated from Expo/React Native modules.
+- PASSED: loading, error, refresh, and ready states are represented on the overview panel.
 
 # Wave 4 - User management tools
 Status: INCOMPLETE

@@ -272,10 +272,12 @@ function OverviewPanel({
       <div className="status-grid">
         <StatusTile label="Users" value={formatCount(metrics.users)} />
         <StatusTile label="Active rooms" value={formatCount(metrics.activeRooms)} />
+        <StatusTile label="Game rooms" value={formatCount(metrics.gameRooms)} />
         <StatusTile label="Private rooms" value={formatCount(metrics.privateRooms)} />
         <StatusTile label="Moderation events" value={formatCount(metrics.moderationEvents)} />
         <StatusTile label="Reports" value={formatCount(metrics.reports)} />
         <StatusTile label="Audit events" value={formatCount(metrics.adminAuditEvents)} />
+        <StatusTile label="System" value={metrics.systemStatus === 'ok' ? 'Online' : 'Check'} />
       </div>
     </>
   );

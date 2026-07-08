@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const {
+  createAdminOverviewPayload,
   normalizeAdminDashboardBody,
   resolveAdminDashboardRequest,
 } = require('./adminDashboardCore');
@@ -41,6 +42,33 @@ describe('adminDashboardCore', () => {
         email: 'admin@example.com',
         uid: 'admin-1',
       },
+    });
+  });
+
+  it('creates a conservative overview payload from aggregate counts', () => {
+    expect(
+      createAdminOverviewPayload(
+        {
+          activeRooms: 3,
+          adminAuditEvents: 1,
+          gameRooms: 2,
+          moderationEvents: 4,
+          privateRooms: 5,
+          reports: -1,
+          users: Number.NaN,
+        },
+        '2026-07-08T00:00:00.000Z',
+      ),
+    ).toEqual({
+      activeRooms: 3,
+      adminAuditEvents: 1,
+      gameRooms: 2,
+      generatedAt: '2026-07-08T00:00:00.000Z',
+      moderationEvents: 4,
+      privateRooms: 5,
+      reports: 0,
+      systemStatus: 'ok',
+      users: 0,
     });
   });
 

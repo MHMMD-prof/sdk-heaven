@@ -9,10 +9,12 @@ export type AdminDashboardSession = {
 export type AdminOverviewMetrics = {
   activeRooms: number;
   adminAuditEvents: number;
+  gameRooms: number;
   generatedAt: string;
   moderationEvents: number;
   privateRooms: number;
   reports: number;
+  systemStatus: 'ok';
   users: number;
 };
 
@@ -94,10 +96,12 @@ function isOverviewMetrics(value: unknown): value is AdminOverviewMetrics {
   return (
     typeof metrics.activeRooms === 'number' &&
     typeof metrics.adminAuditEvents === 'number' &&
+    typeof metrics.gameRooms === 'number' &&
     typeof metrics.generatedAt === 'string' &&
     typeof metrics.moderationEvents === 'number' &&
     typeof metrics.privateRooms === 'number' &&
     typeof metrics.reports === 'number' &&
+    metrics.systemStatus === 'ok' &&
     typeof metrics.users === 'number'
   );
 }

@@ -34,8 +34,27 @@ function resolveAdminDashboardRequest({ body = {}, decodedToken }) {
   };
 }
 
+function createAdminOverviewPayload(counts, generatedAt = new Date().toISOString()) {
+  return {
+    activeRooms: readCount(counts.activeRooms),
+    adminAuditEvents: readCount(counts.adminAuditEvents),
+    gameRooms: readCount(counts.gameRooms),
+    generatedAt,
+    moderationEvents: readCount(counts.moderationEvents),
+    privateRooms: readCount(counts.privateRooms),
+    reports: readCount(counts.reports),
+    systemStatus: 'ok',
+    users: readCount(counts.users),
+  };
+}
+
+function readCount(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
 module.exports = {
   ADMIN_DASHBOARD_ACTIONS,
+  createAdminOverviewPayload,
   normalizeAdminDashboardBody,
   resolveAdminDashboardRequest,
 };

@@ -3,7 +3,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { AccessToken, TrackSource } = require('livekit-server-sdk');
 
-const { resolveAdminDashboardRequest } = require('./adminDashboardCore');
+const { createAdminOverviewPayload, resolveAdminDashboardRequest } = require('./adminDashboardCore');
 const { extractBearerToken, resolveTokenRequest } = require('./livekitTokenCore');
 const { normalizeRoomCommandBody, resolveRoomCommand } = require('./roomCommandCore');
 
@@ -308,6 +308,7 @@ async function resolveAdminOverview(db) {
   const [
     usersSnapshot,
     activeRoomsSnapshot,
+    gameRoomsSnapshot,
     privateRoomsSnapshot,
     moderationEventsSnapshot,
     reportsSnapshot,
@@ -315,21 +316,22 @@ async function resolveAdminOverview(db) {
   ] = await Promise.all([
     getCollectionCount(db.collection('users')),
     getCollectionCount(db.collection('rooms').where('status', '==', 'active')),
+    getCollectionCount(db.collection('rooms').where('type', '==', 'game')),
     getCollectionCount(db.collection('rooms').where('visibility', '==', 'private')),
     getCollectionGroupCount(db.collectionGroup('moderationEvents')),
     getCollectionCount(db.collection('reports')),
     getCollectionCount(db.collection('adminAuditEvents')),
   ]);
 
-  return {
+  return createAdminOverviewPayload({
     activeRooms: activeRoomsSnapshot,
     adminAuditEvents: auditEventsSnapshot,
+    gameRooms: gameRoomsSnapshot,
     moderationEvents: moderationEventsSnapshot,
     privateRooms: privateRoomsSnapshot,
     reports: reportsSnapshot,
     users: usersSnapshot,
-    generatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 async function getCollectionCount(query) {
