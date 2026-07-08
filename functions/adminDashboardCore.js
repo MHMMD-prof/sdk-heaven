@@ -1,10 +1,47 @@
 const { hasAdminClaim } = require('./adminClaimsCore');
 
-const ADMIN_DASHBOARD_ACTIONS = ['overview', 'session'];
+const ADMIN_DASHBOARD_ACTIONS = ['overview', 'session', 'user-note', 'users'];
+const MAX_USER_RESULTS = 25;
+const MAX_USER_SEARCH_SCAN_RESULTS = 100;
 
 function normalizeAdminDashboardBody(body = {}) {
   return {
     action: typeof body.action === 'string' ? body.action.trim() : '',
+  };
+}
+
+function normalizeAdminUsersQuery(body = {}) {
+  const rawLimit = Number(body.limit);
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_USER_RESULTS)
+    : MAX_USER_RESULTS;
+  const search = typeof body.search === 'string' ? body.search.trim().toLowerCase().slice(0, 80) : '';
+
+  return {
+    limit,
+    readLimit: search ? MAX_USER_SEARCH_SCAN_RESULTS : limit,
+    search,
+  };
+}
+
+function normalizeAdminUserNote(body = {}) {
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+  const targetUid = typeof body.targetUid === 'string' ? body.targetUid.trim() : '';
+
+  if (!targetUid) {
+    return { ok: false, status: 400, error: 'targetUid is required.' };
+  }
+
+  if (note.length < 2) {
+    return { ok: false, status: 400, error: 'A note with at least 2 characters is required.' };
+  }
+
+  return {
+    ok: true,
+    value: {
+      note,
+      targetUid,
+    },
   };
 }
 
@@ -48,13 +85,60 @@ function createAdminOverviewPayload(counts, generatedAt = new Date().toISOString
   };
 }
 
+function mapAdminUserProfileDocument(id, data = {}) {
+  const uid = typeof data.uid === 'string' && data.uid.trim() ? data.uid.trim() : id;
+
+  if (!uid) {
+    return null;
+  }
+
+  return {
+    avatarLabel: typeof data.avatarLabel === 'string' ? data.avatarLabel.trim().slice(0, 2) : '',
+    displayName: typeof data.displayName === 'string' ? data.displayName.trim() : '',
+    email: typeof data.email === 'string' ? data.email.trim() : '',
+    uid,
+    updatedAt: readTimestampIso(data.updatedAt),
+  };
+}
+
+function filterAdminUserRows(rows, search) {
+  if (!search) {
+    return rows;
+  }
+
+  return rows.filter((row) => {
+    const haystack = `${row.uid} ${row.email} ${row.displayName}`.toLowerCase();
+    return haystack.includes(search);
+  });
+}
+
 function readCount(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function readTimestampIso(value) {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (value && typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate().toISOString();
+  }
+
+  if (value && typeof value === 'object' && typeof value.toMillis === 'function') {
+    return new Date(value.toMillis()).toISOString();
+  }
+
+  return '';
 }
 
 module.exports = {
   ADMIN_DASHBOARD_ACTIONS,
   createAdminOverviewPayload,
+  filterAdminUserRows,
+  mapAdminUserProfileDocument,
+  normalizeAdminUserNote,
+  normalizeAdminUsersQuery,
   normalizeAdminDashboardBody,
   resolveAdminDashboardRequest,
 };

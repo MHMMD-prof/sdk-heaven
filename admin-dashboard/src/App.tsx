@@ -2,10 +2,13 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'f
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
+  createAdminUserNote,
   requestAdminDashboardSession,
   requestAdminOverview,
+  requestAdminUsers,
   AdminDashboardSession,
   AdminOverviewMetrics,
+  AdminUserRow,
 } from './adminDashboardApi';
 import { firebaseAuth } from './firebase';
 
@@ -70,6 +73,13 @@ export function App() {
     | { status: 'ready'; metrics: AdminOverviewMetrics }
     | { status: 'error'; message: string }
   >({ status: 'idle' });
+  const [usersState, setUsersState] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; users: AdminUserRow[] }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' });
+  const [userSearch, setUserSearch] = useState('');
 
   useEffect(() => {
     return onAuthStateChanged(firebaseAuth, async (user) => {
@@ -112,6 +122,14 @@ export function App() {
     void loadOverview(authState.user);
   }, [activeRoute.key, authState]);
 
+  useEffect(() => {
+    if (authState.status !== 'admin' || activeRoute.key !== 'users') {
+      return;
+    }
+
+    void loadUsers(authState.user, userSearch);
+  }, [activeRoute.key, authState]);
+
   function navigateToRoute(route: DashboardRoute) {
     if (route.path !== window.location.pathname) {
       window.history.pushState({}, '', route.path);
@@ -130,6 +148,20 @@ export function App() {
       setOverviewState({
         status: 'error',
         message: error instanceof Error ? error.message : 'Admin overview is unavailable.',
+      });
+    }
+  }
+
+  async function loadUsers(user: User, search: string) {
+    setUsersState({ status: 'loading' });
+
+    try {
+      const users = await requestAdminUsers(user, search);
+      setUsersState({ status: 'ready', users });
+    } catch (error) {
+      setUsersState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Admin users are unavailable.',
       });
     }
   }
@@ -182,7 +214,7 @@ export function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-          <p className="eyebrow">Admin session</p>
+            <p className="eyebrow">Admin session</p>
             <h2>{activeRoute.title}</h2>
           </div>
           <div className="session-pill">{authState.session.email || authState.session.uid}</div>
@@ -193,6 +225,14 @@ export function App() {
             <OverviewPanel
               onRefresh={() => void loadOverview(authState.user)}
               overviewState={overviewState}
+            />
+          ) : activeRoute.key === 'users' ? (
+            <UsersPanel
+              onCreateNote={(targetUid, note) => createAdminUserNote(authState.user, targetUid, note)}
+              onRefresh={() => void loadUsers(authState.user, userSearch)}
+              onSearchChange={setUserSearch}
+              search={userSearch}
+              usersState={usersState}
             />
           ) : (
             <>
@@ -211,6 +251,115 @@ export function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function UsersPanel({
+  onCreateNote,
+  onRefresh,
+  onSearchChange,
+  search,
+  usersState,
+}: {
+  onCreateNote: (targetUid: string, note: string) => Promise<string>;
+  onRefresh: () => void;
+  onSearchChange: (search: string) => void;
+  search: string;
+  usersState:
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; users: AdminUserRow[] }
+    | { status: 'error'; message: string };
+}) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onRefresh();
+  }
+
+  return (
+    <div className="user-management">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Users</p>
+          <h3>User review</h3>
+          <p>Review matching profile records and preserve internal notes.</p>
+        </div>
+        <form className="search-form" onSubmit={handleSubmit}>
+          <input
+            aria-label="Search users"
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search email, uid, or name"
+            value={search}
+          />
+          <button className="secondary-button compact" type="submit">
+            Search
+          </button>
+        </form>
+      </div>
+
+      {usersState.status === 'error' ? <p className="error-text">{usersState.message}</p> : null}
+      {usersState.status === 'loading' || usersState.status === 'idle' ? (
+        <p className="muted-text">Loading user records.</p>
+      ) : null}
+      {usersState.status === 'ready' && usersState.users.length === 0 ? (
+        <p className="muted-text">No matching users.</p>
+      ) : null}
+      {usersState.status === 'ready' && usersState.users.length > 0 ? (
+        <div className="user-list">
+          {usersState.users.map((userRow) => (
+            <UserReviewRow key={userRow.uid} onCreateNote={onCreateNote} userRow={userRow} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function UserReviewRow({
+  onCreateNote,
+  userRow,
+}: {
+  onCreateNote: (targetUid: string, note: string) => Promise<string>;
+  userRow: AdminUserRow;
+}) {
+  const [note, setNote] = useState('');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus('saving');
+
+    try {
+      await onCreateNote(userRow.uid, note);
+      setNote('');
+      setStatus('saved');
+    } catch {
+      setStatus('error');
+    }
+  }
+
+  return (
+    <article className="user-row">
+      <div className="avatar-chip">{userRow.avatarLabel || '?'}</div>
+      <div className="user-main">
+        <strong>{userRow.displayName || 'Unnamed user'}</strong>
+        <span>{userRow.email || userRow.uid}</span>
+        <small>{userRow.updatedAt ? `Updated ${formatDateTime(userRow.updatedAt)}` : userRow.uid}</small>
+      </div>
+      <form className="note-form" onSubmit={handleSubmit}>
+        <input
+          aria-label={`Admin note for ${userRow.displayName || userRow.uid}`}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Add note"
+          value={note}
+        />
+        <button className="secondary-button compact" disabled={status === 'saving' || note.trim().length < 2} type="submit">
+          Save
+        </button>
+        {status === 'saved' ? <span className="note-status">Saved</span> : null}
+        {status === 'error' ? <span className="note-status error-text">Failed</span> : null}
+      </form>
+    </article>
   );
 }
 

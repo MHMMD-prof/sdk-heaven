@@ -3,7 +3,14 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { AccessToken, TrackSource } = require('livekit-server-sdk');
 
-const { createAdminOverviewPayload, resolveAdminDashboardRequest } = require('./adminDashboardCore');
+const {
+  createAdminOverviewPayload,
+  filterAdminUserRows,
+  mapAdminUserProfileDocument,
+  normalizeAdminUserNote,
+  normalizeAdminUsersQuery,
+  resolveAdminDashboardRequest,
+} = require('./adminDashboardCore');
 const { extractBearerToken, resolveTokenRequest } = require('./livekitTokenCore');
 const { normalizeRoomCommandBody, resolveRoomCommand } = require('./roomCommandCore');
 
@@ -294,6 +301,43 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'users') {
+      try {
+        const users = await resolveAdminUsers(admin.firestore(), request.body);
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          users,
+        });
+      } catch (error) {
+        console.error('Failed to resolve admin users:', error);
+        response.status(500).json({ error: 'Failed to resolve admin users.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'user-note') {
+      const note = normalizeAdminUserNote(request.body);
+
+      if (!note.ok) {
+        response.status(note.status).json({ error: note.error });
+        return;
+      }
+
+      try {
+        const noteId = await createAdminUserNote(admin.firestore(), decodedToken, note.value);
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          noteId,
+        });
+      } catch (error) {
+        console.error('Failed to create admin user note:', error);
+        response.status(500).json({ error: 'Failed to create admin user note.' });
+      }
+      return;
+    }
+
     response.json({
       ok: true,
       action: dashboardRequest.value.action,
@@ -332,6 +376,34 @@ async function resolveAdminOverview(db) {
     reports: reportsSnapshot,
     users: usersSnapshot,
   });
+}
+
+async function resolveAdminUsers(db, body) {
+  const query = normalizeAdminUsersQuery(body);
+  const snapshot = await db
+    .collection('users')
+    .orderBy('displayName')
+    .limit(query.readLimit)
+    .get();
+  const rows = snapshot.docs
+    .map((doc) => mapAdminUserProfileDocument(doc.id, doc.data()))
+    .filter(Boolean);
+
+  return filterAdminUserRows(rows, query.search).slice(0, query.limit);
+}
+
+async function createAdminUserNote(db, decodedToken, note) {
+  const noteRef = db.collection('adminUserNotes').doc();
+
+  await noteRef.set({
+    actorEmail: decodedToken.email || '',
+    actorUid: decodedToken.uid,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    note: note.note,
+    targetUid: note.targetUid,
+  });
+
+  return noteRef.id;
 }
 
 async function getCollectionCount(query) {

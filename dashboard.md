@@ -152,8 +152,27 @@ Review notes:
 
 # Wave 4 - User management tools
 Status: INCOMPLETE
+Checkpoint commit: 6de0b5b2e7b5aa8f42df7292e973f60a054ea89f
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: IN_PROGRESS
+Review: IN_PROGRESS
+Commit: NOT_STARTED
 
 Add searchable user profile review with account status, profile metadata, recent room activity, and safe admin actions. Support limited actions first, such as profile review flags or account notes, and defer destructive account actions until lifecycle flows are fully designed.
+
+Wave 4 implementation plan:
+- Touched files: extend the admin dashboard Function core and HTTP handler with `users` and `user-note` actions, add tests for user query/note normalization and user row mapping, update Firestore rules for explicit admin note access boundaries, and update the Vite Users route with backend-limited search, refresh, loading/error/empty states, and note submission.
+- Risks: broad client collection scans, exposing private user data, destructive account operations, or client-side writes to admin note collections. Keep user reads/writes behind the admin-only Function, return safe profile fields only, cap result limits, and support notes as append-only backend writes.
+- Required tests/checks: run focused Functions tests, `npm --prefix functions run lint`, `npm --prefix admin-dashboard run typecheck`, `npm --prefix admin-dashboard run build`, and root `npm test`. Do not run Firebase emulator commands in this wave.
+- Rollback considerations: revert the Wave 4 implementation commit to remove user search/note actions, tests, and dashboard Users UI; checkpoint `6de0b5b2e7b5aa8f42df7292e973f60a054ea89f` preserves the pre-Wave 4 state.
+
+Verification notes:
+- PASSED: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED: `npm --prefix functions run lint`
+- PASSED: `npm --prefix admin-dashboard run typecheck`
+- PASSED: `npm test`
+- BLOCKED then passed after resume: `npm --prefix admin-dashboard run build` initially could not run because the app approval gate rejected the required filesystem escalation after the account usage limit was reached; rerun passed.
 
 # Wave 5 - Room and voice moderation console
 Status: INCOMPLETE

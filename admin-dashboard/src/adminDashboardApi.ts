@@ -18,6 +18,14 @@ export type AdminOverviewMetrics = {
   users: number;
 };
 
+export type AdminUserRow = {
+  avatarLabel: string;
+  displayName: string;
+  email: string;
+  uid: string;
+  updatedAt: string;
+};
+
 type AdminDashboardResponse = AdminDashboardSession & {
   error?: string;
   ok: boolean;
@@ -27,6 +35,18 @@ type AdminOverviewResponse = {
   error?: string;
   ok: boolean;
   overview?: Partial<AdminOverviewMetrics>;
+};
+
+type AdminUsersResponse = {
+  error?: string;
+  ok: boolean;
+  users?: unknown;
+};
+
+type AdminUserNoteResponse = {
+  error?: string;
+  noteId?: string;
+  ok: boolean;
 };
 
 function getFunctionsBaseUrl() {
@@ -64,9 +84,39 @@ export async function requestAdminOverview(user: User): Promise<AdminOverviewMet
   return overview;
 }
 
+export async function requestAdminUsers(user: User, search: string): Promise<AdminUserRow[]> {
+  const payload = await requestAdminDashboard<AdminUsersResponse>(user, {
+    action: 'users',
+    search,
+  });
+
+  if (payload.ok !== true || !Array.isArray(payload.users)) {
+    throw new Error(payload.error || 'Admin users are unavailable.');
+  }
+
+  return payload.users.filter(isAdminUserRow);
+}
+
+export async function createAdminUserNote(user: User, targetUid: string, note: string): Promise<string> {
+  const payload = await requestAdminDashboard<AdminUserNoteResponse>(user, {
+    action: 'user-note',
+    note,
+    targetUid,
+  });
+
+  if (payload.ok !== true || !payload.noteId) {
+    throw new Error(payload.error || 'Admin user note could not be saved.');
+  }
+
+  return payload.noteId;
+}
+
 async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>(
   user: User,
-  body: { action: 'overview' | 'session' },
+  body:
+    | { action: 'overview' | 'session' }
+    | { action: 'users'; search: string }
+    | { action: 'user-note'; note: string; targetUid: string },
 ): Promise<T> {
   const token = await user.getIdToken();
   const response = await fetch(`${getFunctionsBaseUrl()}/adminDashboard`, {
@@ -85,6 +135,21 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
   }
 
   return payload;
+}
+
+function isAdminUserRow(value: unknown): value is AdminUserRow {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.avatarLabel === 'string' &&
+    typeof row.displayName === 'string' &&
+    typeof row.email === 'string' &&
+    typeof row.uid === 'string' &&
+    typeof row.updatedAt === 'string'
+  );
 }
 
 function isOverviewMetrics(value: unknown): value is AdminOverviewMetrics {
