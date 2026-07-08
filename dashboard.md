@@ -155,8 +155,8 @@ Status: INCOMPLETE
 Checkpoint commit: 6de0b5b2e7b5aa8f42df7292e973f60a054ea89f
 Plan: COMPLETE
 Implementation: COMPLETE
-Verification: IN_PROGRESS
-Review: IN_PROGRESS
+Verification: PASSED
+Review: PASSED
 Commit: NOT_STARTED
 
 Add searchable user profile review with account status, profile metadata, recent room activity, and safe admin actions. Support limited actions first, such as profile review flags or account notes, and defer destructive account actions until lifecycle flows are fully designed.
@@ -173,6 +173,17 @@ Verification notes:
 - PASSED: `npm --prefix admin-dashboard run typecheck`
 - PASSED: `npm test`
 - BLOCKED then passed after resume: `npm --prefix admin-dashboard run build` initially could not run because the app approval gate rejected the required filesystem escalation after the account usage limit was reached; rerun passed.
+- PASSED after review fix: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED after review fix: `npm --prefix functions run lint`
+- PASSED after review fix: `npm --prefix admin-dashboard run typecheck`
+- PASSED after review fix: `npm --prefix admin-dashboard run build` with approved filesystem access after sandbox denial.
+- PASSED after review fix: `npm test`
+
+Review notes:
+- PASSED after fix: user search keeps returned rows capped at 25 while scanning a bounded 100 rows when a search term is present, avoiding a misleading first-page-only search.
+- PASSED: user reads and note writes remain behind the admin-only Function; the Vite client does not scan Firestore or write notes directly.
+- PASSED after final review fix: `adminUserNotes` has explicit Firestore admin-read/client-write-denied rules.
+- PASSED: no destructive account actions, mobile app imports, Expo dependencies, or emulator-only requirements were added.
 
 # Wave 5 - Room and voice moderation console
 Status: INCOMPLETE

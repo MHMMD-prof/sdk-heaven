@@ -104,6 +104,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /adminUserNotes/{noteId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /adminProfiles/{userId} {
       allow read: if isAdmin();
       allow write: if false;
