@@ -3,15 +3,16 @@
 This file tracks missed app features and production polish waves that can be implemented incrementally by Codex.
 
 # Wave 0 — Arabic copy and mojibake cleanup
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint: 1b28cd5
+Implementation Commit: 41c7a69
 
 Phase Status:
 - Plan: COMPLETE
 - Implementation: COMPLETE
 - Verification: PASSED
 - Review: PASSED
-- Commit: BLOCKED
+- Commit: COMPLETE
 
 Implementation Plan:
 - Touched files: scan reachable UI/source/test/data/docs files for mojibake markers, then edit only files that contain broken copy for this wave.
@@ -25,7 +26,7 @@ Verification Notes:
 - `npm test` passed: 37 files, 284 tests.
 
 Remaining:
-- Commit phase is blocked because sandboxed Git cannot create `.git/index.lock`, and escalated `git add` was rejected by the app approval/usage limit. Resume by staging only Wave 0 files and creating the implementation commit.
+- None.
 
 Fix broken Arabic/mojibake text across reachable screens, data files, validation messages, and release-path copy. Keep existing UI behavior unchanged, prefer valid UTF-8 Arabic strings, and add or update targeted tests where release gates already check for broken copy.
 
