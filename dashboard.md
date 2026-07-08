@@ -188,13 +188,14 @@ Review notes:
 - PASSED: no destructive account actions, mobile app imports, Expo dependencies, or emulator-only requirements were added.
 
 # Wave 5 - Room and voice moderation console
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint commit: 446afc44dbd345b95682af2e526886cafcf6d29d
+Implementation commit: 0d1825703b97f74bb21bd90fe140e3e752c548ad
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Add admin room discovery across active and recently closed rooms, including host, participant counts, member status, moderation history, and room close/remove actions. Reuse existing room moderation events where possible and write every admin action to an audit trail.
 
