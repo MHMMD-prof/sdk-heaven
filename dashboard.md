@@ -106,13 +106,14 @@ Review notes:
 - PASSED after fix: section navigation uses browser history routes and placeholder copy is operational empty-state text, not future-feature instructions.
 
 # Wave 3 - Admin overview metrics
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint commit: 192ec5947aa7310f1caa993eafe2deafe7dd2fec
+Implementation commit: 17a2168865c96970a1c601ce20d458c61acc6fbe
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Build the first web dashboard screen with operational summaries for users, active rooms, game sessions, moderation actions, and recent system health. Prefer aggregate documents or backend-computed summaries so the Vite site does not need broad collection scans.
 
@@ -133,6 +134,16 @@ Verification notes:
 - PASSED after resume: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
 - PASSED after resume: `npm --prefix functions run lint`
 - PASSED after resume: `npm test`
+- PASSED after overview payload review fix: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED after overview payload review fix: `npm --prefix functions run lint`
+- PASSED after overview payload review fix: `npm --prefix admin-dashboard run typecheck`
+- PASSED after overview payload review fix: `npm --prefix admin-dashboard run build`
+- PASSED after overview payload review fix: `npm test`
+
+Review notes:
+- PASSED: Overview data is fetched through the admin-only backend Function; the Vite client does not scan Firestore collections.
+- PASSED after fix: Overview payload includes user, active-room, game-room, moderation, report, audit, generated timestamp, and system status fields.
+- PASSED: No Expo, React Native, mobile navigation, secrets, or emulator commands were added for this wave.
 
 Review notes:
 - PASSED: overview metrics are fetched through the admin-only Function, not direct client collection scans.
