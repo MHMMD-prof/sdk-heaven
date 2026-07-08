@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const mojibakePattern = new RegExp(
-  `[${String.fromCharCode(0x00c2, 0x00c3, 0x00e2, 0x0153, 0xfffd)}]`,
+  `[${String.fromCharCode(0x00c2, 0x00c3, 0x00d8, 0x00d9, 0x00e2, 0x0153, 0xfffd)}]`,
 );
 
 const sourceRoots = [
