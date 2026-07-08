@@ -63,7 +63,37 @@ Remaining:
 Add Firestore-backed room presence using client heartbeats, fresh presence filtering, leave cleanup, and active speaker/listener counts. Keep room membership as the authorization source and use presence only for live availability, counts, and UI freshness.
 
 # Wave 2 — Private rooms and invite codes
-Status: INCOMPLETE
+Status: COMPLETE
+Checkpoint: 4a711b7
+Implementation Commit: 8f7ccd1
+
+Phase Status:
+- Plan: COMPLETE
+- Implementation: COMPLETE
+- Verification: PASSED
+- Review: PASSED
+- Commit: COMPLETE
+
+Implementation Plan:
+- Touched files: `src/screens/GroupsScreen.tsx` plus existing private-room provider/core/rules/tests.
+- Risks: private rooms must stay hidden from public discovery, public rooms must keep existing behavior, and invite codes must not bypass membership authorization.
+- Required tests: focused room profile tests, copy encoding test, `npx tsc --noEmit`, `npm test`, and rules tests if the emulator is available.
+- Rollback: revert to checkpoint commit `4a711b7` or revert the final Wave 2 implementation/tracker commits once created.
+
+Verification Notes:
+- PASSED: `npx vitest run src/voice/__tests__/roomProfile.test.ts src/__tests__/copyEncoding.test.ts`
+- PASSED: `npx tsc --noEmit`
+- PASSED: `npm test`
+- PASSED: `npm run test:rules` after sandboxed npm cache/network access failed and the check was rerun with escalation.
+- PASSED after review fix: focused room profile/copy tests, `npx tsc --noEmit`, and `npm test`.
+
+Review Notes:
+- PASSED: public room creation and joining still use the existing `createRoom`/`joinRoom` paths.
+- PASSED: private room creation now requires an explicit invite code in the UI and uses `createPrivateRoom`.
+- PASSED: private room joining uses separate room id and invite code state and calls `joinPrivateRoom` without exposing private rooms in public discovery.
+
+Remaining:
+- None.
 
 Add private room visibility, invite code creation, invite-based joining, and discovery rules so private rooms are hidden unless the signed-in user is invited or already a member. Keep public rooms working as they do today.
 
