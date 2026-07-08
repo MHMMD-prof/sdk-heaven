@@ -213,6 +213,6 @@ describe('Battleship persistence', () => {
       )
       .join('\n');
 
-    expect(source).not.toMatch(/[Ãâœ]/);
+    expect(source).not.toMatch(new RegExp(`[${String.fromCharCode(0x00c3, 0x00e2, 0x0153)}]`));
   });
 });

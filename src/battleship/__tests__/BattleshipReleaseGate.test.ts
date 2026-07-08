@@ -346,7 +346,7 @@ describe('Battleship release gate', () => {
       .join('\n');
 
     expect(source).not.toMatch(/\b(experimental|prototype|debug|wave|online)\b/i);
-    expect(source).not.toMatch(/[Ãâœ]/);
+    expect(source).not.toMatch(new RegExp(`[${String.fromCharCode(0x00c3, 0x00e2, 0x0153)}]`));
     expect(source).toContain('passConfirmHint');
     expect(source).toContain('resumeMatchHint');
     expect(source).toContain('confirmBattleResetMessage');
