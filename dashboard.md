@@ -151,13 +151,14 @@ Review notes:
 - PASSED: loading, error, refresh, and ready states are represented on the overview panel.
 
 # Wave 4 - User management tools
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint commit: 6de0b5b2e7b5aa8f42df7292e973f60a054ea89f
+Implementation commit: 00f97938e89fb276d897d2e54fe4ee598157f0af
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Add searchable user profile review with account status, profile metadata, recent room activity, and safe admin actions. Support limited actions first, such as profile review flags or account notes, and defer destructive account actions until lifecycle flows are fully designed.
 
@@ -180,6 +181,7 @@ Verification notes:
 - PASSED after review fix: `npm test`
 
 Review notes:
+- NOTE: The main Wave 4 user-management code was already captured in commit `012ce98` during a later checkpoint before this resume; implementation commit `00f97938e89fb276d897d2e54fe4ee598157f0af` finalizes the wave with tracker updates and explicit admin note rules.
 - PASSED after fix: user search keeps returned rows capped at 25 while scanning a bounded 100 rows when a search term is present, avoiding a misleading first-page-only search.
 - PASSED: user reads and note writes remain behind the admin-only Function; the Vite client does not scan Firestore or write notes directly.
 - PASSED after final review fix: `adminUserNotes` has explicit Firestore admin-read/client-write-denied rules.
