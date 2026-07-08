@@ -95,9 +95,25 @@ Wave 8 implementation plan:
 - Completed with implementation commit `15782a0`.
 
 # Wave 9 — Account lifecycle and security UX
-Status: INCOMPLETE
+Status: COMPLETE
+Checkpoint: fc588b9
+Implementation commit: 1ce34af
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: COMPLETE
 
 Add production account settings: edit profile, change/reset password entry points, account deletion request flow, reauth handling, and user-facing security/error states.
+
+Wave 9 implementation plan:
+- Extend auth APIs with profile editing reuse, password reset for the current email, and an account deletion request document rather than destructive client-side deletion.
+- Add an account/settings screen reachable from the main app header for profile edits, password reset entry point, sign-out, and account deletion request UX.
+- Add a `users/{uid}/accountDeletionRequests/{requestId}` client-write path with strict owner-only Firestore rules and no immediate account deletion.
+- Add tests for account deletion request payload validation/mapping, auth API behavior where unit-testable, and navigation type/gate coverage as appropriate.
+- Run `npx tsc --noEmit` and `npm test`. Avoid running Java-based rules emulator unless rules changed in a way that requires it; if rules change, run `npm run test:rules` and expect a local Java firewall prompt.
+- Rollback: revert the Wave 9 implementation commit after checkpoint `fc588b9`; full reset to `fc588b9` is destructive and requires explicit approval.
+- Completed with implementation commit `1ce34af`.
 
 # Wave 10 — iOS Firebase setup
 Status: INCOMPLETE
