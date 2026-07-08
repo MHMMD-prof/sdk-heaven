@@ -5,7 +5,10 @@ const require = createRequire(import.meta.url);
 const {
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminRoomAction,
+  normalizeAdminRoomsQuery,
   normalizeAdminUserNote,
   normalizeAdminUsersQuery,
   normalizeAdminDashboardBody,
@@ -60,6 +63,17 @@ describe('adminDashboardCore', () => {
     });
   });
 
+  it('allows verified custom-claim admins to resolve room moderation requests', () => {
+    expect(resolveAdminDashboardRequest({ body: { action: 'rooms' }, decodedToken: adminToken })).toMatchObject({
+      ok: true,
+      value: { action: 'rooms' },
+    });
+    expect(resolveAdminDashboardRequest({ body: { action: 'room-action' }, decodedToken: adminToken })).toMatchObject({
+      ok: true,
+      value: { action: 'room-action' },
+    });
+  });
+
   it('creates a conservative overview payload from aggregate counts', () => {
     expect(
       createAdminOverviewPayload(
@@ -109,6 +123,37 @@ describe('adminDashboardCore', () => {
     expect(normalizeAdminUserNote({ targetUid: 'user-1', note: 'x' })).toMatchObject({ ok: false, status: 400 });
   });
 
+  it('normalizes room queries and safe room actions', () => {
+    expect(normalizeAdminRoomsQuery({ limit: 250, status: 'closed' })).toEqual({
+      limit: 25,
+      status: 'closed',
+    });
+    expect(normalizeAdminRoomsQuery({ limit: 12, status: 'unknown' })).toEqual({
+      limit: 12,
+      status: 'active',
+    });
+    expect(normalizeAdminRoomAction({ roomAction: 'close-room', roomId: ' room-1 ', reason: ' done ' })).toEqual({
+      ok: true,
+      value: {
+        action: 'close-room',
+        reason: 'done',
+        roomId: 'room-1',
+        targetUid: '',
+      },
+    });
+    expect(normalizeAdminRoomAction({ roomAction: 'remove-member', roomId: 'room-1', targetUid: 'user-2' })).toEqual({
+      ok: true,
+      value: {
+        action: 'remove-member',
+        reason: '',
+        roomId: 'room-1',
+        targetUid: 'user-2',
+      },
+    });
+    expect(normalizeAdminRoomAction({ roomAction: 'delete-room', roomId: 'room-1' })).toMatchObject({ ok: false, status: 400 });
+    expect(normalizeAdminRoomAction({ roomAction: 'remove-member', roomId: 'room-1' })).toMatchObject({ ok: false, status: 400 });
+  });
+
   it('maps and filters safe admin user profile rows', () => {
     const updatedAt = { toMillis: () => Date.parse('2026-07-08T00:00:00.000Z') };
     const row = mapAdminUserProfileDocument('user-1', {
@@ -127,6 +172,38 @@ describe('adminDashboardCore', () => {
     });
     expect(filterAdminUserRows([row], 'example')).toEqual([row]);
     expect(filterAdminUserRows([row], 'missing')).toEqual([]);
+  });
+
+  it('maps safe admin room rows without invite codes', () => {
+    const updatedAt = { toDate: () => new Date('2026-07-08T01:00:00.000Z') };
+    expect(
+      mapAdminRoomDocument('room-1', {
+        currentGameId: 'game-1',
+        hostAvatarLabel: 'H',
+        hostDisplayName: ' Host ',
+        hostId: 'host-1',
+        inviteCode: 'SECRET',
+        participantCount: 4,
+        status: 'active',
+        title: ' Lobby ',
+        type: 'voice',
+        updatedAt,
+        visibility: 'private',
+      }),
+    ).toEqual({
+      createdAt: '',
+      currentGameId: 'game-1',
+      hostAvatarLabel: 'H',
+      hostDisplayName: 'Host',
+      hostId: 'host-1',
+      id: 'room-1',
+      participantCount: 4,
+      status: 'active',
+      title: 'Lobby',
+      type: 'voice',
+      updatedAt: '2026-07-08T01:00:00.000Z',
+      visibility: 'private',
+    });
   });
 
   it('rejects unverified, non-admin, and malformed dashboard requests', () => {

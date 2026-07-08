@@ -189,8 +189,37 @@ Review notes:
 
 # Wave 5 - Room and voice moderation console
 Status: INCOMPLETE
+Checkpoint commit: 446afc44dbd345b95682af2e526886cafcf6d29d
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: NOT_STARTED
 
 Add admin room discovery across active and recently closed rooms, including host, participant counts, member status, moderation history, and room close/remove actions. Reuse existing room moderation events where possible and write every admin action to an audit trail.
+
+Wave 5 implementation plan:
+- Touched files: extend the admin dashboard Function core and HTTP handler with room discovery and safe room moderation actions, add focused Functions tests for room row/action normalization, update Firestore rules for explicit admin audit/moderation boundaries if needed, and update the Vite Rooms route with backend-limited filters, refresh, loading/error/empty states, room metadata, and safe close/remove controls.
+- Risks: broad client collection scans, destructive room changes without audit records, exposing private room invite data beyond admin-only responses, duplicating existing room moderation logic, or importing Expo/mobile modules into the Vite dashboard. Keep room reads and writes behind the admin-only Function, cap result sizes, write backend audit events for every moderation action, and avoid emulator-only flows in this wave.
+- Required tests/checks: run focused Functions tests, `npm --prefix functions run lint`, `npm --prefix admin-dashboard run typecheck`, `npm --prefix admin-dashboard run build`, and root `npm test`. Do not run Firebase emulator commands in this wave.
+- Rollback considerations: revert the Wave 5 implementation commit to remove admin room discovery/action APIs, tests, rules updates, and dashboard Rooms UI; checkpoint `446afc44dbd345b95682af2e526886cafcf6d29d` preserves the pre-Wave 5 state.
+
+Verification notes:
+- PASSED: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED: `npm --prefix functions run lint`
+- PASSED: `npm --prefix admin-dashboard run typecheck`
+- PASSED: `npm --prefix admin-dashboard run build`
+- PASSED: `npm test`
+- PASSED after review fix: `npm --prefix functions run lint`
+- PASSED after review fix: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED after review fix: `npm test`
+
+Review notes:
+- PASSED: Room discovery and close/remove-member actions are routed through the admin-only Function; the Vite client does not scan Firestore directly.
+- PASSED: Room rows omit invite codes and private secrets while preserving operational room metadata.
+- PASSED after fix: expected admin room action conflicts return clear 4xx responses instead of generic 500s.
+- PASSED: Successful room actions write both room moderation events and immutable admin audit events.
+- PASSED: No Expo, React Native, mobile navigation, destructive deletes, or emulator commands were added for this wave.
 
 # Wave 6 - Reports and abuse workflow
 Status: INCOMPLETE

@@ -218,7 +218,8 @@ button:disabled {
 }
 
 .search-form input,
-.note-form input {
+.note-form input,
+.room-actions input {
   background: #0e1117;
   border: 1px solid #2c3442;
   border-radius: 6px;
@@ -232,6 +233,104 @@ button:disabled {
   display: grid;
   gap: 18px;
   grid-column: 1 / -1;
+}
+
+.room-management {
+  display: grid;
+  gap: 18px;
+  grid-column: 1 / -1;
+}
+
+.toolbar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.segmented-control {
+  background: #10151e;
+  border: 1px solid #273141;
+  border-radius: 6px;
+  display: flex;
+  padding: 3px;
+}
+
+.segmented-control button {
+  background: transparent;
+  border-radius: 4px;
+  color: #cdd4df;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.segmented-control button.selected {
+  background: #d6ad5c;
+  color: #17130b;
+  font-weight: 750;
+}
+
+.room-list {
+  display: grid;
+  gap: 10px;
+}
+
+.room-row {
+  align-items: start;
+  background: #10151e;
+  border: 1px solid #273141;
+  border-radius: 6px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(260px, 1fr) minmax(320px, 0.95fr);
+  padding: 14px;
+}
+
+.room-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.room-main strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-main small {
+  color: #9ea8b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.room-meta span {
+  background: #151a23;
+  border: 1px solid #273141;
+  border-radius: 999px;
+  color: #cdd4df;
+  font-size: 0.82rem;
+  padding: 4px 8px;
+}
+
+.room-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.action-buttons {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .user-list {
@@ -329,8 +428,17 @@ button:disabled {
   }
 
   .section-header,
-  .search-form {
+  .search-form,
+  .toolbar {
     flex-direction: column;
+  }
+
+  .toolbar {
+    align-items: stretch;
+  }
+
+  .room-row {
+    grid-template-columns: 1fr;
   }
 
   .user-row {

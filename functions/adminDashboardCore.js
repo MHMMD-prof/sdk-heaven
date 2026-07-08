@@ -1,6 +1,9 @@
 const { hasAdminClaim } = require('./adminClaimsCore');
 
-const ADMIN_DASHBOARD_ACTIONS = ['overview', 'session', 'user-note', 'users'];
+const ADMIN_DASHBOARD_ACTIONS = ['overview', 'room-action', 'rooms', 'session', 'user-note', 'users'];
+const ADMIN_ROOM_ACTIONS = ['close-room', 'remove-member'];
+const ADMIN_ROOM_STATUSES = ['active', 'closed'];
+const MAX_ROOM_RESULTS = 25;
 const MAX_USER_RESULTS = 25;
 const MAX_USER_SEARCH_SCAN_RESULTS = 100;
 
@@ -24,6 +27,21 @@ function normalizeAdminUsersQuery(body = {}) {
   };
 }
 
+function normalizeAdminRoomsQuery(body = {}) {
+  const rawLimit = Number(body.limit);
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_ROOM_RESULTS)
+    : MAX_ROOM_RESULTS;
+  const status = typeof body.status === 'string' && ADMIN_ROOM_STATUSES.includes(body.status.trim())
+    ? body.status.trim()
+    : 'active';
+
+  return {
+    limit,
+    status,
+  };
+}
+
 function normalizeAdminUserNote(body = {}) {
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
   const targetUid = typeof body.targetUid === 'string' ? body.targetUid.trim() : '';
@@ -40,6 +58,35 @@ function normalizeAdminUserNote(body = {}) {
     ok: true,
     value: {
       note,
+      targetUid,
+    },
+  };
+}
+
+function normalizeAdminRoomAction(body = {}) {
+  const action = typeof body.roomAction === 'string' ? body.roomAction.trim() : '';
+  const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 240) : '';
+  const roomId = typeof body.roomId === 'string' ? body.roomId.trim() : '';
+  const targetUid = typeof body.targetUid === 'string' ? body.targetUid.trim() : '';
+
+  if (!ADMIN_ROOM_ACTIONS.includes(action)) {
+    return { ok: false, status: 400, error: 'Valid room action is required.' };
+  }
+
+  if (!roomId) {
+    return { ok: false, status: 400, error: 'roomId is required.' };
+  }
+
+  if (action === 'remove-member' && !targetUid) {
+    return { ok: false, status: 400, error: 'targetUid is required.' };
+  }
+
+  return {
+    ok: true,
+    value: {
+      action,
+      reason,
+      roomId,
       targetUid,
     },
   };
@@ -101,6 +148,29 @@ function mapAdminUserProfileDocument(id, data = {}) {
   };
 }
 
+function mapAdminRoomDocument(id, data = {}) {
+  const roomId = typeof data.id === 'string' && data.id.trim() ? data.id.trim() : id;
+
+  if (!roomId) {
+    return null;
+  }
+
+  return {
+    createdAt: readTimestampIso(data.createdAt),
+    currentGameId: typeof data.currentGameId === 'string' ? data.currentGameId.trim() : '',
+    hostAvatarLabel: typeof data.hostAvatarLabel === 'string' ? data.hostAvatarLabel.trim().slice(0, 2) : '',
+    hostDisplayName: typeof data.hostDisplayName === 'string' ? data.hostDisplayName.trim() : '',
+    hostId: typeof data.hostId === 'string' ? data.hostId.trim() : '',
+    id: roomId,
+    participantCount: readCount(data.participantCount),
+    status: ADMIN_ROOM_STATUSES.includes(data.status) ? data.status : '',
+    title: typeof data.title === 'string' ? data.title.trim() : '',
+    type: typeof data.type === 'string' ? data.type.trim() : '',
+    updatedAt: readTimestampIso(data.updatedAt),
+    visibility: typeof data.visibility === 'string' ? data.visibility.trim() : '',
+  };
+}
+
 function filterAdminUserRows(rows, search) {
   if (!search) {
     return rows;
@@ -136,7 +206,10 @@ module.exports = {
   ADMIN_DASHBOARD_ACTIONS,
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminRoomAction,
+  normalizeAdminRoomsQuery,
   normalizeAdminUserNote,
   normalizeAdminUsersQuery,
   normalizeAdminDashboardBody,

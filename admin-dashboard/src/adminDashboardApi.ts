@@ -26,6 +26,24 @@ export type AdminUserRow = {
   updatedAt: string;
 };
 
+export type AdminRoomRow = {
+  createdAt: string;
+  currentGameId: string;
+  hostAvatarLabel: string;
+  hostDisplayName: string;
+  hostId: string;
+  id: string;
+  participantCount: number;
+  status: string;
+  title: string;
+  type: string;
+  updatedAt: string;
+  visibility: string;
+};
+
+export type AdminRoomStatusFilter = 'active' | 'closed';
+export type AdminRoomAction = 'close-room' | 'remove-member';
+
 type AdminDashboardResponse = AdminDashboardSession & {
   error?: string;
   ok: boolean;
@@ -46,6 +64,18 @@ type AdminUsersResponse = {
 type AdminUserNoteResponse = {
   error?: string;
   noteId?: string;
+  ok: boolean;
+};
+
+type AdminRoomsResponse = {
+  error?: string;
+  ok: boolean;
+  rooms?: unknown;
+};
+
+type AdminRoomActionResponse = {
+  error?: string;
+  eventId?: string;
   ok: boolean;
 };
 
@@ -111,10 +141,47 @@ export async function createAdminUserNote(user: User, targetUid: string, note: s
   return payload.noteId;
 }
 
+export async function requestAdminRooms(user: User, status: AdminRoomStatusFilter): Promise<AdminRoomRow[]> {
+  const payload = await requestAdminDashboard<AdminRoomsResponse>(user, {
+    action: 'rooms',
+    status,
+  });
+
+  if (payload.ok !== true || !Array.isArray(payload.rooms)) {
+    throw new Error(payload.error || 'Admin rooms are unavailable.');
+  }
+
+  return payload.rooms.filter(isAdminRoomRow);
+}
+
+export async function executeAdminRoomAction(
+  user: User,
+  roomId: string,
+  roomAction: AdminRoomAction,
+  targetUid: string,
+  reason: string,
+): Promise<string> {
+  const payload = await requestAdminDashboard<AdminRoomActionResponse>(user, {
+    action: 'room-action',
+    reason,
+    roomAction,
+    roomId,
+    targetUid,
+  });
+
+  if (payload.ok !== true || !payload.eventId) {
+    throw new Error(payload.error || 'Admin room action failed.');
+  }
+
+  return payload.eventId;
+}
+
 async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>(
   user: User,
   body:
     | { action: 'overview' | 'session' }
+    | { action: 'rooms'; status: AdminRoomStatusFilter }
+    | { action: 'room-action'; reason: string; roomAction: AdminRoomAction; roomId: string; targetUid: string }
     | { action: 'users'; search: string }
     | { action: 'user-note'; note: string; targetUid: string },
 ): Promise<T> {
@@ -149,6 +216,28 @@ function isAdminUserRow(value: unknown): value is AdminUserRow {
     typeof row.email === 'string' &&
     typeof row.uid === 'string' &&
     typeof row.updatedAt === 'string'
+  );
+}
+
+function isAdminRoomRow(value: unknown): value is AdminRoomRow {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.createdAt === 'string' &&
+    typeof row.currentGameId === 'string' &&
+    typeof row.hostAvatarLabel === 'string' &&
+    typeof row.hostDisplayName === 'string' &&
+    typeof row.hostId === 'string' &&
+    typeof row.id === 'string' &&
+    typeof row.participantCount === 'number' &&
+    typeof row.status === 'string' &&
+    typeof row.title === 'string' &&
+    typeof row.type === 'string' &&
+    typeof row.updatedAt === 'string' &&
+    typeof row.visibility === 'string'
   );
 }
 

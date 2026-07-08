@@ -6,7 +6,10 @@ const { AccessToken, TrackSource } = require('livekit-server-sdk');
 const {
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminRoomAction,
+  normalizeAdminRoomsQuery,
   normalizeAdminUserNote,
   normalizeAdminUsersQuery,
   resolveAdminDashboardRequest,
@@ -316,6 +319,50 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'rooms') {
+      try {
+        const rooms = await resolveAdminRooms(admin.firestore(), request.body);
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          rooms,
+        });
+      } catch (error) {
+        console.error('Failed to resolve admin rooms:', error);
+        response.status(500).json({ error: 'Failed to resolve admin rooms.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'room-action') {
+      const roomAction = normalizeAdminRoomAction(request.body);
+
+      if (!roomAction.ok) {
+        response.status(roomAction.status).json({ error: roomAction.error });
+        return;
+      }
+
+      try {
+        const eventId = await executeAdminRoomAction(admin.firestore(), decodedToken, roomAction.value);
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          eventId,
+        });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+
+        if (status >= 500) {
+          console.error('Failed to execute admin room action:', error);
+        }
+
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to execute admin room action.' : error.message,
+        });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'user-note') {
       const note = normalizeAdminUserNote(request.body);
 
@@ -390,6 +437,102 @@ async function resolveAdminUsers(db, body) {
     .filter(Boolean);
 
   return filterAdminUserRows(rows, query.search).slice(0, query.limit);
+}
+
+async function resolveAdminRooms(db, body) {
+  const query = normalizeAdminRoomsQuery(body);
+  const snapshot = await db
+    .collection('rooms')
+    .where('status', '==', query.status)
+    .orderBy('updatedAt', 'desc')
+    .limit(query.limit)
+    .get();
+  return snapshot.docs
+    .map((doc) => mapAdminRoomDocument(doc.id, doc.data()))
+    .filter(Boolean);
+}
+
+async function executeAdminRoomAction(db, decodedToken, action) {
+  return db.runTransaction(async (transaction) => {
+    const roomRef = db.doc(`rooms/${action.roomId}`);
+    const roomSnapshot = await transaction.get(roomRef);
+
+    if (!roomSnapshot.exists) {
+      throw createHttpError(404, 'Admin room action requires an existing room.');
+    }
+
+    const room = roomSnapshot.data();
+    const eventRef = roomRef.collection('moderationEvents').doc();
+    const auditRef = db.collection('adminAuditEvents').doc();
+    const actionPayload = {
+      action: action.action,
+      actorEmail: decodedToken.email || '',
+      actorUid: decodedToken.uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      reason: action.reason || '',
+      roomId: action.roomId,
+      targetUid: action.targetUid || '',
+    };
+
+    if (action.action === 'close-room') {
+      if (room.status === 'closed') {
+        throw createHttpError(409, 'Room is already closed.');
+      }
+
+      transaction.update(roomRef, {
+        status: 'closed',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedBy: decodedToken.uid,
+      });
+    }
+
+    if (action.action === 'remove-member') {
+      if (room.status !== 'active') {
+        throw createHttpError(400, 'Member removal requires an active room.');
+      }
+
+      if (action.targetUid === room.hostId) {
+        throw createHttpError(400, 'Host membership cannot be removed by this action.');
+      }
+
+      const memberRef = db.doc(`rooms/${action.roomId}/members/${action.targetUid}`);
+      const memberSnapshot = await transaction.get(memberRef);
+      const member = memberSnapshot.exists ? memberSnapshot.data() : undefined;
+
+      if (!member || member.status === 'removed') {
+        throw createHttpError(400, 'Active target member is required.');
+      }
+
+      transaction.update(memberRef, {
+        canPublishAudio: false,
+        removedAt: admin.firestore.FieldValue.serverTimestamp(),
+        removedBy: decodedToken.uid,
+        status: 'removed',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedBy: decodedToken.uid,
+      });
+      transaction.update(roomRef, {
+        participantCount: admin.firestore.FieldValue.increment(-1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedBy: decodedToken.uid,
+      });
+    }
+
+    transaction.set(eventRef, actionPayload);
+    transaction.set(auditRef, {
+      ...actionPayload,
+      eventPath: eventRef.path,
+      kind: 'room-moderation',
+    });
+
+    return auditRef.id;
+  });
+}
+
+function createHttpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 async function createAdminUserNote(db, decodedToken, note) {

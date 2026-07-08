@@ -3,11 +3,16 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
   createAdminUserNote,
+  executeAdminRoomAction,
   requestAdminDashboardSession,
   requestAdminOverview,
+  requestAdminRooms,
   requestAdminUsers,
   AdminDashboardSession,
   AdminOverviewMetrics,
+  AdminRoomAction,
+  AdminRoomRow,
+  AdminRoomStatusFilter,
   AdminUserRow,
 } from './adminDashboardApi';
 import { firebaseAuth } from './firebase';
@@ -80,6 +85,13 @@ export function App() {
     | { status: 'error'; message: string }
   >({ status: 'idle' });
   const [userSearch, setUserSearch] = useState('');
+  const [roomsState, setRoomsState] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; rooms: AdminRoomRow[] }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' });
+  const [roomStatusFilter, setRoomStatusFilter] = useState<AdminRoomStatusFilter>('active');
 
   useEffect(() => {
     return onAuthStateChanged(firebaseAuth, async (user) => {
@@ -123,6 +135,14 @@ export function App() {
   }, [activeRoute.key, authState]);
 
   useEffect(() => {
+    if (authState.status !== 'admin' || activeRoute.key !== 'rooms') {
+      return;
+    }
+
+    void loadRooms(authState.user, roomStatusFilter);
+  }, [activeRoute.key, authState, roomStatusFilter]);
+
+  useEffect(() => {
     if (authState.status !== 'admin' || activeRoute.key !== 'users') {
       return;
     }
@@ -162,6 +182,20 @@ export function App() {
       setUsersState({
         status: 'error',
         message: error instanceof Error ? error.message : 'Admin users are unavailable.',
+      });
+    }
+  }
+
+  async function loadRooms(user: User, status: AdminRoomStatusFilter) {
+    setRoomsState({ status: 'loading' });
+
+    try {
+      const rooms = await requestAdminRooms(user, status);
+      setRoomsState({ status: 'ready', rooms });
+    } catch (error) {
+      setRoomsState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Admin rooms are unavailable.',
       });
     }
   }
@@ -234,6 +268,20 @@ export function App() {
               search={userSearch}
               usersState={usersState}
             />
+          ) : activeRoute.key === 'rooms' ? (
+            <RoomsPanel
+              onAction={(roomId, roomAction, targetUid, reason) => executeAdminRoomAction(
+                authState.user,
+                roomId,
+                roomAction,
+                targetUid,
+                reason,
+              )}
+              onRefresh={() => void loadRooms(authState.user, roomStatusFilter)}
+              onStatusChange={setRoomStatusFilter}
+              roomsState={roomsState}
+              status={roomStatusFilter}
+            />
           ) : (
             <>
               <div>
@@ -251,6 +299,151 @@ export function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function RoomsPanel({
+  onAction,
+  onRefresh,
+  onStatusChange,
+  roomsState,
+  status,
+}: {
+  onAction: (roomId: string, roomAction: AdminRoomAction, targetUid: string, reason: string) => Promise<string>;
+  onRefresh: () => void;
+  onStatusChange: (status: AdminRoomStatusFilter) => void;
+  roomsState:
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; rooms: AdminRoomRow[] }
+    | { status: 'error'; message: string };
+  status: AdminRoomStatusFilter;
+}) {
+  return (
+    <div className="room-management">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Rooms</p>
+          <h3>Room moderation</h3>
+          <p>Inspect room state and record audited moderation actions.</p>
+        </div>
+        <div className="toolbar">
+          <div className="segmented-control" aria-label="Room status">
+            {(['active', 'closed'] as AdminRoomStatusFilter[]).map((option) => (
+              <button
+                className={status === option ? 'selected' : ''}
+                key={option}
+                onClick={() => onStatusChange(option)}
+                type="button"
+              >
+                {option === 'active' ? 'Active' : 'Closed'}
+              </button>
+            ))}
+          </div>
+          <button className="secondary-button compact" onClick={onRefresh} type="button">
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {roomsState.status === 'error' ? <p className="error-text">{roomsState.message}</p> : null}
+      {roomsState.status === 'loading' || roomsState.status === 'idle' ? (
+        <p className="muted-text">Loading room records.</p>
+      ) : null}
+      {roomsState.status === 'ready' && roomsState.rooms.length === 0 ? (
+        <p className="muted-text">No matching rooms.</p>
+      ) : null}
+      {roomsState.status === 'ready' && roomsState.rooms.length > 0 ? (
+        <div className="room-list">
+          {roomsState.rooms.map((room) => (
+            <RoomReviewRow key={room.id} onAction={onAction} onRefresh={onRefresh} room={room} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RoomReviewRow({
+  onAction,
+  onRefresh,
+  room,
+}: {
+  onAction: (roomId: string, roomAction: AdminRoomAction, targetUid: string, reason: string) => Promise<string>;
+  onRefresh: () => void;
+  room: AdminRoomRow;
+}) {
+  const [reason, setReason] = useState('');
+  const [targetUid, setTargetUid] = useState('');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  async function runAction(roomAction: AdminRoomAction) {
+    setStatus('saving');
+
+    try {
+      await onAction(room.id, roomAction, roomAction === 'remove-member' ? targetUid : '', reason);
+      setReason('');
+      setTargetUid('');
+      setStatus('saved');
+      onRefresh();
+    } catch {
+      setStatus('error');
+    }
+  }
+
+  const canClose = room.status === 'active';
+  const canRemove = room.status === 'active' && targetUid.trim().length > 0 && targetUid.trim() !== room.hostId;
+
+  return (
+    <article className="room-row">
+      <div className="room-main">
+        <div>
+          <p className="eyebrow">{room.type || 'Room'}</p>
+          <strong>{room.title || room.id}</strong>
+        </div>
+        <div className="room-meta">
+          <span>{room.status || 'unknown'}</span>
+          <span>{room.visibility || 'unknown'}</span>
+          <span>{formatCount(room.participantCount)} participants</span>
+          <span>{room.updatedAt ? `Updated ${formatDateTime(room.updatedAt)}` : room.id}</span>
+        </div>
+        <small>{room.hostDisplayName || room.hostId || 'Unknown host'}</small>
+      </div>
+      <div className="room-actions">
+        <input
+          aria-label={`Target member for ${room.title || room.id}`}
+          onChange={(event) => setTargetUid(event.target.value)}
+          placeholder="Member UID"
+          value={targetUid}
+        />
+        <input
+          aria-label={`Moderation reason for ${room.title || room.id}`}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="Reason"
+          value={reason}
+        />
+        <div className="action-buttons">
+          <button
+            className="secondary-button compact"
+            disabled={status === 'saving' || !canClose}
+            onClick={() => void runAction('close-room')}
+            type="button"
+          >
+            Close
+          </button>
+          <button
+            className="secondary-button compact"
+            disabled={status === 'saving' || !canRemove}
+            onClick={() => void runAction('remove-member')}
+            type="button"
+          >
+            Remove
+          </button>
+          {status === 'saved' ? <span className="note-status">Saved</span> : null}
+          {status === 'error' ? <span className="note-status error-text">Failed</span> : null}
+        </div>
+      </div>
+    </article>
   );
 }
 
