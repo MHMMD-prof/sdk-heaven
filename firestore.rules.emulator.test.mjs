@@ -50,6 +50,37 @@ describe('firestore.rules auth waves', () => {
     await assertFails(getDoc(doc(userDb('uid-2', 'dana@example.com'), 'users', 'uid-1')));
   });
 
+  it('allows owner account deletion requests and denies forged request identity', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+
+    const db = userDb('uid-1', 'salem@example.com');
+    const requestRef = doc(db, 'users', 'uid-1', 'accountDeletionRequests', 'request-1');
+
+    await assertSucceeds(
+      setDoc(requestRef, {
+        uid: 'uid-1',
+        email: 'salem@example.com',
+        displayName: 'Salem',
+        avatarLabel: 'S',
+        status: 'requested',
+        reason: 'Done for now',
+        requestedAt: now,
+        updatedAt: now,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, 'users', 'uid-1', 'accountDeletionRequests', 'request-2'), {
+        uid: 'uid-2',
+        email: 'dana@example.com',
+        displayName: 'Dana',
+        avatarLabel: 'D',
+        status: 'requested',
+        requestedAt: now,
+        updatedAt: now,
+      }),
+    );
+  });
+
   it('lists public active rooms but hides private rooms from non-members', async () => {
     await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
     await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');

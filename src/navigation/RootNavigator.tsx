@@ -5,6 +5,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { resolveAuthGateRoute } from '../auth/authGate';
 import { useAuth } from '../auth/AuthProvider';
 import { CarromScreen } from '../screens/CarromScreen';
+import { AccountSettingsScreen } from '../screens/AccountSettingsScreen';
 import { DrawingGuessScreen } from '../drawingGuess/screens/DrawingGuessScreen';
 import { EmailVerificationScreen } from '../screens/EmailVerificationScreen';
 import { LoginScreen } from '../screens/LoginScreen';
@@ -58,6 +59,7 @@ export function RootNavigator() {
         {authRoute === 'main' ? (
           <>
             <Stack.Screen name="Main" component={MainShellScreen} />
+            <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
             <Stack.Screen name="MiniGame" component={MiniGameScreen} />
             <Stack.Screen name="Carrom" component={CarromScreen} />
             <Stack.Screen name="DrawingGuess" component={DrawingGuessScreen} />

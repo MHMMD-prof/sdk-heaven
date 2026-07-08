@@ -27,6 +27,7 @@ export function MainShellScreen({ navigation }: MainShellScreenProps) {
   return (
     <HomeScreen
       bottomNavigation={bottomNavigation}
+      onOpenAccountSettings={() => navigation.navigate('AccountSettings')}
       onOpenGames={() => setActiveTab('games')}
       onOpenGroups={() => setActiveTab('groups')}
     />

@@ -6,6 +6,7 @@ export type RootStackParamList = {
   Login: undefined;
   EmailVerification: undefined;
   ProfileSetup: undefined;
+  AccountSettings: undefined;
   Main: undefined;
   MiniGame: {
     initialMode?: MiniGameModeId;

@@ -4,7 +4,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../auth/AuthProvider';
 import { colors, radius, spacing, typography } from '../theme';
 
-export function HomeHeader() {
+type HomeHeaderProps = {
+  onOpenAccountSettings: () => void;
+};
+
+export function HomeHeader({ onOpenAccountSettings }: HomeHeaderProps) {
   const { authUser, signOut } = useAuth();
 
   return (
@@ -12,12 +16,10 @@ export function HomeHeader() {
       <View style={styles.appBar}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => {
-            void signOut();
-          }}
-          style={({ pressed }) => [styles.signOutButton, pressed && styles.pressed]}
+          onPress={onOpenAccountSettings}
+          style={({ pressed }) => [styles.accountButton, pressed && styles.pressed]}
         >
-          <Text style={styles.signOutText}>خروج</Text>
+          <Text style={styles.accountText}>الحساب</Text>
         </Pressable>
         <View style={styles.titleBlock}>
           <Text numberOfLines={1} style={styles.kicker}>
@@ -51,6 +53,14 @@ export function HomeHeader() {
           <Text style={styles.statLabel}>الحالة</Text>
         </View>
       </LinearGradient>
+      <Text
+        onPress={() => {
+          void signOut();
+        }}
+        style={styles.signOutLink}
+      >
+        خروج
+      </Text>
     </View>
   );
 }
@@ -99,7 +109,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: typography.weights.black,
   },
-  signOutButton: {
+  accountButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderColor: colors.border,
@@ -113,10 +123,18 @@ const styles = StyleSheet.create({
     opacity: 0.82,
     transform: [{ scale: 0.98 }],
   },
-  signOutText: {
+  accountText: {
     color: colors.textMuted,
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
+    writingDirection: 'rtl',
+  },
+  signOutLink: {
+    color: colors.textSubtle,
+    fontSize: 11,
+    fontWeight: typography.weights.bold,
+    marginTop: spacing.sm,
+    textAlign: 'left',
     writingDirection: 'rtl',
   },
   statsRail: {

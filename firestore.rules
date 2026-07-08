@@ -58,10 +58,40 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function validAccountDeletionRequest(userId) {
+      let data = request.resource.data;
+      return isOwner(userId)
+        && data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'avatarLabel',
+          'status',
+          'reason',
+          'requestedAt',
+          'updatedAt',
+        ])
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.email == request.auth.token.email
+        && data.displayName == get(profilePath(request.auth.uid)).data.displayName
+        && data.avatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
+        && data.status == 'requested'
+        && (!('reason' in data) || (data.reason is string && data.reason.size() <= 240))
+        && data.requestedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId) && validProfile(userId);
       allow delete: if false;
+
+      match /accountDeletionRequests/{requestId} {
+        allow read: if isOwner(userId);
+        allow create: if validAccountDeletionRequest(userId);
+        allow update, delete: if false;
+      }
     }
 
     match /adminDashboard/{document=**} {

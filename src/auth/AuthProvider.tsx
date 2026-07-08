@@ -9,9 +9,10 @@ import {
   signOut as firebaseSignOut,
 } from '@firebase/auth';
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { firebaseAuth, firebaseDb } from './firebase';
+import { AccountDeletionRequestInput, createAccountDeletionRequestPayload } from './accountLifecycle';
 import { createProfilePayload, isCompleteProfile, mapUserProfileDocument, validateProfileInput } from './profile';
 import { AuthUser, ProfileStatus, SaveProfileInput, UserProfile } from './types';
 
@@ -22,8 +23,10 @@ type AuthContextValue = {
   profile: UserProfile | null;
   profileStatus: ProfileStatus;
   refreshUser: () => Promise<void>;
+  requestAccountDeletion: (input: AccountDeletionRequestInput) => Promise<void>;
   saveProfile: (input: SaveProfileInput) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
+  sendPasswordResetForCurrentUser: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -147,8 +150,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
           { merge: true },
         );
       },
+      requestAccountDeletion: async (input) => {
+        const currentUser = firebaseAuth.currentUser;
+
+        if (!currentUser?.email || !currentUser.emailVerified || !authUser) {
+          throw new Error('A complete verified account is required to request account deletion.');
+        }
+
+        const payload = createAccountDeletionRequestPayload(authUser, input);
+
+        if (!payload) {
+          throw new Error('Account deletion request is invalid.');
+        }
+
+        await addDoc(collection(firebaseDb, 'users', currentUser.uid, 'accountDeletionRequests'), {
+          ...payload,
+          requestedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      },
       sendPasswordReset: async (email) => {
         await sendPasswordResetEmail(firebaseAuth, email);
+      },
+      sendPasswordResetForCurrentUser: async () => {
+        const currentEmail = firebaseAuth.currentUser?.email;
+
+        if (!currentEmail) {
+          throw new Error('No signed-in email is available for password reset.');
+        }
+
+        await sendPasswordResetEmail(firebaseAuth, currentEmail);
       },
       sendVerificationEmail: async () => {
         const currentUser = firebaseAuth.currentUser;

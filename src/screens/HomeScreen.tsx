@@ -9,14 +9,15 @@ import { colors, radius, spacing, typography } from '../theme';
 
 type HomeScreenProps = {
   bottomNavigation: ReactNode;
+  onOpenAccountSettings: () => void;
   onOpenGames: () => void;
   onOpenGroups: () => void;
 };
 
-export function HomeScreen({ bottomNavigation, onOpenGames, onOpenGroups }: HomeScreenProps) {
+export function HomeScreen({ bottomNavigation, onOpenAccountSettings, onOpenGames, onOpenGroups }: HomeScreenProps) {
   return (
     <ScreenContainer bottomInset fixedBottom={bottomNavigation}>
-      <HomeHeader />
+      <HomeHeader onOpenAccountSettings={onOpenAccountSettings} />
       <PromoBanner />
 
       <View style={styles.quickGrid}>
