@@ -116,13 +116,14 @@ Wave 9 implementation plan:
 - Completed with implementation commit `1ce34af`.
 
 # Wave 10 — iOS Firebase setup
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint: f55d24de463d2bc95b27357371c9bd0017dfb9e5
+Implementation commit: afc8cdca7f3e14c063f3c27f58805dda80b663ce
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
 Review: PASSED
-Commit: NOT_STARTED
+Commit: COMPLETE
 
 Add iOS bundle id, `GoogleService-Info.plist`, Expo iOS Firebase config, and iOS auth smoke testing when the iOS release wave starts.
 
@@ -132,3 +133,4 @@ Wave 10 implementation plan:
 - Add focused automated coverage for iOS auth/Firebase configuration expectations without running native iOS builds or Java-based emulators.
 - Run `npx tsc --noEmit` and `npm test`; avoid `expo run:ios` because it requires local Xcode/iOS environment and a real Firebase plist.
 - Rollback: revert the Wave 10 implementation commit after checkpoint `f55d24de463d2bc95b27357371c9bd0017dfb9e5`; full reset to the checkpoint is destructive and requires explicit approval.
+- Completed with implementation commit `afc8cdca7f3e14c063f3c27f58805dda80b663ce`. Native iOS builds still require the real `GoogleService-Info.plist` from Firebase Console.
