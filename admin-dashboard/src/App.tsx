@@ -1,7 +1,12 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
-import { requestAdminDashboardSession, AdminDashboardSession } from './adminDashboardApi';
+import {
+  requestAdminDashboardSession,
+  requestAdminOverview,
+  AdminDashboardSession,
+  AdminOverviewMetrics,
+} from './adminDashboardApi';
 import { firebaseAuth } from './firebase';
 
 type AuthState =
@@ -59,6 +64,12 @@ function getRouteFromPath(pathname: string) {
 export function App() {
   const [authState, setAuthState] = useState<AuthState>({ status: 'checking' });
   const [activeRoute, setActiveRoute] = useState(() => getRouteFromPath(window.location.pathname));
+  const [overviewState, setOverviewState] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; metrics: AdminOverviewMetrics }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' });
 
   useEffect(() => {
     return onAuthStateChanged(firebaseAuth, async (user) => {
@@ -93,12 +104,34 @@ export function App() {
 
   const navItems = useMemo(() => routes, []);
 
+  useEffect(() => {
+    if (authState.status !== 'admin' || activeRoute.key !== 'overview') {
+      return;
+    }
+
+    void loadOverview(authState.user);
+  }, [activeRoute.key, authState]);
+
   function navigateToRoute(route: DashboardRoute) {
     if (route.path !== window.location.pathname) {
       window.history.pushState({}, '', route.path);
     }
 
     setActiveRoute(route);
+  }
+
+  async function loadOverview(user: User) {
+    setOverviewState({ status: 'loading' });
+
+    try {
+      const metrics = await requestAdminOverview(user);
+      setOverviewState({ status: 'ready', metrics });
+    } catch (error) {
+      setOverviewState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Admin overview is unavailable.',
+      });
+    }
   }
 
   if (authState.status === 'checking' || authState.status === 'verifying') {
@@ -156,20 +189,113 @@ export function App() {
         </header>
 
         <section className="panel">
-          <div>
-            <p className="eyebrow">Session ready</p>
-            <h3>{activeRoute.title}</h3>
-            <p>{activeRoute.detail}</p>
-          </div>
-          <div className="status-grid">
-            <StatusTile label="Auth gate" value="Live" />
-            <StatusTile label="Claim source" value="Firebase" />
-            <StatusTile label="Client writes" value="Denied" />
-          </div>
+          {activeRoute.key === 'overview' ? (
+            <OverviewPanel
+              onRefresh={() => void loadOverview(authState.user)}
+              overviewState={overviewState}
+            />
+          ) : (
+            <>
+              <div>
+                <p className="eyebrow">Session ready</p>
+                <h3>{activeRoute.title}</h3>
+                <p>{activeRoute.detail}</p>
+              </div>
+              <div className="status-grid">
+                <StatusTile label="Auth gate" value="Live" />
+                <StatusTile label="Claim source" value="Firebase" />
+                <StatusTile label="Client writes" value="Denied" />
+              </div>
+            </>
+          )}
         </section>
       </section>
     </main>
   );
+}
+
+function OverviewPanel({
+  onRefresh,
+  overviewState,
+}: {
+  onRefresh: () => void;
+  overviewState:
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; metrics: AdminOverviewMetrics }
+    | { status: 'error'; message: string };
+}) {
+  if (overviewState.status === 'error') {
+    return (
+      <>
+        <div>
+          <p className="eyebrow">Overview</p>
+          <h3>Metrics unavailable</h3>
+          <p>{overviewState.message}</p>
+        </div>
+        <button className="secondary-button compact" onClick={onRefresh} type="button">
+          Refresh
+        </button>
+      </>
+    );
+  }
+
+  if (overviewState.status !== 'ready') {
+    return (
+      <>
+        <div>
+          <p className="eyebrow">Overview</p>
+          <h3>Loading metrics</h3>
+          <p>Fetching admin-only aggregate counts.</p>
+        </div>
+        <div className="status-grid">
+          <StatusTile label="Users" value="..." />
+          <StatusTile label="Active rooms" value="..." />
+          <StatusTile label="Reports" value="..." />
+        </div>
+      </>
+    );
+  }
+
+  const { metrics } = overviewState;
+
+  return (
+    <>
+      <div>
+        <p className="eyebrow">Overview</p>
+        <h3>Operational summary</h3>
+        <p>Generated {formatDateTime(metrics.generatedAt)}</p>
+        <button className="secondary-button compact" onClick={onRefresh} type="button">
+          Refresh
+        </button>
+      </div>
+      <div className="status-grid">
+        <StatusTile label="Users" value={formatCount(metrics.users)} />
+        <StatusTile label="Active rooms" value={formatCount(metrics.activeRooms)} />
+        <StatusTile label="Private rooms" value={formatCount(metrics.privateRooms)} />
+        <StatusTile label="Moderation events" value={formatCount(metrics.moderationEvents)} />
+        <StatusTile label="Reports" value={formatCount(metrics.reports)} />
+        <StatusTile label="Audit events" value={formatCount(metrics.adminAuditEvents)} />
+      </div>
+    </>
+  );
+}
+
+function formatCount(value: number) {
+  return new Intl.NumberFormat().format(value);
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
 }
 
 function LoginScreen() {

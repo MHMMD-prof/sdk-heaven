@@ -32,6 +32,18 @@ describe('adminDashboardCore', () => {
     });
   });
 
+  it('allows verified custom-claim admins to resolve an overview request', () => {
+    expect(resolveAdminDashboardRequest({ body: { action: 'overview' }, decodedToken: adminToken })).toEqual({
+      ok: true,
+      value: {
+        action: 'overview',
+        admin: true,
+        email: 'admin@example.com',
+        uid: 'admin-1',
+      },
+    });
+  });
+
   it('rejects unverified, non-admin, and malformed dashboard requests', () => {
     expect(
       resolveAdminDashboardRequest({

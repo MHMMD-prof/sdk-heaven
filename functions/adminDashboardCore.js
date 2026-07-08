@@ -1,6 +1,6 @@
 const { hasAdminClaim } = require('./adminClaimsCore');
 
-const ADMIN_DASHBOARD_ACTIONS = ['session'];
+const ADMIN_DASHBOARD_ACTIONS = ['overview', 'session'];
 
 function normalizeAdminDashboardBody(body = {}) {
   return {

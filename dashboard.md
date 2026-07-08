@@ -107,8 +107,32 @@ Review notes:
 
 # Wave 3 - Admin overview metrics
 Status: INCOMPLETE
+Checkpoint commit: 192ec5947aa7310f1caa993eafe2deafe7dd2fec
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: IN_PROGRESS
+Commit: NOT_STARTED
 
 Build the first web dashboard screen with operational summaries for users, active rooms, game sessions, moderation actions, and recent system health. Prefer aggregate documents or backend-computed summaries so the Vite site does not need broad collection scans.
+
+Wave 3 implementation plan:
+- Touched files: extend the admin dashboard Function core and HTTP handler with a narrow `overview` action that returns backend-computed summary counts, add focused tests for the overview payload shape and admin guard, and update the Vite dashboard to fetch and render those summaries on the Overview route with loading/error/refresh states.
+- Risks: broad client collection scans, exposing non-admin metrics, making the Vite app depend on mobile modules, or treating placeholder data as authoritative. Keep all data reads inside the backend Function and return only aggregate counts.
+- Required tests/checks: run focused Functions tests, `npm --prefix functions run lint`, `npm --prefix admin-dashboard run typecheck`, `npm --prefix admin-dashboard run build`, and root `npm test`. Do not run Firebase emulator commands in this wave.
+- Rollback considerations: revert the Wave 3 implementation commit to remove the overview Function action, tests, and dashboard overview UI; checkpoint `192ec5947aa7310f1caa993eafe2deafe7dd2fec` preserves the pre-Wave 3 state.
+
+Verification notes:
+- PASSED: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED: `npm --prefix functions run lint`
+- FAILED then fixed: `npm --prefix admin-dashboard run typecheck` initially failed on missing `error` response fields in dashboard API types.
+- PASSED after fix: `npm --prefix admin-dashboard run typecheck`
+- BLOCKED: `npm --prefix admin-dashboard run build` could not run because the app approval gate rejected the required filesystem escalation after the account usage limit was reached. Resume verification here before review or commit.
+- PASSED after resume: `npm --prefix admin-dashboard run build`
+- PASSED after resume: `npm --prefix admin-dashboard run typecheck`
+- PASSED after resume: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED after resume: `npm --prefix functions run lint`
+- PASSED after resume: `npm test`
 
 # Wave 4 - User management tools
 Status: INCOMPLETE

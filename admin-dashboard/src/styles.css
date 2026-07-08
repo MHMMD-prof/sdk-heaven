@@ -112,6 +112,12 @@ button:disabled {
   padding: 0 16px;
 }
 
+.secondary-button.compact {
+  justify-self: start;
+  margin-top: 18px;
+  min-height: 38px;
+}
+
 .error-text {
   color: #ffb4a8;
 }

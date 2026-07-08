@@ -279,6 +279,21 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'overview') {
+      try {
+        const overview = await resolveAdminOverview(admin.firestore());
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          overview,
+        });
+      } catch (error) {
+        console.error('Failed to resolve admin overview:', error);
+        response.status(500).json({ error: 'Failed to resolve admin overview.' });
+      }
+      return;
+    }
+
     response.json({
       ok: true,
       action: dashboardRequest.value.action,
@@ -288,3 +303,41 @@ exports.adminDashboard = onRequest(
     });
   },
 );
+
+async function resolveAdminOverview(db) {
+  const [
+    usersSnapshot,
+    activeRoomsSnapshot,
+    privateRoomsSnapshot,
+    moderationEventsSnapshot,
+    reportsSnapshot,
+    auditEventsSnapshot,
+  ] = await Promise.all([
+    getCollectionCount(db.collection('users')),
+    getCollectionCount(db.collection('rooms').where('status', '==', 'active')),
+    getCollectionCount(db.collection('rooms').where('visibility', '==', 'private')),
+    getCollectionGroupCount(db.collectionGroup('moderationEvents')),
+    getCollectionCount(db.collection('reports')),
+    getCollectionCount(db.collection('adminAuditEvents')),
+  ]);
+
+  return {
+    activeRooms: activeRoomsSnapshot,
+    adminAuditEvents: auditEventsSnapshot,
+    moderationEvents: moderationEventsSnapshot,
+    privateRooms: privateRoomsSnapshot,
+    reports: reportsSnapshot,
+    users: usersSnapshot,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+async function getCollectionCount(query) {
+  const snapshot = await query.count().get();
+  return snapshot.data().count;
+}
+
+async function getCollectionGroupCount(query) {
+  const snapshot = await query.count().get();
+  return snapshot.data().count;
+}
