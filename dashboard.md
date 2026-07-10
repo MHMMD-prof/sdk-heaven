@@ -223,13 +223,14 @@ Review notes:
 - PASSED: No Expo, React Native, mobile navigation, destructive deletes, or emulator commands were added for this wave.
 
 # Wave 6 - Reports and abuse workflow
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint commit: 6268204ae8550816fc6cb4438bf9f7835b79d315
+Implementation commit: f70d484832ce218f6d78d5e5f4b43a635f5f1ec4
 Plan: COMPLETE
 Implementation: COMPLETE
 Verification: PASSED
-Review: IN_PROGRESS
-Commit: NOT_STARTED
+Review: PASSED
+Commit: COMPLETE
 
 Add a report intake model for users, rooms, games, and voice behavior. Build triage states, assignment metadata, resolution notes, and links back to user and room records so admin moderation is trackable instead of one-off.
 
@@ -245,6 +246,13 @@ Verification notes:
 - PASSED: `npm --prefix admin-dashboard run typecheck`
 - PASSED: `npm --prefix admin-dashboard run build`
 - PASSED: `npm test`
+
+Review notes:
+- NOTE: Wave 6 implementation files were captured in commit `f70d484832ce218f6d78d5e5f4b43a635f5f1ec4` while this run was in progress; this tracker update records that commit as the Wave 6 implementation commit.
+- PASSED: Report intake is created from the backend `report-member` room command and dashboard report reads/actions are routed through the admin-only Function.
+- PASSED: Report rows expose bounded operational fields only, and the Vite dashboard does not scan Firestore directly or write report documents directly.
+- PASSED: Assign/resolve report actions normalize status transitions, write admin audit events, and return clear validation errors for expected bad requests.
+- PASSED: No Expo, React Native, mobile navigation, client-side role grants, secrets, destructive deletes, or emulator commands were added for this wave.
 
 # Wave 7 - Audit log and accountability
 Status: INCOMPLETE
