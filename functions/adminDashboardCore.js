@@ -1,8 +1,11 @@
 const { hasAdminClaim } = require('./adminClaimsCore');
 
-const ADMIN_DASHBOARD_ACTIONS = ['overview', 'room-action', 'rooms', 'session', 'user-note', 'users'];
+const ADMIN_DASHBOARD_ACTIONS = ['overview', 'report-action', 'reports', 'room-action', 'rooms', 'session', 'user-note', 'users'];
+const ADMIN_REPORT_ACTIONS = ['assign', 'resolve'];
+const ADMIN_REPORT_STATUSES = ['open', 'triage', 'resolved'];
 const ADMIN_ROOM_ACTIONS = ['close-room', 'remove-member'];
 const ADMIN_ROOM_STATUSES = ['active', 'closed'];
+const MAX_REPORT_RESULTS = 25;
 const MAX_ROOM_RESULTS = 25;
 const MAX_USER_RESULTS = 25;
 const MAX_USER_SEARCH_SCAN_RESULTS = 100;
@@ -42,6 +45,21 @@ function normalizeAdminRoomsQuery(body = {}) {
   };
 }
 
+function normalizeAdminReportsQuery(body = {}) {
+  const rawLimit = Number(body.limit);
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_REPORT_RESULTS)
+    : MAX_REPORT_RESULTS;
+  const status = typeof body.status === 'string' && ADMIN_REPORT_STATUSES.includes(body.status.trim())
+    ? body.status.trim()
+    : 'open';
+
+  return {
+    limit,
+    status,
+  };
+}
+
 function normalizeAdminUserNote(body = {}) {
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
   const targetUid = typeof body.targetUid === 'string' ? body.targetUid.trim() : '';
@@ -59,6 +77,35 @@ function normalizeAdminUserNote(body = {}) {
     value: {
       note,
       targetUid,
+    },
+  };
+}
+
+function normalizeAdminReportAction(body = {}) {
+  const action = typeof body.reportAction === 'string' ? body.reportAction.trim() : '';
+  const assigneeUid = typeof body.assigneeUid === 'string' ? body.assigneeUid.trim() : '';
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+  const reportId = typeof body.reportId === 'string' ? body.reportId.trim() : '';
+
+  if (!ADMIN_REPORT_ACTIONS.includes(action)) {
+    return { ok: false, status: 400, error: 'Valid report action is required.' };
+  }
+
+  if (!reportId) {
+    return { ok: false, status: 400, error: 'reportId is required.' };
+  }
+
+  if (action === 'resolve' && note.length < 2) {
+    return { ok: false, status: 400, error: 'A resolution note with at least 2 characters is required.' };
+  }
+
+  return {
+    ok: true,
+    value: {
+      action,
+      assigneeUid,
+      note,
+      reportId,
     },
   };
 }
@@ -171,6 +218,29 @@ function mapAdminRoomDocument(id, data = {}) {
   };
 }
 
+function mapAdminReportDocument(id, data = {}) {
+  const reportId = typeof data.id === 'string' && data.id.trim() ? data.id.trim() : id;
+
+  if (!reportId) {
+    return null;
+  }
+
+  return {
+    assignedTo: typeof data.assignedTo === 'string' ? data.assignedTo.trim() : '',
+    createdAt: readTimestampIso(data.createdAt),
+    id: reportId,
+    reason: typeof data.reason === 'string' ? data.reason.trim().slice(0, 240) : '',
+    reporterUid: typeof data.reporterUid === 'string' ? data.reporterUid.trim() : '',
+    resolutionNote: typeof data.resolutionNote === 'string' ? data.resolutionNote.trim().slice(0, 500) : '',
+    roomId: typeof data.roomId === 'string' ? data.roomId.trim() : '',
+    source: typeof data.source === 'string' ? data.source.trim() : '',
+    status: ADMIN_REPORT_STATUSES.includes(data.status) ? data.status : '',
+    subjectType: typeof data.subjectType === 'string' ? data.subjectType.trim() : '',
+    targetUid: typeof data.targetUid === 'string' ? data.targetUid.trim() : '',
+    updatedAt: readTimestampIso(data.updatedAt),
+  };
+}
+
 function filterAdminUserRows(rows, search) {
   if (!search) {
     return rows;
@@ -206,8 +276,11 @@ module.exports = {
   ADMIN_DASHBOARD_ACTIONS,
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminReportDocument,
   mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminReportAction,
+  normalizeAdminReportsQuery,
   normalizeAdminRoomAction,
   normalizeAdminRoomsQuery,
   normalizeAdminUserNote,

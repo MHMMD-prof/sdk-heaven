@@ -44,6 +44,24 @@ export type AdminRoomRow = {
 export type AdminRoomStatusFilter = 'active' | 'closed';
 export type AdminRoomAction = 'close-room' | 'remove-member';
 
+export type AdminReportRow = {
+  assignedTo: string;
+  createdAt: string;
+  id: string;
+  reason: string;
+  reporterUid: string;
+  resolutionNote: string;
+  roomId: string;
+  source: string;
+  status: string;
+  subjectType: string;
+  targetUid: string;
+  updatedAt: string;
+};
+
+export type AdminReportStatusFilter = 'open' | 'triage' | 'resolved';
+export type AdminReportAction = 'assign' | 'resolve';
+
 type AdminDashboardResponse = AdminDashboardSession & {
   error?: string;
   ok: boolean;
@@ -74,6 +92,18 @@ type AdminRoomsResponse = {
 };
 
 type AdminRoomActionResponse = {
+  error?: string;
+  eventId?: string;
+  ok: boolean;
+};
+
+type AdminReportsResponse = {
+  error?: string;
+  ok: boolean;
+  reports?: unknown;
+};
+
+type AdminReportActionResponse = {
   error?: string;
   eventId?: string;
   ok: boolean;
@@ -176,10 +206,47 @@ export async function executeAdminRoomAction(
   return payload.eventId;
 }
 
+export async function requestAdminReports(user: User, status: AdminReportStatusFilter): Promise<AdminReportRow[]> {
+  const payload = await requestAdminDashboard<AdminReportsResponse>(user, {
+    action: 'reports',
+    status,
+  });
+
+  if (payload.ok !== true || !Array.isArray(payload.reports)) {
+    throw new Error(payload.error || 'Admin reports are unavailable.');
+  }
+
+  return payload.reports.filter(isAdminReportRow);
+}
+
+export async function executeAdminReportAction(
+  user: User,
+  reportId: string,
+  reportAction: AdminReportAction,
+  assigneeUid: string,
+  note: string,
+): Promise<string> {
+  const payload = await requestAdminDashboard<AdminReportActionResponse>(user, {
+    action: 'report-action',
+    assigneeUid,
+    note,
+    reportAction,
+    reportId,
+  });
+
+  if (payload.ok !== true || !payload.eventId) {
+    throw new Error(payload.error || 'Admin report action failed.');
+  }
+
+  return payload.eventId;
+}
+
 async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>(
   user: User,
   body:
     | { action: 'overview' | 'session' }
+    | { action: 'reports'; status: AdminReportStatusFilter }
+    | { action: 'report-action'; assigneeUid: string; note: string; reportAction: AdminReportAction; reportId: string }
     | { action: 'rooms'; status: AdminRoomStatusFilter }
     | { action: 'room-action'; reason: string; roomAction: AdminRoomAction; roomId: string; targetUid: string }
     | { action: 'users'; search: string }
@@ -238,6 +305,28 @@ function isAdminRoomRow(value: unknown): value is AdminRoomRow {
     typeof row.type === 'string' &&
     typeof row.updatedAt === 'string' &&
     typeof row.visibility === 'string'
+  );
+}
+
+function isAdminReportRow(value: unknown): value is AdminReportRow {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.assignedTo === 'string' &&
+    typeof row.createdAt === 'string' &&
+    typeof row.id === 'string' &&
+    typeof row.reason === 'string' &&
+    typeof row.reporterUid === 'string' &&
+    typeof row.resolutionNote === 'string' &&
+    typeof row.roomId === 'string' &&
+    typeof row.source === 'string' &&
+    typeof row.status === 'string' &&
+    typeof row.subjectType === 'string' &&
+    typeof row.targetUid === 'string' &&
+    typeof row.updatedAt === 'string'
   );
 }
 

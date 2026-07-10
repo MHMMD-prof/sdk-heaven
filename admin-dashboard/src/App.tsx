@@ -3,13 +3,18 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
   createAdminUserNote,
+  executeAdminReportAction,
   executeAdminRoomAction,
   requestAdminDashboardSession,
   requestAdminOverview,
+  requestAdminReports,
   requestAdminRooms,
   requestAdminUsers,
   AdminDashboardSession,
   AdminOverviewMetrics,
+  AdminReportAction,
+  AdminReportRow,
+  AdminReportStatusFilter,
   AdminRoomAction,
   AdminRoomRow,
   AdminRoomStatusFilter,
@@ -92,6 +97,13 @@ export function App() {
     | { status: 'error'; message: string }
   >({ status: 'idle' });
   const [roomStatusFilter, setRoomStatusFilter] = useState<AdminRoomStatusFilter>('active');
+  const [reportsState, setReportsState] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; reports: AdminReportRow[] }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' });
+  const [reportStatusFilter, setReportStatusFilter] = useState<AdminReportStatusFilter>('open');
 
   useEffect(() => {
     return onAuthStateChanged(firebaseAuth, async (user) => {
@@ -141,6 +153,14 @@ export function App() {
 
     void loadRooms(authState.user, roomStatusFilter);
   }, [activeRoute.key, authState, roomStatusFilter]);
+
+  useEffect(() => {
+    if (authState.status !== 'admin' || activeRoute.key !== 'reports') {
+      return;
+    }
+
+    void loadReports(authState.user, reportStatusFilter);
+  }, [activeRoute.key, authState, reportStatusFilter]);
 
   useEffect(() => {
     if (authState.status !== 'admin' || activeRoute.key !== 'users') {
@@ -196,6 +216,20 @@ export function App() {
       setRoomsState({
         status: 'error',
         message: error instanceof Error ? error.message : 'Admin rooms are unavailable.',
+      });
+    }
+  }
+
+  async function loadReports(user: User, status: AdminReportStatusFilter) {
+    setReportsState({ status: 'loading' });
+
+    try {
+      const reports = await requestAdminReports(user, status);
+      setReportsState({ status: 'ready', reports });
+    } catch (error) {
+      setReportsState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Admin reports are unavailable.',
       });
     }
   }
@@ -282,6 +316,20 @@ export function App() {
               roomsState={roomsState}
               status={roomStatusFilter}
             />
+          ) : activeRoute.key === 'reports' ? (
+            <ReportsPanel
+              onAction={(reportId, reportAction, assigneeUid, note) => executeAdminReportAction(
+                authState.user,
+                reportId,
+                reportAction,
+                assigneeUid,
+                note,
+              )}
+              onRefresh={() => void loadReports(authState.user, reportStatusFilter)}
+              onStatusChange={setReportStatusFilter}
+              reportsState={reportsState}
+              status={reportStatusFilter}
+            />
           ) : (
             <>
               <div>
@@ -299,6 +347,152 @@ export function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function ReportsPanel({
+  onAction,
+  onRefresh,
+  onStatusChange,
+  reportsState,
+  status,
+}: {
+  onAction: (reportId: string, reportAction: AdminReportAction, assigneeUid: string, note: string) => Promise<string>;
+  onRefresh: () => void;
+  onStatusChange: (status: AdminReportStatusFilter) => void;
+  reportsState:
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; reports: AdminReportRow[] }
+    | { status: 'error'; message: string };
+  status: AdminReportStatusFilter;
+}) {
+  return (
+    <div className="report-management">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Reports</p>
+          <h3>Abuse workflow</h3>
+          <p>Assign report intake and record resolution decisions.</p>
+        </div>
+        <div className="toolbar">
+          <div className="segmented-control" aria-label="Report status">
+            {(['open', 'triage', 'resolved'] as AdminReportStatusFilter[]).map((option) => (
+              <button
+                className={status === option ? 'selected' : ''}
+                key={option}
+                onClick={() => onStatusChange(option)}
+                type="button"
+              >
+                {option === 'triage' ? 'Triage' : option === 'resolved' ? 'Resolved' : 'Open'}
+              </button>
+            ))}
+          </div>
+          <button className="secondary-button compact" onClick={onRefresh} type="button">
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {reportsState.status === 'error' ? <p className="error-text">{reportsState.message}</p> : null}
+      {reportsState.status === 'loading' || reportsState.status === 'idle' ? (
+        <p className="muted-text">Loading report records.</p>
+      ) : null}
+      {reportsState.status === 'ready' && reportsState.reports.length === 0 ? (
+        <p className="muted-text">No matching reports.</p>
+      ) : null}
+      {reportsState.status === 'ready' && reportsState.reports.length > 0 ? (
+        <div className="report-list">
+          {reportsState.reports.map((report) => (
+            <ReportReviewRow key={report.id} onAction={onAction} onRefresh={onRefresh} report={report} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ReportReviewRow({
+  onAction,
+  onRefresh,
+  report,
+}: {
+  onAction: (reportId: string, reportAction: AdminReportAction, assigneeUid: string, note: string) => Promise<string>;
+  onRefresh: () => void;
+  report: AdminReportRow;
+}) {
+  const [assigneeUid, setAssigneeUid] = useState(report.assignedTo);
+  const [note, setNote] = useState('');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  async function runAction(reportAction: AdminReportAction) {
+    setStatus('saving');
+
+    try {
+      await onAction(report.id, reportAction, assigneeUid, note);
+      setNote('');
+      setStatus('saved');
+      onRefresh();
+    } catch {
+      setStatus('error');
+    }
+  }
+
+  const canAssign = report.status !== 'resolved';
+  const canResolve = note.trim().length >= 2;
+
+  return (
+    <article className="report-row">
+      <div className="report-main">
+        <div>
+          <p className="eyebrow">{report.subjectType || 'Report'}</p>
+          <strong>{report.reason || 'No report note'}</strong>
+        </div>
+        <div className="room-meta">
+          <span>{report.status || 'unknown'}</span>
+          <span>{report.source || 'unknown'}</span>
+          <span>{report.roomId || 'no room'}</span>
+          <span>{report.updatedAt ? `Updated ${formatDateTime(report.updatedAt)}` : report.id}</span>
+        </div>
+        <small>
+          Reporter {report.reporterUid || 'unknown'} / Target {report.targetUid || 'unknown'}
+        </small>
+      </div>
+      <div className="report-actions">
+        <input
+          aria-label={`Assignee for ${report.id}`}
+          onChange={(event) => setAssigneeUid(event.target.value)}
+          placeholder="Assignee UID"
+          value={assigneeUid}
+        />
+        <input
+          aria-label={`Resolution note for ${report.id}`}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Resolution note"
+          value={note}
+        />
+        <div className="action-buttons">
+          <button
+            className="secondary-button compact"
+            disabled={status === 'saving' || !canAssign}
+            onClick={() => void runAction('assign')}
+            type="button"
+          >
+            Assign
+          </button>
+          <button
+            className="secondary-button compact"
+            disabled={status === 'saving' || !canResolve}
+            onClick={() => void runAction('resolve')}
+            type="button"
+          >
+            Resolve
+          </button>
+          {status === 'saved' ? <span className="note-status">Saved</span> : null}
+          {status === 'error' ? <span className="note-status error-text">Failed</span> : null}
+        </div>
+      </div>
+    </article>
   );
 }
 

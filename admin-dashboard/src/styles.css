@@ -219,6 +219,7 @@ button:disabled {
 
 .search-form input,
 .note-form input,
+.report-actions input,
 .room-actions input {
   background: #0e1117;
   border: 1px solid #2c3442;
@@ -235,6 +236,7 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.report-management,
 .room-management {
   display: grid;
   gap: 18px;
@@ -270,11 +272,13 @@ button:disabled {
   font-weight: 750;
 }
 
+.report-list,
 .room-list {
   display: grid;
   gap: 10px;
 }
 
+.report-row,
 .room-row {
   align-items: start;
   background: #10151e;
@@ -286,12 +290,14 @@ button:disabled {
   padding: 14px;
 }
 
+.report-main,
 .room-main {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
+.report-main strong,
 .room-main strong {
   display: block;
   overflow: hidden;
@@ -299,6 +305,7 @@ button:disabled {
   white-space: nowrap;
 }
 
+.report-main small,
 .room-main small {
   color: #9ea8b8;
   overflow: hidden;
@@ -321,6 +328,7 @@ button:disabled {
   padding: 4px 8px;
 }
 
+.report-actions,
 .room-actions {
   display: grid;
   gap: 8px;
@@ -437,6 +445,7 @@ button:disabled {
     align-items: stretch;
   }
 
+  .report-row,
   .room-row {
     grid-template-columns: 1fr;
   }

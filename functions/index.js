@@ -6,8 +6,11 @@ const { AccessToken, TrackSource } = require('livekit-server-sdk');
 const {
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminReportDocument,
   mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminReportAction,
+  normalizeAdminReportsQuery,
   normalizeAdminRoomAction,
   normalizeAdminRoomsQuery,
   normalizeAdminUserNote,
@@ -180,6 +183,9 @@ exports.roomCommand = onRequest(
         }
 
         const eventRef = roomRef.collection('moderationEvents').doc();
+        const reportRef = command.value.action === 'report-member'
+          ? db.collection('reports').doc()
+          : undefined;
         const eventPayload = {
           action: command.value.action,
           actorUid: decodedToken.uid,
@@ -233,6 +239,22 @@ exports.roomCommand = onRequest(
         }
 
         transaction.set(eventRef, eventPayload);
+
+        if (reportRef) {
+          transaction.set(reportRef, {
+            assignedTo: '',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            reason: command.value.reason || '',
+            reporterUid: decodedToken.uid,
+            resolutionNote: '',
+            roomId: command.value.roomId,
+            source: 'room-command',
+            status: 'open',
+            subjectType: 'member',
+            targetUid: command.value.targetUid || '',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
 
         return command;
       });
@@ -330,6 +352,50 @@ exports.adminDashboard = onRequest(
       } catch (error) {
         console.error('Failed to resolve admin rooms:', error);
         response.status(500).json({ error: 'Failed to resolve admin rooms.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'reports') {
+      try {
+        const reports = await resolveAdminReports(admin.firestore(), request.body);
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          reports,
+        });
+      } catch (error) {
+        console.error('Failed to resolve admin reports:', error);
+        response.status(500).json({ error: 'Failed to resolve admin reports.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'report-action') {
+      const reportAction = normalizeAdminReportAction(request.body);
+
+      if (!reportAction.ok) {
+        response.status(reportAction.status).json({ error: reportAction.error });
+        return;
+      }
+
+      try {
+        const eventId = await executeAdminReportAction(admin.firestore(), decodedToken, reportAction.value);
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          eventId,
+        });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+
+        if (status >= 500) {
+          console.error('Failed to execute admin report action:', error);
+        }
+
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to execute admin report action.' : error.message,
+        });
       }
       return;
     }
@@ -450,6 +516,72 @@ async function resolveAdminRooms(db, body) {
   return snapshot.docs
     .map((doc) => mapAdminRoomDocument(doc.id, doc.data()))
     .filter(Boolean);
+}
+
+async function resolveAdminReports(db, body) {
+  const query = normalizeAdminReportsQuery(body);
+  const snapshot = await db
+    .collection('reports')
+    .where('status', '==', query.status)
+    .orderBy('updatedAt', 'desc')
+    .limit(query.limit)
+    .get();
+  return snapshot.docs
+    .map((doc) => mapAdminReportDocument(doc.id, doc.data()))
+    .filter(Boolean);
+}
+
+async function executeAdminReportAction(db, decodedToken, action) {
+  return db.runTransaction(async (transaction) => {
+    const reportRef = db.collection('reports').doc(action.reportId);
+    const reportSnapshot = await transaction.get(reportRef);
+
+    if (!reportSnapshot.exists) {
+      throw createHttpError(404, 'Admin report action requires an existing report.');
+    }
+
+    const report = reportSnapshot.data();
+    const auditRef = db.collection('adminAuditEvents').doc();
+    const assignedTo = action.assigneeUid || decodedToken.uid;
+    const update = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: decodedToken.uid,
+    };
+
+    if (action.action === 'assign') {
+      if (report.status === 'resolved') {
+        throw createHttpError(409, 'Resolved reports cannot be assigned.');
+      }
+
+      update.assignedAt = admin.firestore.FieldValue.serverTimestamp();
+      update.assignedBy = decodedToken.uid;
+      update.assignedTo = assignedTo;
+      update.status = 'triage';
+    }
+
+    if (action.action === 'resolve') {
+      update.resolutionNote = action.note;
+      update.resolvedAt = admin.firestore.FieldValue.serverTimestamp();
+      update.resolvedBy = decodedToken.uid;
+      update.status = 'resolved';
+    }
+
+    transaction.update(reportRef, update);
+    transaction.set(auditRef, {
+      action: `report-${action.action}`,
+      actorEmail: decodedToken.email || '',
+      actorUid: decodedToken.uid,
+      assignedTo: action.action === 'assign' ? assignedTo : report.assignedTo || '',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      kind: 'report-workflow',
+      note: action.note || '',
+      reportId: action.reportId,
+      status: update.status,
+      targetUid: report.targetUid || '',
+    });
+
+    return auditRef.id;
+  });
 }
 
 async function executeAdminRoomAction(db, decodedToken, action) {

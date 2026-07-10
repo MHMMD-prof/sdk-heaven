@@ -5,8 +5,11 @@ const require = createRequire(import.meta.url);
 const {
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminReportDocument,
   mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminReportAction,
+  normalizeAdminReportsQuery,
   normalizeAdminRoomAction,
   normalizeAdminRoomsQuery,
   normalizeAdminUserNote,
@@ -71,6 +74,17 @@ describe('adminDashboardCore', () => {
     expect(resolveAdminDashboardRequest({ body: { action: 'room-action' }, decodedToken: adminToken })).toMatchObject({
       ok: true,
       value: { action: 'room-action' },
+    });
+  });
+
+  it('allows verified custom-claim admins to resolve report workflow requests', () => {
+    expect(resolveAdminDashboardRequest({ body: { action: 'reports' }, decodedToken: adminToken })).toMatchObject({
+      ok: true,
+      value: { action: 'reports' },
+    });
+    expect(resolveAdminDashboardRequest({ body: { action: 'report-action' }, decodedToken: adminToken })).toMatchObject({
+      ok: true,
+      value: { action: 'report-action' },
     });
   });
 
@@ -154,6 +168,37 @@ describe('adminDashboardCore', () => {
     expect(normalizeAdminRoomAction({ roomAction: 'remove-member', roomId: 'room-1' })).toMatchObject({ ok: false, status: 400 });
   });
 
+  it('normalizes report queries and workflow actions', () => {
+    expect(normalizeAdminReportsQuery({ limit: 250, status: 'triage' })).toEqual({
+      limit: 25,
+      status: 'triage',
+    });
+    expect(normalizeAdminReportsQuery({ limit: 12, status: 'bad' })).toEqual({
+      limit: 12,
+      status: 'open',
+    });
+    expect(normalizeAdminReportAction({ reportAction: 'assign', reportId: ' report-1 ', assigneeUid: ' admin-2 ' })).toEqual({
+      ok: true,
+      value: {
+        action: 'assign',
+        assigneeUid: 'admin-2',
+        note: '',
+        reportId: 'report-1',
+      },
+    });
+    expect(normalizeAdminReportAction({ reportAction: 'resolve', reportId: 'report-1', note: ' done ' })).toEqual({
+      ok: true,
+      value: {
+        action: 'resolve',
+        assigneeUid: '',
+        note: 'done',
+        reportId: 'report-1',
+      },
+    });
+    expect(normalizeAdminReportAction({ reportAction: 'delete', reportId: 'report-1' })).toMatchObject({ ok: false, status: 400 });
+    expect(normalizeAdminReportAction({ reportAction: 'resolve', reportId: 'report-1', note: 'x' })).toMatchObject({ ok: false, status: 400 });
+  });
+
   it('maps and filters safe admin user profile rows', () => {
     const updatedAt = { toMillis: () => Date.parse('2026-07-08T00:00:00.000Z') };
     const row = mapAdminUserProfileDocument('user-1', {
@@ -203,6 +248,37 @@ describe('adminDashboardCore', () => {
       type: 'voice',
       updatedAt: '2026-07-08T01:00:00.000Z',
       visibility: 'private',
+    });
+  });
+
+  it('maps safe admin report rows', () => {
+    const createdAt = { toDate: () => new Date('2026-07-08T02:00:00.000Z') };
+    expect(
+      mapAdminReportDocument('report-1', {
+        assignedTo: 'admin-1',
+        createdAt,
+        reason: ' spam ',
+        reporterUid: 'user-1',
+        resolutionNote: 'handled',
+        roomId: 'room-1',
+        source: 'room-command',
+        status: 'open',
+        subjectType: 'member',
+        targetUid: 'user-2',
+      }),
+    ).toEqual({
+      assignedTo: 'admin-1',
+      createdAt: '2026-07-08T02:00:00.000Z',
+      id: 'report-1',
+      reason: 'spam',
+      reporterUid: 'user-1',
+      resolutionNote: 'handled',
+      roomId: 'room-1',
+      source: 'room-command',
+      status: 'open',
+      subjectType: 'member',
+      targetUid: 'user-2',
+      updatedAt: '',
     });
   });
 

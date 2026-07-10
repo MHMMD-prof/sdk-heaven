@@ -224,8 +224,27 @@ Review notes:
 
 # Wave 6 - Reports and abuse workflow
 Status: INCOMPLETE
+Checkpoint commit: 6268204ae8550816fc6cb4438bf9f7835b79d315
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: IN_PROGRESS
+Commit: NOT_STARTED
 
 Add a report intake model for users, rooms, games, and voice behavior. Build triage states, assignment metadata, resolution notes, and links back to user and room records so admin moderation is trackable instead of one-off.
+
+Wave 6 implementation plan:
+- Touched files: extend the admin dashboard Function core and HTTP handler with `reports` and `report-action` actions, add focused tests for report query/action normalization and safe row mapping, and update the Vite Reports route with backend-limited status filters, refresh, loading/error/empty states, report metadata, assignment/resolution controls, and audit-backed action submission.
+- Risks: broad client collection scans, exposing private report details beyond admin-only responses, letting clients mutate report documents directly, weakening immutable audit posture, or mixing the Vite dashboard with Expo/mobile code. Keep all report reads/writes behind the admin-only Function, cap results, normalize notes/status transitions, and write admin audit events for each report action.
+- Required tests/checks: run focused Functions tests, `npm --prefix functions run lint`, `npm --prefix admin-dashboard run typecheck`, `npm --prefix admin-dashboard run build`, and root `npm test`. Do not run Firebase emulator commands in this wave.
+- Rollback considerations: revert the Wave 6 implementation commit to remove admin report APIs, tests, and dashboard Reports UI; checkpoint `6268204ae8550816fc6cb4438bf9f7835b79d315` preserves the pre-Wave 6 state.
+
+Verification notes:
+- PASSED: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED: `npm --prefix functions run lint`
+- PASSED: `npm --prefix admin-dashboard run typecheck`
+- PASSED: `npm --prefix admin-dashboard run build`
+- PASSED: `npm test`
 
 # Wave 7 - Audit log and accountability
 Status: INCOMPLETE
