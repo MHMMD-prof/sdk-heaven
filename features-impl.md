@@ -98,7 +98,7 @@ Remaining:
 Add private room visibility, invite code creation, invite-based joining, and discovery rules so private rooms are hidden unless the signed-in user is invited or already a member. Keep public rooms working as they do today.
 
 # Wave 3 — Account settings and profile management
-Status: INCOMPLETE
+Status: COMPLETE
 Checkpoint: bb56d06
 Implementation Commit: 1ce34af
 
@@ -107,7 +107,7 @@ Phase Status:
 - Implementation: COMPLETE
 - Verification: PASSED
 - Review: PASSED
-- Commit: BLOCKED
+- Commit: COMPLETE
 
 Implementation Plan:
 - Touched files: verify existing `src/screens/AccountSettingsScreen.tsx`, `src/components/HomeHeader.tsx`, `src/auth/accountLifecycle.ts`, auth provider account methods, navigation, and Firestore rules/tests; add code only if verification exposes missing Wave 3 requirements.
@@ -127,7 +127,7 @@ Review Notes:
 - PASSED: account deletion remains a non-destructive request document under owner-only rules; no direct account deletion path was added.
 
 Remaining:
-- Commit phase is blocked because sandboxed Git cannot create `.git/index.lock`, and escalated `git add features-impl.md` was rejected by the app approval/usage limit. Resume by staging only `features-impl.md` and creating the Wave 3 tracker completion commit.
+- None.
 
 Add an account/settings entry point with edit profile, password reset access, sign-out, account deletion request flow, reauthentication handling, and clear user-facing security/error states.
 
