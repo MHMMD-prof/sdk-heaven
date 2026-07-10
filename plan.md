@@ -36,7 +36,35 @@ Remaining:
 Add or tighten private room creation, invite code generation, invite-code joining, and discovery rules. Private rooms should be hidden unless the signed-in user is invited or already a member, while public rooms keep their current behavior.
 
 # Wave 1 - Live presence polish
-Status: NOT_STARTED
+Status: COMPLETE
+Checkpoint: e57aee5
+Implementation Commit: 69e48ff8336f16a82b4aa9a33d3b9a2f8bd62da9
+
+Phase Status:
+- Plan: COMPLETE
+- Implementation: COMPLETE
+- Verification: PASSED
+- Review: PASSED
+- Commit: COMPLETE
+
+Implementation Plan:
+- Touched files: review existing presence implementation in `src/voice/roomPresence.ts`, `src/voice/VoiceRoomsProvider.tsx`, `src/screens/VoiceRoomScreen.tsx`, `firestore.rules`, and focused voice presence tests.
+- Risks: duplicating prior presence work, counting stale clients as live participants, replacing membership authorization with presence, or leaving rooms visually stale after unmount/leave.
+- Required tests: run focused room presence tests, related voice mapping/session tests, `npx tsc --noEmit`, and `npm test`; inspect Firestore presence rules for active-member read/write constraints.
+- Rollback: revert tracker-only closure commit for this wave; revert implementation commit `69e48ff8336f16a82b4aa9a33d3b9a2f8bd62da9` only if the underlying presence implementation must be removed.
+
+Verification Notes:
+- PASSED: `npx vitest run src\voice\__tests__\roomPresence.test.ts src\voice\__tests__\mapVoiceRoomToMockParticipants.test.ts src\voice\__tests__\voiceRoomSessionReducer.test.ts`
+- PASSED: `npx tsc --noEmit`
+- PASSED: `npm test`
+
+Review Notes:
+- PASSED: voice rooms start presence on room screen mount and write stale presence on leave/unmount.
+- PASSED: heartbeats refresh `online` presence every 20 seconds and fresh filtering drives live speaker/listener counts.
+- PASSED: Firestore rules require active room membership for presence reads and only allow users to write their own presence using their member role and publish capability.
+
+Remaining:
+- None.
 
 Make live room presence feel accurate across normal app use: fresh heartbeats, stale cleanup, leave cleanup, and speaker/listener counts that reflect who is actually online. Keep membership as the authorization source and presence as live UI state only.
 
