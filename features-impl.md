@@ -99,6 +99,35 @@ Add private room visibility, invite code creation, invite-based joining, and dis
 
 # Wave 3 — Account settings and profile management
 Status: INCOMPLETE
+Checkpoint: bb56d06
+Implementation Commit: 1ce34af
+
+Phase Status:
+- Plan: COMPLETE
+- Implementation: COMPLETE
+- Verification: PASSED
+- Review: PASSED
+- Commit: BLOCKED
+
+Implementation Plan:
+- Touched files: verify existing `src/screens/AccountSettingsScreen.tsx`, `src/components/HomeHeader.tsx`, `src/auth/accountLifecycle.ts`, auth provider account methods, navigation, and Firestore rules/tests; add code only if verification exposes missing Wave 3 requirements.
+- Risks: account deletion must remain a request flow rather than immediate destructive deletion, profile edits must keep existing validation, and password reset/sign-out paths must stay clear and user-facing.
+- Required tests: focused account lifecycle/profile/copy tests, `npx tsc --noEmit`, `npm test`, and `npm run test:rules` if emulator tooling is available.
+- Rollback: revert to checkpoint commit `bb56d06` or revert the final Wave 3 tracker/implementation commits once created.
+
+Verification Notes:
+- PASSED: `npx vitest run src/auth/__tests__/accountLifecycle.test.ts src/auth/__tests__/profile.test.ts src/auth/__tests__/authGate.test.ts src/__tests__/copyEncoding.test.ts`
+- PASSED: `npx tsc --noEmit`
+- PASSED: `npm test`
+- PASSED: `npm run test:rules` after sandboxed npm cache/network access failed and the check was rerun with escalation.
+
+Review Notes:
+- PASSED: account/settings is registered in navigation and reachable from the home header.
+- PASSED: profile edit, signed-in password reset, sign-out, and account deletion request flow use existing auth provider methods and validation.
+- PASSED: account deletion remains a non-destructive request document under owner-only rules; no direct account deletion path was added.
+
+Remaining:
+- Commit phase is blocked because sandboxed Git cannot create `.git/index.lock`, and escalated `git add features-impl.md` was rejected by the app approval/usage limit. Resume by staging only `features-impl.md` and creating the Wave 3 tracker completion commit.
 
 Add an account/settings entry point with edit profile, password reset access, sign-out, account deletion request flow, reauthentication handling, and clear user-facing security/error states.
 
