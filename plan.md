@@ -3,7 +3,27 @@
 This file tracks the highest-impact app features as staged waves that can be implemented and reviewed one at a time.
 
 # Wave 0 - Private room foundation
-Status: NOT_STARTED
+Status: IN_PROGRESS
+Checkpoint: d534cf7
+Implementation Commit: 8f7ccd1
+
+Phase Status:
+- Plan: COMPLETE
+- Implementation: COMPLETE
+- Verification: PASSED
+- Review: IN_PROGRESS
+- Commit: NOT_STARTED
+
+Implementation Plan:
+- Touched files: review existing private-room implementation in `src/voice/roomProfile.ts`, `src/voice/VoiceRoomsProvider.tsx`, `src/screens/GroupsScreen.tsx`, `src/types/voice.ts`, `firestore.rules`, and focused room/rules tests.
+- Risks: duplicating already-implemented private-room work, exposing private rooms in public discovery, accepting invalid invite codes, or weakening room membership authorization.
+- Required tests: run focused room profile tests, `npx tsc --noEmit`, and `npm test`; inspect Firestore room rules for private visibility and invite membership constraints.
+- Rollback: revert tracker-only closure commit for this wave; revert implementation commit `8f7ccd1` only if the underlying private-room implementation must be removed.
+
+Verification Notes:
+- PASSED: `npx vitest run src\voice\__tests__\roomProfile.test.ts`
+- PASSED: `npx tsc --noEmit`
+- PASSED: `npm test`
 
 Add or tighten private room creation, invite code generation, invite-code joining, and discovery rules. Private rooms should be hidden unless the signed-in user is invited or already a member, while public rooms keep their current behavior.
 
