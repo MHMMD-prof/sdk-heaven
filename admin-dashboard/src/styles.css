@@ -217,6 +217,7 @@ button:disabled {
   width: 100%;
 }
 
+.audit-filters input,
 .search-form input,
 .note-form input,
 .report-actions input,
@@ -236,6 +237,7 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.audit-management,
 .report-management,
 .room-management {
   display: grid;
@@ -272,12 +274,21 @@ button:disabled {
   font-weight: 750;
 }
 
+.audit-filters {
+  display: flex;
+  gap: 10px;
+  max-width: 560px;
+  width: 100%;
+}
+
+.audit-list,
 .report-list,
 .room-list {
   display: grid;
   gap: 10px;
 }
 
+.audit-row,
 .report-row,
 .room-row {
   align-items: start;
@@ -290,6 +301,11 @@ button:disabled {
   padding: 14px;
 }
 
+.audit-row {
+  grid-template-columns: 1fr;
+}
+
+.audit-main,
 .report-main,
 .room-main {
   display: grid;
@@ -297,6 +313,7 @@ button:disabled {
   min-width: 0;
 }
 
+.audit-main strong,
 .report-main strong,
 .room-main strong {
   display: block;
@@ -305,6 +322,7 @@ button:disabled {
   white-space: nowrap;
 }
 
+.audit-main small,
 .report-main small,
 .room-main small {
   color: #9ea8b8;
@@ -436,6 +454,7 @@ button:disabled {
   }
 
   .section-header,
+  .audit-filters,
   .search-form,
   .toolbar {
     flex-direction: column;

@@ -6,9 +6,11 @@ const { AccessToken, TrackSource } = require('livekit-server-sdk');
 const {
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminAuditEventDocument,
   mapAdminReportDocument,
   mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminAuditQuery,
   normalizeAdminReportAction,
   normalizeAdminReportsQuery,
   normalizeAdminRoomAction,
@@ -326,6 +328,21 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'audit-events') {
+      try {
+        const auditEvents = await resolveAdminAuditEvents(admin.firestore(), request.body);
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          auditEvents,
+        });
+      } catch (error) {
+        console.error('Failed to resolve admin audit events:', error);
+        response.status(500).json({ error: 'Failed to resolve admin audit events.' });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'users') {
       try {
         const users = await resolveAdminUsers(admin.firestore(), request.body);
@@ -503,6 +520,28 @@ async function resolveAdminUsers(db, body) {
     .filter(Boolean);
 
   return filterAdminUserRows(rows, query.search).slice(0, query.limit);
+}
+
+async function resolveAdminAuditEvents(db, body) {
+  const query = normalizeAdminAuditQuery(body);
+  let auditQuery = db.collection('adminAuditEvents');
+
+  if (query.actorUid) {
+    auditQuery = auditQuery.where('actorUid', '==', query.actorUid);
+  }
+
+  if (query.kind) {
+    auditQuery = auditQuery.where('kind', '==', query.kind);
+  }
+
+  const snapshot = await auditQuery
+    .orderBy('createdAt', 'desc')
+    .limit(query.limit)
+    .get();
+
+  return snapshot.docs
+    .map((doc) => mapAdminAuditEventDocument(doc.id, doc.data()))
+    .filter(Boolean);
 }
 
 async function resolveAdminRooms(db, body) {

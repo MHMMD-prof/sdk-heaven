@@ -5,11 +5,13 @@ import {
   createAdminUserNote,
   executeAdminReportAction,
   executeAdminRoomAction,
+  requestAdminAuditEvents,
   requestAdminDashboardSession,
   requestAdminOverview,
   requestAdminReports,
   requestAdminRooms,
   requestAdminUsers,
+  AdminAuditEventRow,
   AdminDashboardSession,
   AdminOverviewMetrics,
   AdminReportAction,
@@ -104,6 +106,14 @@ export function App() {
     | { status: 'error'; message: string }
   >({ status: 'idle' });
   const [reportStatusFilter, setReportStatusFilter] = useState<AdminReportStatusFilter>('open');
+  const [auditState, setAuditState] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; auditEvents: AdminAuditEventRow[] }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' });
+  const [auditActorFilter, setAuditActorFilter] = useState('');
+  const [auditKindFilter, setAuditKindFilter] = useState('');
 
   useEffect(() => {
     return onAuthStateChanged(firebaseAuth, async (user) => {
@@ -161,6 +171,14 @@ export function App() {
 
     void loadReports(authState.user, reportStatusFilter);
   }, [activeRoute.key, authState, reportStatusFilter]);
+
+  useEffect(() => {
+    if (authState.status !== 'admin' || activeRoute.key !== 'audit') {
+      return;
+    }
+
+    void loadAuditEvents(authState.user, auditActorFilter, auditKindFilter);
+  }, [activeRoute.key, authState]);
 
   useEffect(() => {
     if (authState.status !== 'admin' || activeRoute.key !== 'users') {
@@ -230,6 +248,20 @@ export function App() {
       setReportsState({
         status: 'error',
         message: error instanceof Error ? error.message : 'Admin reports are unavailable.',
+      });
+    }
+  }
+
+  async function loadAuditEvents(user: User, actorUid: string, kind: string) {
+    setAuditState({ status: 'loading' });
+
+    try {
+      const auditEvents = await requestAdminAuditEvents(user, { actorUid, kind });
+      setAuditState({ status: 'ready', auditEvents });
+    } catch (error) {
+      setAuditState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Admin audit events are unavailable.',
       });
     }
   }
@@ -330,6 +362,15 @@ export function App() {
               reportsState={reportsState}
               status={reportStatusFilter}
             />
+          ) : activeRoute.key === 'audit' ? (
+            <AuditPanel
+              actorFilter={auditActorFilter}
+              auditState={auditState}
+              kindFilter={auditKindFilter}
+              onActorFilterChange={setAuditActorFilter}
+              onKindFilterChange={setAuditKindFilter}
+              onRefresh={() => void loadAuditEvents(authState.user, auditActorFilter, auditKindFilter)}
+            />
           ) : (
             <>
               <div>
@@ -347,6 +388,94 @@ export function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function AuditPanel({
+  actorFilter,
+  auditState,
+  kindFilter,
+  onActorFilterChange,
+  onKindFilterChange,
+  onRefresh,
+}: {
+  actorFilter: string;
+  auditState:
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; auditEvents: AdminAuditEventRow[] }
+    | { status: 'error'; message: string };
+  kindFilter: string;
+  onActorFilterChange: (value: string) => void;
+  onKindFilterChange: (value: string) => void;
+  onRefresh: () => void;
+}) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onRefresh();
+  }
+
+  return (
+    <div className="audit-management">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Audit</p>
+          <h3>Accountability log</h3>
+          <p>Review immutable admin actions by actor, target, and workflow.</p>
+        </div>
+        <form className="audit-filters" onSubmit={handleSubmit}>
+          <input
+            aria-label="Audit actor UID"
+            onChange={(event) => onActorFilterChange(event.target.value)}
+            placeholder="Actor UID"
+            value={actorFilter}
+          />
+          <input
+            aria-label="Audit kind"
+            onChange={(event) => onKindFilterChange(event.target.value)}
+            placeholder="Kind"
+            value={kindFilter}
+          />
+          <button className="secondary-button compact" type="submit">
+            Filter
+          </button>
+        </form>
+      </div>
+
+      {auditState.status === 'error' ? <p className="error-text">{auditState.message}</p> : null}
+      {auditState.status === 'loading' || auditState.status === 'idle' ? (
+        <p className="muted-text">Loading audit events.</p>
+      ) : null}
+      {auditState.status === 'ready' && auditState.auditEvents.length === 0 ? (
+        <p className="muted-text">No matching audit events.</p>
+      ) : null}
+      {auditState.status === 'ready' && auditState.auditEvents.length > 0 ? (
+        <div className="audit-list">
+          {auditState.auditEvents.map((event) => (
+            <AuditEventRow event={event} key={event.id} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AuditEventRow({ event }: { event: AdminAuditEventRow }) {
+  return (
+    <article className="audit-row">
+      <div className="audit-main">
+        <div>
+          <p className="eyebrow">{event.kind || 'Audit'}</p>
+          <strong>{event.action || event.id}</strong>
+        </div>
+        <div className="room-meta">
+          <span>{event.actorUid || 'unknown actor'}</span>
+          <span>{event.targetUid || event.reportId || event.roomId || 'no target'}</span>
+          <span>{event.createdAt ? formatDateTime(event.createdAt) : event.id}</span>
+        </div>
+        <small>{event.actorEmail || event.eventPath || event.note || 'No additional context'}</small>
+      </div>
+    </article>
   );
 }
 

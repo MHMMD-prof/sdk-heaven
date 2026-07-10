@@ -18,6 +18,22 @@ export type AdminOverviewMetrics = {
   users: number;
 };
 
+export type AdminAuditEventRow = {
+  action: string;
+  actorEmail: string;
+  actorUid: string;
+  assignedTo: string;
+  createdAt: string;
+  eventPath: string;
+  id: string;
+  kind: string;
+  note: string;
+  reportId: string;
+  roomId: string;
+  status: string;
+  targetUid: string;
+};
+
 export type AdminUserRow = {
   avatarLabel: string;
   displayName: string;
@@ -71,6 +87,12 @@ type AdminOverviewResponse = {
   error?: string;
   ok: boolean;
   overview?: Partial<AdminOverviewMetrics>;
+};
+
+type AdminAuditEventsResponse = {
+  auditEvents?: unknown;
+  error?: string;
+  ok: boolean;
 };
 
 type AdminUsersResponse = {
@@ -142,6 +164,23 @@ export async function requestAdminOverview(user: User): Promise<AdminOverviewMet
   }
 
   return overview;
+}
+
+export async function requestAdminAuditEvents(
+  user: User,
+  filters: { actorUid: string; kind: string },
+): Promise<AdminAuditEventRow[]> {
+  const payload = await requestAdminDashboard<AdminAuditEventsResponse>(user, {
+    action: 'audit-events',
+    actorUid: filters.actorUid,
+    kind: filters.kind,
+  });
+
+  if (payload.ok !== true || !Array.isArray(payload.auditEvents)) {
+    throw new Error(payload.error || 'Admin audit events are unavailable.');
+  }
+
+  return payload.auditEvents.filter(isAdminAuditEventRow);
 }
 
 export async function requestAdminUsers(user: User, search: string): Promise<AdminUserRow[]> {
@@ -244,6 +283,7 @@ export async function executeAdminReportAction(
 async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>(
   user: User,
   body:
+    | { action: 'audit-events'; actorUid: string; kind: string }
     | { action: 'overview' | 'session' }
     | { action: 'reports'; status: AdminReportStatusFilter }
     | { action: 'report-action'; assigneeUid: string; note: string; reportAction: AdminReportAction; reportId: string }
@@ -283,6 +323,29 @@ function isAdminUserRow(value: unknown): value is AdminUserRow {
     typeof row.email === 'string' &&
     typeof row.uid === 'string' &&
     typeof row.updatedAt === 'string'
+  );
+}
+
+function isAdminAuditEventRow(value: unknown): value is AdminAuditEventRow {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.action === 'string' &&
+    typeof row.actorEmail === 'string' &&
+    typeof row.actorUid === 'string' &&
+    typeof row.assignedTo === 'string' &&
+    typeof row.createdAt === 'string' &&
+    typeof row.eventPath === 'string' &&
+    typeof row.id === 'string' &&
+    typeof row.kind === 'string' &&
+    typeof row.note === 'string' &&
+    typeof row.reportId === 'string' &&
+    typeof row.roomId === 'string' &&
+    typeof row.status === 'string' &&
+    typeof row.targetUid === 'string'
   );
 }
 

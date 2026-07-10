@@ -256,8 +256,34 @@ Review notes:
 
 # Wave 7 - Audit log and accountability
 Status: INCOMPLETE
+Checkpoint commit: f6522ea3ac8f2de8f994f2f4bf4c430bcaad1dbb
+Plan: COMPLETE
+Implementation: COMPLETE
+Verification: PASSED
+Review: PASSED
+Commit: NOT_STARTED
 
 Create immutable admin audit events for role changes, user actions, room actions, report resolutions, and dashboard data exports. Restrict audit writes to backend services and allow admin reads with filters for actor, target, action type, and date.
+
+Wave 7 implementation plan:
+- Touched files: extend the admin dashboard Function core and HTTP handler with an `audit-events` action, add focused tests for audit query normalization and safe audit row mapping, and update the Vite Audit route with backend-limited filters, refresh, loading/error/empty states, actor/target/action/date fields, and links back to related room/report/user identifiers when available.
+- Risks: exposing private payload details, allowing client-side audit writes, broad client collection scans, mixing audit records with mutable workflow state, or importing Expo/mobile modules into the Vite dashboard. Keep audit reads behind the admin-only Function, return bounded rows, keep writes backend-only, and preserve Firestore rules that deny client writes.
+- Required tests/checks: run focused Functions tests, `npm --prefix functions run lint`, `npm --prefix admin-dashboard run typecheck`, `npm --prefix admin-dashboard run build`, and root `npm test`. Do not run Firebase emulator commands in this wave.
+- Rollback considerations: revert the Wave 7 implementation commit to remove admin audit listing APIs, tests, and dashboard Audit UI; checkpoint `f6522ea3ac8f2de8f994f2f4bf4c430bcaad1dbb` preserves the pre-Wave 7 state.
+
+Verification notes:
+- PASSED: `npx vitest run functions\adminDashboardCore.test.mjs functions\adminClaimsCore.test.mjs functions\livekitTokenCore.test.mjs functions\roomCommandCore.test.mjs`
+- PASSED: `npm --prefix functions run lint`
+- PASSED: `npm --prefix admin-dashboard run typecheck`
+- PASSED: `npm --prefix admin-dashboard run build`
+- PASSED: `npm test`
+
+Review notes:
+- PASSED: Audit event reads are routed through the admin-only Function and return bounded rows from `adminAuditEvents`.
+- PASSED: The Vite dashboard does not read Firestore directly or write audit documents.
+- PASSED: Audit row mapping exposes operational actor, target, kind, action, and timestamp fields without arbitrary private payloads.
+- PASSED: Firestore rules continue to deny client writes to audit paths; no destructive delete or emulator command was added.
+- PASSED: No Expo, React Native, mobile navigation, service credentials, or Vite secret variables were added.
 
 # Wave 8 - Dashboard UI polish and responsive states
 Status: INCOMPLETE

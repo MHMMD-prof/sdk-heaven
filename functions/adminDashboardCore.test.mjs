@@ -5,9 +5,11 @@ const require = createRequire(import.meta.url);
 const {
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminAuditEventDocument,
   mapAdminReportDocument,
   mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminAuditQuery,
   normalizeAdminReportAction,
   normalizeAdminReportsQuery,
   normalizeAdminRoomAction,
@@ -85,6 +87,13 @@ describe('adminDashboardCore', () => {
     expect(resolveAdminDashboardRequest({ body: { action: 'report-action' }, decodedToken: adminToken })).toMatchObject({
       ok: true,
       value: { action: 'report-action' },
+    });
+  });
+
+  it('allows verified custom-claim admins to resolve audit log requests', () => {
+    expect(resolveAdminDashboardRequest({ body: { action: 'audit-events' }, decodedToken: adminToken })).toMatchObject({
+      ok: true,
+      value: { action: 'audit-events' },
     });
   });
 
@@ -199,6 +208,19 @@ describe('adminDashboardCore', () => {
     expect(normalizeAdminReportAction({ reportAction: 'resolve', reportId: 'report-1', note: 'x' })).toMatchObject({ ok: false, status: 400 });
   });
 
+  it('normalizes audit event queries with conservative limits', () => {
+    expect(normalizeAdminAuditQuery({ actorUid: ' admin-1 ', kind: ' report-workflow ', limit: 250 })).toEqual({
+      actorUid: 'admin-1',
+      kind: 'report-workflow',
+      limit: 25,
+    });
+    expect(normalizeAdminAuditQuery({ limit: 12 })).toEqual({
+      actorUid: '',
+      kind: '',
+      limit: 12,
+    });
+  });
+
   it('maps and filters safe admin user profile rows', () => {
     const updatedAt = { toMillis: () => Date.parse('2026-07-08T00:00:00.000Z') };
     const row = mapAdminUserProfileDocument('user-1', {
@@ -279,6 +301,41 @@ describe('adminDashboardCore', () => {
       subjectType: 'member',
       targetUid: 'user-2',
       updatedAt: '',
+    });
+  });
+
+  it('maps safe admin audit event rows', () => {
+    const createdAt = { toMillis: () => Date.parse('2026-07-08T03:00:00.000Z') };
+    expect(
+      mapAdminAuditEventDocument('audit-1', {
+        action: 'report-resolve',
+        actorEmail: 'admin@example.com',
+        actorUid: 'admin-1',
+        assignedTo: 'admin-2',
+        createdAt,
+        eventPath: 'rooms/room-1/moderationEvents/event-1',
+        kind: 'report-workflow',
+        note: 'handled',
+        privatePayload: 'hidden',
+        reportId: 'report-1',
+        roomId: 'room-1',
+        status: 'resolved',
+        targetUid: 'user-2',
+      }),
+    ).toEqual({
+      action: 'report-resolve',
+      actorEmail: 'admin@example.com',
+      actorUid: 'admin-1',
+      assignedTo: 'admin-2',
+      createdAt: '2026-07-08T03:00:00.000Z',
+      eventPath: 'rooms/room-1/moderationEvents/event-1',
+      id: 'audit-1',
+      kind: 'report-workflow',
+      note: 'handled',
+      reportId: 'report-1',
+      roomId: 'room-1',
+      status: 'resolved',
+      targetUid: 'user-2',
     });
   });
 

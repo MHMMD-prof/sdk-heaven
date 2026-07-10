@@ -1,6 +1,7 @@
 const { hasAdminClaim } = require('./adminClaimsCore');
 
-const ADMIN_DASHBOARD_ACTIONS = ['overview', 'report-action', 'reports', 'room-action', 'rooms', 'session', 'user-note', 'users'];
+const ADMIN_DASHBOARD_ACTIONS = ['audit-events', 'overview', 'report-action', 'reports', 'room-action', 'rooms', 'session', 'user-note', 'users'];
+const MAX_AUDIT_RESULTS = 25;
 const ADMIN_REPORT_ACTIONS = ['assign', 'resolve'];
 const ADMIN_REPORT_STATUSES = ['open', 'triage', 'resolved'];
 const ADMIN_ROOM_ACTIONS = ['close-room', 'remove-member'];
@@ -27,6 +28,21 @@ function normalizeAdminUsersQuery(body = {}) {
     limit,
     readLimit: search ? MAX_USER_SEARCH_SCAN_RESULTS : limit,
     search,
+  };
+}
+
+function normalizeAdminAuditQuery(body = {}) {
+  const rawLimit = Number(body.limit);
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_AUDIT_RESULTS)
+    : MAX_AUDIT_RESULTS;
+  const actorUid = typeof body.actorUid === 'string' ? body.actorUid.trim().slice(0, 80) : '';
+  const kind = typeof body.kind === 'string' ? body.kind.trim().slice(0, 80) : '';
+
+  return {
+    actorUid,
+    kind,
+    limit,
   };
 }
 
@@ -241,6 +257,30 @@ function mapAdminReportDocument(id, data = {}) {
   };
 }
 
+function mapAdminAuditEventDocument(id, data = {}) {
+  const eventId = typeof data.id === 'string' && data.id.trim() ? data.id.trim() : id;
+
+  if (!eventId) {
+    return null;
+  }
+
+  return {
+    action: typeof data.action === 'string' ? data.action.trim().slice(0, 120) : '',
+    actorEmail: typeof data.actorEmail === 'string' ? data.actorEmail.trim().slice(0, 160) : '',
+    actorUid: typeof data.actorUid === 'string' ? data.actorUid.trim() : '',
+    assignedTo: typeof data.assignedTo === 'string' ? data.assignedTo.trim() : '',
+    createdAt: readTimestampIso(data.createdAt),
+    eventPath: typeof data.eventPath === 'string' ? data.eventPath.trim() : '',
+    id: eventId,
+    kind: typeof data.kind === 'string' ? data.kind.trim().slice(0, 80) : '',
+    note: typeof data.note === 'string' ? data.note.trim().slice(0, 500) : '',
+    reportId: typeof data.reportId === 'string' ? data.reportId.trim() : '',
+    roomId: typeof data.roomId === 'string' ? data.roomId.trim() : '',
+    status: typeof data.status === 'string' ? data.status.trim() : '',
+    targetUid: typeof data.targetUid === 'string' ? data.targetUid.trim() : '',
+  };
+}
+
 function filterAdminUserRows(rows, search) {
   if (!search) {
     return rows;
@@ -276,9 +316,11 @@ module.exports = {
   ADMIN_DASHBOARD_ACTIONS,
   createAdminOverviewPayload,
   filterAdminUserRows,
+  mapAdminAuditEventDocument,
   mapAdminReportDocument,
   mapAdminRoomDocument,
   mapAdminUserProfileDocument,
+  normalizeAdminAuditQuery,
   normalizeAdminReportAction,
   normalizeAdminReportsQuery,
   normalizeAdminRoomAction,
