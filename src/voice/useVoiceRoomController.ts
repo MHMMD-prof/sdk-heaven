@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo } from 'react';
-import { AppState } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 
 import { VoiceRoom } from '../types/voice';
 import { createMockVoiceConnectOptions } from './createMockVoiceConnectOptions';
 import { requestLiveKitConnectOptions } from './requestLiveKitConnectOptions';
+import { shouldReconnectVoiceRoom } from './roomReconnect';
 import { VoiceRoomCommandType } from './types';
 import { useRoomHostControls } from './useRoomHostControls';
 import { useVoiceProviderConfig } from './useVoiceProviderConfig';
@@ -20,6 +21,7 @@ export function useVoiceRoomController(room: VoiceRoom) {
   const providerConfig = useVoiceProviderConfig();
   const hostControls = useRoomHostControls(room);
   const voiceRoom = useVoiceRoom();
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const {
     connect,
     connectionState,
@@ -71,13 +73,21 @@ export function useVoiceRoomController(room: VoiceRoom) {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+
+      if (shouldReconnectVoiceRoom(previousState, nextState)) {
+        void reconnectToRoom();
+        return;
+      }
+
       if (nextState !== 'active') {
         void disconnect();
       }
     });
 
     return () => subscription.remove();
-  }, [disconnect]);
+  }, [disconnect, reconnectToRoom]);
 
   const statusLabel = useMemo(() => {
     if (connectionState === 'connecting') {
