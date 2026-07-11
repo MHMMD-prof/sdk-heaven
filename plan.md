@@ -69,7 +69,36 @@ Remaining:
 Make live room presence feel accurate across normal app use: fresh heartbeats, stale cleanup, leave cleanup, and speaker/listener counts that reflect who is actually online. Keep membership as the authorization source and presence as live UI state only.
 
 # Wave 2 - Room reconnect and recovery
-Status: NOT_STARTED
+Status: COMPLETE
+Checkpoint: 75a0566
+Implementation Commit: 8a39492
+
+Phase Status:
+- Plan: COMPLETE
+- Implementation: COMPLETE
+- Verification: PASSED
+- Review: PASSED
+- Commit: COMPLETE
+
+Implementation Plan:
+- Touched files: update `src/voice/useVoiceRoomController.ts` to reconnect the current room when app state returns active after background/inactive disconnect, and add a focused lifecycle policy test under `src/voice/__tests__/`.
+- Risks: reconnect loops, reconnecting after an intentional leave/unmount, duplicate connection attempts, or losing existing role/member state. Keep the policy local to the mounted room screen and preserve the existing explicit leave path.
+- Required tests: new reconnect lifecycle unit test, focused voice room session tests, `npx tsc --noEmit`, and `npm test`.
+- Rollback: revert the Wave 2 implementation commit and the tracker completion commit, or return to checkpoint `75a0566`.
+
+Verification Notes:
+- FAILED then fixed: initial reconnect policy test imported the controller hook, which pulled untransformed `react-native` Flow syntax into Vitest.
+- PASSED after fix: `npx vitest run src\voice\__tests__\useVoiceRoomController.test.ts src\voice\__tests__\voiceRoomSessionReducer.test.ts src\voice\__tests__\roomPresence.test.ts`
+- PASSED after fix: `npx tsc --noEmit`
+- PASSED after fix: `npm test`
+
+Review Notes:
+- PASSED: reconnect policy is isolated in a pure helper and covered without importing React Native into Vitest.
+- PASSED: the mounted room screen disconnects on background/inactive and reconnects the same room when the app returns active.
+- PASSED: explicit leave/unmount behavior remains separate, so the wave does not add duplicate membership writes or alter room membership authorization.
+
+Remaining:
+- None.
 
 Recover the correct room state after app backgrounding, network drop, screen switch, or reconnect. Prevent duplicate membership, lost role state, broken local member data, and stale UI after reconnect.
 
