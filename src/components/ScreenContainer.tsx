@@ -13,23 +13,28 @@ import { colors, spacing } from '../theme';
 
 type ScreenContainerProps = PropsWithChildren<{
   bottomInset?: boolean;
+  decorativeGlows?: boolean;
   fixedBottom?: ReactNode;
   horizontalPadding?: number;
   topPadding?: number;
   scroll?: boolean;
   scrollEnabled?: boolean;
+  variant?: 'default' | 'ruby';
 }>;
 
 export function ScreenContainer({
   bottomInset = false,
   children,
+  decorativeGlows = true,
   fixedBottom,
   horizontalPadding = spacing.lg,
   scroll = true,
   scrollEnabled = true,
   topPadding,
+  variant = 'default',
 }: ScreenContainerProps) {
   const insets = useSafeAreaInsets();
+  const isRuby = variant === 'ruby';
 
   const content = (
     <View
@@ -47,15 +52,19 @@ export function ScreenContainer({
         },
       ]}
     >
-      <View style={styles.glowTop} />
-      <View style={styles.glowBottom} />
+      {decorativeGlows ? <View style={[styles.glowTop, isRuby && styles.rubyGlowTop]} /> : null}
+      {decorativeGlows ? <View style={[styles.glowBottom, isRuby && styles.rubyGlowBottom]} /> : null}
       {children}
     </View>
   );
 
   return (
     <LinearGradient
-      colors={[colors.backgroundDeep, colors.background, '#150A25', colors.backgroundDeep]}
+      colors={
+        isRuby
+          ? ['#020202', '#090505', '#140708', '#020202']
+          : [colors.backgroundDeep, colors.background, '#150A25', colors.backgroundDeep]
+      }
       start={{ x: 0.1, y: 0 }}
       end={{ x: 0.9, y: 1 }}
       style={styles.gradient}
@@ -83,7 +92,11 @@ export function ScreenContainer({
             pointerEvents="box-none"
             style={[
               styles.fixedBottom,
-              { paddingBottom: Math.max(insets.bottom, spacing.sm) },
+              {
+                backgroundColor: isRuby ? '#060202' : 'transparent',
+                paddingBottom: isRuby ? insets.bottom : Math.max(insets.bottom, spacing.sm),
+                paddingHorizontal: isRuby ? 0 : spacing.lg,
+              },
             ]}
           >
             {fixedBottom}
@@ -113,7 +126,6 @@ const styles = StyleSheet.create({
   fixedBottom: {
     bottom: 0,
     left: 0,
-    paddingHorizontal: spacing.lg,
     position: 'absolute',
     right: 0,
   },
@@ -134,5 +146,11 @@ const styles = StyleSheet.create({
     height: 230,
     borderRadius: 115,
     backgroundColor: 'rgba(232, 190, 97, 0.10)',
+  },
+  rubyGlowTop: {
+    backgroundColor: 'rgba(150, 18, 31, 0.22)',
+  },
+  rubyGlowBottom: {
+    backgroundColor: 'rgba(216, 168, 78, 0.08)',
   },
 });

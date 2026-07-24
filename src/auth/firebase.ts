@@ -5,14 +5,28 @@ import {
   initializeAuth,
 } from '@firebase/auth';
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import { Platform } from 'react-native';
 
 import { readFirebaseConfig } from './firebaseConfig';
 
 const firebaseConfig = readFirebaseConfig();
 
 export const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const firebaseDb = getFirestore(firebaseApp);
+export const firebaseDb = (() => {
+  if (Platform.OS === 'web') {
+    return getFirestore(firebaseApp);
+  }
+
+  try {
+    return initializeFirestore(firebaseApp, {
+      experimentalForceLongPolling: true,
+    });
+  } catch {
+    // Fast Refresh can reuse an instance that was initialized by the previous bundle.
+    return getFirestore(firebaseApp);
+  }
+})();
 
 export const firebaseAuth = (() => {
   try {

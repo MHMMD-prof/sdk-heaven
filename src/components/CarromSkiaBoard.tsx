@@ -2,16 +2,13 @@ import {
   Canvas,
   Circle,
   Group,
-  Image as SkiaImage,
   Line,
-  Rect,
-  useImage,
 } from '@shopify/react-native-skia';
-import { forwardRef, memo, ReactNode, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
-import { StyleSheet, View, ViewProps } from 'react-native';
+import { forwardRef, memo, ReactNode, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+import { Image, StyleSheet, View, ViewProps } from 'react-native';
 import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
 
-import { colors, radius, spacing } from '../theme';
+import { radius } from '../theme';
 import { CarromDisc, CarromShotGuide } from '../types/carrom';
 import {
   CARROM_EDGE_BOTTOM,
@@ -23,12 +20,12 @@ import {
 } from '../utils/carromEngine';
 import { CarromDebugOverlay } from './CarromDebugOverlay';
 
-const whitePieceImage = require('../../assets/carrom/piece-red.png');
-const blackPieceImage = require('../../assets/carrom/piece-black.png');
-const strikerPieceImage = require('../../assets/carrom/piece-striker.png');
 const MAX_DRAG_POWER = 260;
 const AIM_DOT_COUNT = 7;
 const AIM_DOT_INDICES = Array.from({ length: AIM_DOT_COUNT }, (_, index) => index);
+const PIECE_VISUAL_SCALE = 1.18;
+const STRIKER_VISUAL_SCALE = 1.12;
+export const CARROM_BOARD_VISIBLE_HEIGHT_RATIO = 0.9;
 
 export type CarromSkiaBoardHandle = {
   syncDiscPositions: (discs: CarromDisc[], scale: number) => void;
@@ -84,19 +81,6 @@ export const CarromSkiaBoard = memo(
     },
     ref,
   ) {
-    const board = useImage(boardImage);
-    const blackPiece = useImage(blackPieceImage);
-    const whitePiece = useImage(whitePieceImage);
-    const strikerPiece = useImage(strikerPieceImage);
-    const pieceImages = useMemo(
-      () => ({
-        black: blackPiece,
-        queen: whitePiece,
-        striker: strikerPiece,
-        white: whitePiece,
-      }),
-      [blackPiece, strikerPiece, whitePiece],
-    );
     const discHandlesRef = useRef<Record<string, CarromSkiaDiscHandle | undefined>>({});
     const idleVisibility = useSharedValue(isMoving ? 0 : 1);
     const aimVisible = useSharedValue(0);
@@ -184,15 +168,23 @@ export const CarromSkiaBoard = memo(
     );
 
     return (
-      <View style={[styles.boardWrap, { height: boardSize, width: boardSize }]}>
+      <View
+        style={[
+          styles.boardWrap,
+          { height: boardSize * CARROM_BOARD_VISIBLE_HEIGHT_RATIO, width: boardSize },
+        ]}
+      >
+        <Image
+          accessibilityIgnoresInvertColors
+          resizeMode="stretch"
+          source={boardImage}
+          style={[styles.boardImage, { height: boardSize, width: boardSize }]}
+        />
         <Canvas style={styles.canvas}>
-          <SkiaImage fit="fill" height={boardSize} image={board} width={boardSize} x={0} y={0} />
-
           {discs.map((disc) => (
             <CarromSkiaDisc
               disc={disc}
               effectsEnabled={effectsEnabled}
-              image={pieceImages[disc.kind]}
               key={disc.id}
               idleVisibility={idleVisibility}
               onRegister={registerDiscHandle}
@@ -205,7 +197,6 @@ export const CarromSkiaBoard = memo(
             aimReachX={aimReachX}
             aimReachY={aimReachY}
             baselineY={baselineY}
-            boardSize={boardSize}
             guideEndX={aimEndX}
             guideEndY={aimEndY}
             guidePower={aimPower}
@@ -229,7 +220,6 @@ export const CarromSkiaBoard = memo(
 type CarromSkiaDiscProps = {
   disc: CarromDisc;
   effectsEnabled: boolean;
-  image: ReturnType<typeof useImage>;
   idleVisibility: ReturnType<typeof useSharedValue<number>>;
   onRegister: (id: string, handle: CarromSkiaDiscHandle | undefined) => void;
   scale: number;
@@ -238,7 +228,6 @@ type CarromSkiaDiscProps = {
 function CarromSkiaDisc({
   disc,
   effectsEnabled,
-  image,
   idleVisibility,
   onRegister,
   scale,
@@ -252,7 +241,14 @@ function CarromSkiaDisc({
   const centerY = useDerivedValue(() => y.value + size.value / 2);
   const discRadius = useDerivedValue(() => size.value / 2);
   const queenHaloRadius = useDerivedValue(() => size.value / 2 + 10);
-  const queenRingRadius = useDerivedValue(() => size.value / 2 - 1);
+  const shadowY = useDerivedValue(() => centerY.value + size.value * 0.06);
+  const faceRadius = useDerivedValue(() => size.value * 0.42);
+  const ringRadius = useDerivedValue(() => size.value * 0.31);
+  const centerRadius = useDerivedValue(() => size.value * 0.13);
+  const shineX = useDerivedValue(() => centerX.value - size.value * 0.13);
+  const shineY = useDerivedValue(() => centerY.value - size.value * 0.14);
+  const shineRadius = useDerivedValue(() => size.value * 0.08);
+  const palette = getDiscPalette(disc.kind);
   const lastLayoutRef = useRef<DiscRenderLayout>({
     ...initial,
     opacity: disc.pocketed ? 0 : 1,
@@ -328,26 +324,19 @@ function CarromSkiaDisc({
           r={queenHaloRadius}
         />
       ) : null}
-      {image ? (
-        <SkiaImage fit="contain" height={size} image={image} width={size} x={x} y={y} />
-      ) : (
-        <Circle
-          color={getFallbackDiscColor(disc)}
-          cx={centerX}
-          cy={centerY}
-          r={discRadius}
-        />
-      )}
-      {disc.kind === 'queen' ? (
-        <Circle
-          color="rgba(246,217,145,0.82)"
-          cx={centerX}
-          cy={centerY}
-          r={queenRingRadius}
-          style="stroke"
-          strokeWidth={2}
-        />
-      ) : null}
+      <Circle color="rgba(0,0,0,0.52)" cx={centerX} cy={shadowY} r={discRadius} />
+      <Circle color={palette.rim} cx={centerX} cy={centerY} r={discRadius} />
+      <Circle color={palette.face} cx={centerX} cy={centerY} r={faceRadius} />
+      <Circle
+        color={palette.ring}
+        cx={centerX}
+        cy={centerY}
+        r={ringRadius}
+        style="stroke"
+        strokeWidth={1.5}
+      />
+      <Circle color={palette.center} cx={centerX} cy={centerY} r={centerRadius} />
+      <Circle color={palette.shine} cx={shineX} cy={shineY} r={shineRadius} />
     </Group>
   );
 }
@@ -356,7 +345,6 @@ type CarromSkiaAimLayerProps = Pick<
   CarromSkiaBoardProps,
   | 'aimAssistEnabled'
   | 'baselineY'
-  | 'boardSize'
   | 'scale'
 > & {
   aimReachX: ReturnType<typeof useSharedValue<number>>;
@@ -376,7 +364,6 @@ function CarromSkiaAimLayer({
   aimReachX,
   aimReachY,
   baselineY,
-  boardSize,
   guideEndX,
   guideEndY,
   guidePower,
@@ -394,30 +381,29 @@ function CarromSkiaAimLayer({
   const guideStart = useDerivedValue(() => ({ x: guideStartX.value, y: guideStartY.value }));
   const guideEnd = useDerivedValue(() => ({ x: guideEndX.value, y: guideEndY.value }));
   const reachEnd = useDerivedValue(() => ({ x: aimReachX.value, y: aimReachY.value }));
-  const powerWidth = useDerivedValue(() => (boardSize - spacing.xl * 2) * guidePower.value);
   const activeGuideVisibility = useDerivedValue(() => guideVisible.value * idleVisibility.value);
 
   return (
     <Group opacity={idleVisibility}>
       <Line
-        color="rgba(246,217,145,0.86)"
+        color="rgba(224,171,70,0.88)"
         p1={{ x: railStart, y: baseline }}
         p2={{ x: railEnd, y: baseline }}
         strokeWidth={2}
       />
-      <Circle color={colors.goldSoft} cx={railStart} cy={baseline} r={4} />
-      <Circle color={colors.goldSoft} cx={railEnd} cy={baseline} r={4} />
+      <Circle color="#F2CF78" cx={railStart} cy={baseline} r={4} />
+      <Circle color="#F2CF78" cx={railEnd} cy={baseline} r={4} />
 
       <Group opacity={activeGuideVisibility}>
           <Circle
-            color="rgba(246,217,145,0.38)"
+            color="rgba(229,177,75,0.28)"
             cx={guideStartX}
             cy={guideStartY}
             r={auraRadius}
           />
           {aimAssistEnabled ? (
             <Line
-              color="rgba(255,247,232,0.42)"
+              color="rgba(255,248,232,0.74)"
               p1={guideStart}
               p2={reachEnd}
               strokeWidth={2}
@@ -443,20 +429,6 @@ function CarromSkiaAimLayer({
             : null}
           <Circle color={guidePowerColor} cx={guideEndX} cy={guideEndY} r={7} />
           <Circle color="rgba(255,255,255,0.92)" cx={guideEndX} cy={guideEndY} r={2} />
-          <Rect
-            color="rgba(8,5,15,0.58)"
-            height={10}
-            width={boardSize - spacing.xl * 2}
-            x={spacing.xl}
-            y={boardSize - spacing.md - 10}
-          />
-          <Rect
-            color={guidePowerColor}
-            height={10}
-            width={powerWidth}
-            x={spacing.xl}
-            y={boardSize - spacing.md - 10}
-          />
         </Group>
     </Group>
   );
@@ -482,11 +454,12 @@ function CarromSkiaAimDot({
   const cx = useDerivedValue(() => guideStartX.value + (guideEndX.value - guideStartX.value) * ratio);
   const cy = useDerivedValue(() => guideStartY.value + (guideEndY.value - guideStartY.value) * ratio);
 
-  return <Circle color={`rgba(246,217,145,${opacity})`} cx={cx} cy={cy} r={3} />;
+  return <Circle color={`rgba(255,248,232,${opacity})`} cx={cx} cy={cy} r={3} />;
 }
 
 function getDiscLayout(disc: CarromDisc, scale: number) {
-  const size = disc.radius * 2 * scale;
+  const visualScale = disc.kind === 'striker' ? STRIKER_VISUAL_SCALE : PIECE_VISUAL_SCALE;
+  const size = disc.radius * 2 * scale * visualScale;
 
   return {
     size,
@@ -495,19 +468,52 @@ function getDiscLayout(disc: CarromDisc, scale: number) {
   };
 }
 
-function getFallbackDiscColor(disc: CarromDisc) {
-  if (disc.kind === 'black') {
-    return '#101014';
+function getDiscPalette(kind: CarromDisc['kind']) {
+  if (kind === 'black') {
+    return {
+      center: '#080809',
+      face: '#151517',
+      rim: '#5A4936',
+      ring: '#4E4944',
+      shine: 'rgba(255,255,255,0.18)',
+    };
   }
 
-  if (disc.kind === 'striker') {
-    return '#F6E8CF';
+  if (kind === 'queen') {
+    return {
+      center: '#7F0A10',
+      face: '#B71922',
+      rim: '#E9B64E',
+      ring: '#F26A62',
+      shine: 'rgba(255,239,218,0.42)',
+    };
   }
 
-  return '#D52F58';
+  if (kind === 'striker') {
+    return {
+      center: '#7B1A18',
+      face: '#F0DFC0',
+      rim: '#E9B64E',
+      ring: '#B77B25',
+      shine: 'rgba(255,255,255,0.68)',
+    };
+  }
+
+  return {
+    center: '#D4B47B',
+    face: '#F1E2C4',
+    rim: '#D7A84B',
+    ring: '#C69D59',
+    shine: 'rgba(255,255,255,0.74)',
+  };
 }
 
 const styles = StyleSheet.create({
+  boardImage: {
+    left: 0,
+    position: 'absolute',
+    top: 0,
+  },
   boardWrap: {
     alignSelf: 'center',
     borderRadius: radius.lg,
@@ -548,12 +554,12 @@ function getAimReachToRail(x: number, y: number, angle: number) {
 
 function getAimPowerTone(powerPercent: number) {
   if (powerPercent > 0.72) {
-    return '#FF7B6E';
+    return '#F0C45C';
   }
 
   if (powerPercent > 0.42) {
-    return colors.goldSoft;
+    return '#F4D27A';
   }
 
-  return '#63F4C4';
+  return '#FFF2D2';
 }

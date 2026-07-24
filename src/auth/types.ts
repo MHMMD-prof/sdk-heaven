@@ -5,9 +5,7 @@ export type UserProfile = {
   avatarLabel: string;
 };
 
-export type AuthUser = UserProfile & {
-  emailVerified: boolean;
-};
+export type AuthUser = UserProfile;
 
 export type SaveProfileInput = {
   displayName: string;

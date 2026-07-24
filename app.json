@@ -22,7 +22,23 @@
           "enableBackgroundRecording": false,
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#B31224",
+          "defaultChannel": "social",
+          "icon": "./assets/android-icon-monochrome.png"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "نحتاج إلى الوصول إلى صورك لاختيار صورة آمنة للغرفة."
+        }
+      ],
+      "expo-asset",
+      "expo-font"
     ],
     "ios": {
       "bundleIdentifier": "com.mh.games",
@@ -50,7 +66,6 @@
         "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH"
       ],
-      "usesCleartextTraffic": true,
       "predictiveBackGestureEnabled": false,
       "googleServicesFile": "./google-services.json",
       "package": "com.mh.games"

@@ -1,6 +1,6 @@
 import { VoiceRoom, VoiceRoomMember, VoiceRoomMemberRole } from '../types/voice';
 
-export type RoomPresenceStatus = 'online' | 'stale';
+export type RoomPresenceStatus = 'online' | 'reconnecting' | 'stale';
 
 export type RoomPresenceDocument = {
   uid: string;
@@ -10,6 +10,8 @@ export type RoomPresenceDocument = {
   status: RoomPresenceStatus;
   canPublishAudio: boolean;
   lastSeenAtMs: number;
+  leaseExpiresAtMs?: number;
+  sessionId?: string;
 };
 
 export const ROOM_PRESENCE_FRESH_MS = 45_000;
@@ -31,13 +33,14 @@ export function mapRoomPresenceDocument(data: unknown): RoomPresenceDocument | n
     typeof candidate.displayName !== 'string' ||
     typeof candidate.avatarLabel !== 'string' ||
     (candidate.role !== 'host' && candidate.role !== 'speaker' && candidate.role !== 'listener') ||
-    (candidate.status !== 'online' && candidate.status !== 'stale') ||
+    (candidate.status !== 'online' && candidate.status !== 'reconnecting' && candidate.status !== 'stale') ||
     typeof candidate.canPublishAudio !== 'boolean' ||
     lastSeenAtMs === null
   ) {
     return null;
   }
 
+  const leaseExpiresAtMs = readTimestampMs(candidate.leaseExpiresAt);
   return {
     uid: candidate.uid,
     displayName: candidate.displayName,
@@ -46,6 +49,8 @@ export function mapRoomPresenceDocument(data: unknown): RoomPresenceDocument | n
     status: candidate.status,
     canPublishAudio: candidate.canPublishAudio,
     lastSeenAtMs,
+    ...(leaseExpiresAtMs !== null ? { leaseExpiresAtMs } : {}),
+    ...(typeof candidate.sessionId === 'string' ? { sessionId: candidate.sessionId } : {}),
   };
 }
 
@@ -54,7 +59,9 @@ export function isRoomPresenceFresh(
   nowMs = Date.now(),
   freshMs = ROOM_PRESENCE_FRESH_MS,
 ) {
-  return presence.status === 'online' && nowMs - presence.lastSeenAtMs <= freshMs;
+  return presence.status === 'online'
+    && nowMs - presence.lastSeenAtMs <= freshMs
+    && (presence.leaseExpiresAtMs === undefined || presence.leaseExpiresAtMs > nowMs);
 }
 
 export function applyRoomPresence(

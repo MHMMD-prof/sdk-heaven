@@ -4,7 +4,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 const host = '127.0.0.1';
-const port = await findOpenPort();
+const [firestorePort, storagePort] = await findOpenPorts(2);
 const tempDir = path.join(process.cwd(), '.firebase-rules-test');
 const configPath = path.join(tempDir, 'firebase.json');
 
@@ -16,10 +16,17 @@ await writeFile(
       firestore: {
         rules: 'firestore.rules',
       },
+      storage: {
+        rules: 'storage.rules',
+      },
       emulators: {
         firestore: {
           host,
-          port,
+          port: firestorePort,
+        },
+        storage: {
+          host,
+          port: storagePort,
         },
       },
     },
@@ -33,56 +40,64 @@ const exitCode = await runCommand(configPath);
 await rm(tempDir, { force: true, recursive: true });
 process.exit(exitCode);
 
-function findOpenPort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
+async function findOpenPorts(count) {
+  const servers = [];
+  const ports = [];
 
-    server.once('error', reject);
-    server.listen(0, host, () => {
-      const address = server.address();
-      server.close(() => {
+  for (let index = 0; index < count; index += 1) {
+    const server = net.createServer();
+    const port = await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, host, () => {
+        const address = server.address();
         if (address && typeof address === 'object') {
           resolve(address.port);
           return;
         }
-
-        reject(new Error('Could not allocate a Firestore emulator port.'));
+        reject(new Error('Could not allocate a Firebase emulator port.'));
       });
     });
-  });
+    servers.push(server);
+    ports.push(port);
+  }
+
+  await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
+  return ports;
 }
 
 function runCommand(configPath) {
   return new Promise((resolve) => {
-    const args =
-      process.platform === 'win32'
-        ? [
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-Command',
-            `npx firebase-tools@13.35.1 emulators:exec --only firestore --project demo-auth-rules-wave8 --config '${configPath}' 'vitest run firestore.rules.emulator.test.mjs'`,
-          ]
-        : [
-            'firebase-tools@13.35.1',
-            'emulators:exec',
-            '--only',
-            'firestore',
-            '--project',
-            'demo-auth-rules-wave8',
-            '--config',
-            configPath,
-            'vitest run firestore.rules.emulator.test.mjs',
-          ];
-    const command = process.platform === 'win32' ? 'powershell.exe' : 'npx';
-    console.log(`Running Firestore rules tests on ${host}:${port}`);
-    console.log([command, ...args].join(' '));
-    const child = spawn(command, args, {
+    const args = [
+      'firebase-tools@13.35.1',
+      'emulators:exec',
+      '--only',
+      'firestore,storage',
+      '--project',
+      'demo-auth-rules-wave8',
+      '--config',
+      configPath,
+      'vitest run --no-file-parallelism firestore.rules.emulator.test.mjs storage.rules.emulator.test.mjs',
+    ];
+    const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : 'npx';
+    const spawnArgs = process.platform === 'win32'
+      ? [
+          '/d',
+          '/s',
+          '/c',
+          `npx firebase-tools@13.35.1 emulators:exec --only firestore,storage --project demo-auth-rules-wave8 --config "${configPath}" "vitest run --no-file-parallelism firestore.rules.emulator.test.mjs storage.rules.emulator.test.mjs"`,
+        ]
+      : args;
+    console.log(`Running Firestore rules tests on ${host}:${firestorePort}`);
+    console.log(`Running Storage rules tests on ${host}:${storagePort}`);
+    console.log([command, ...spawnArgs].join(' '));
+    const child = spawn(command, spawnArgs, {
       env: {
         ...process.env,
-        FIRESTORE_RULES_TEST_PORT: String(port),
+        FIRESTORE_RULES_TEST_PORT: String(firestorePort),
+        STORAGE_RULES_TEST_PORT: String(storagePort),
       },
       stdio: 'inherit',
+      windowsHide: true,
     });
 
     child.on('close', (code) => resolve(code ?? 1));

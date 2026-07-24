@@ -7,6 +7,7 @@ import {
 } from 'livekit-client';
 
 import { VoiceClient } from './VoiceClient';
+import { debugError, debugLog } from '../utils/debugLog';
 import {
   VoiceClientEvent,
   VoiceClientEventListener,
@@ -32,6 +33,13 @@ export class LiveKitVoiceClient implements VoiceClient {
     }
 
     const attemptId = this.connectAttemptId + 1;
+    debugLog('voice.livekit', 'connect:start', {
+      roomId: options.roomId,
+      hasServerUrl: Boolean(options.serverUrl),
+      hasToken: Boolean(options.token),
+      canPublishAudio: options.canPublishAudio,
+      attemptId,
+    });
     this.connectAttemptId = attemptId;
     const previousRoom = this.room;
     this.teardownRoom();
@@ -47,9 +55,12 @@ export class LiveKitVoiceClient implements VoiceClient {
     this.bindRoomEvents(room);
 
     try {
+      debugLog('voice.livekit', 'audioSession:start', { roomId: options.roomId, attemptId });
       await AudioSession.startAudioSession();
       this.audioSessionActive = true;
+      debugLog('voice.livekit', 'roomConnect:start', { roomId: options.roomId, attemptId });
       await room.connect(options.serverUrl, options.token);
+      debugLog('voice.livekit', 'roomConnect:success', { roomId: options.roomId, attemptId });
 
       if (attemptId !== this.connectAttemptId || this.room !== room) {
         room.disconnect();
@@ -60,9 +71,12 @@ export class LiveKitVoiceClient implements VoiceClient {
       }
 
       if (options.canPublishAudio !== false) {
+        debugLog('voice.livekit', 'microphoneEnable:start', { roomId: options.roomId, attemptId });
         await room.localParticipant.setMicrophoneEnabled(true);
+        debugLog('voice.livekit', 'microphoneEnable:success', { roomId: options.roomId, attemptId });
       }
     } catch (error) {
+      debugError('voice.livekit', 'connect:error', error, { roomId: options.roomId, attemptId });
       const ownsCurrentRoom = this.room === room;
 
       if (ownsCurrentRoom) {
@@ -83,6 +97,11 @@ export class LiveKitVoiceClient implements VoiceClient {
 
     this.syncParticipants();
     this.syncSpeakingParticipants();
+    debugLog('voice.livekit', 'connect:complete', {
+      roomId: options.roomId,
+      participantCount: this.participants.length,
+      attemptId,
+    });
     this.setConnectionState('connected');
   }
 
@@ -93,6 +112,7 @@ export class LiveKitVoiceClient implements VoiceClient {
     this.teardownRoom();
 
     if (room) {
+      debugLog('voice.livekit', 'disconnect:room', {});
       room.disconnect();
     }
 
@@ -223,6 +243,7 @@ export class LiveKitVoiceClient implements VoiceClient {
   }
 
   private setConnectionState(state: VoiceConnectionState) {
+    debugLog('voice.livekit', 'state', { state });
     this.connectionState = state;
     this.emitEvent({ type: 'connectionStateChanged', connectionState: state });
   }

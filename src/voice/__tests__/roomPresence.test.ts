@@ -81,6 +81,35 @@ describe('roomPresence', () => {
     expect(mapRoomPresenceDocument({ uid: 'uid-1', status: 'online' })).toBeNull();
   });
 
+  it('uses one leased session record across background reconnect churn', () => {
+    const reconnecting = mapRoomPresenceDocument({
+      uid: 'uid-1',
+      displayName: 'Dana',
+      avatarLabel: 'D',
+      role: 'speaker',
+      status: 'reconnecting',
+      canPublishAudio: true,
+      sessionId: 'presence-session-1',
+      lastSeenAt: 1_000,
+      leaseExpiresAt: 46_000,
+    });
+    const online = mapRoomPresenceDocument({
+      uid: 'uid-1',
+      displayName: 'Dana',
+      avatarLabel: 'D',
+      role: 'speaker',
+      status: 'online',
+      canPublishAudio: true,
+      sessionId: 'presence-session-1',
+      lastSeenAt: 2_000,
+      leaseExpiresAt: 47_000,
+    });
+    expect(reconnecting).toMatchObject({ sessionId: 'presence-session-1', status: 'reconnecting' });
+    expect(isRoomPresenceFresh(reconnecting!, 2_000)).toBe(false);
+    expect(isRoomPresenceFresh(online!, 2_000)).toBe(true);
+    expect(isRoomPresenceFresh(online!, 47_001)).toBe(false);
+  });
+
   it('derives speakers, listeners, and counts from fresh presence', () => {
     const updatedRoom = applyRoomPresence(
       room,

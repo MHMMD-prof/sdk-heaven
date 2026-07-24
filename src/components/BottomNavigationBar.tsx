@@ -1,5 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../theme';
 import { MainTabKey } from '../types/navigation';
@@ -7,11 +7,12 @@ import { MainTabKey } from '../types/navigation';
 const tabs: Array<{
   key: MainTabKey;
   label: string;
-  icon: string;
+  icon: ImageSourcePropType;
 }> = [
-  { key: 'groups', label: 'المجموعات', icon: '◎' },
-  { key: 'home', label: 'الرئيسية', icon: '◆' },
-  { key: 'games', label: 'الألعاب', icon: '♕' },
+  { key: 'home', label: 'الرئيسية', icon: require('../../assets/home/icons/home.png') },
+  { key: 'groups', label: 'الصوتية', icon: require('../../assets/home/icons/voice.png') },
+  { key: 'games', label: 'الألعاب', icon: require('../../assets/home/icons/games.png') },
+  { key: 'me', label: 'أنا', icon: require('../../assets/home/icons/profile.png') },
 ];
 
 type BottomNavigationBarProps = {
@@ -23,7 +24,7 @@ export function BottomNavigationBar({ activeTab, onTabPress }: BottomNavigationB
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       <LinearGradient
-        colors={['rgba(17,12,28,0.96)', 'rgba(8,5,15,0.98)']}
+        colors={['#180709', '#060202']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.bar}
@@ -34,6 +35,7 @@ export function BottomNavigationBar({ activeTab, onTabPress }: BottomNavigationB
           return (
             <Pressable
               accessibilityRole="tab"
+              accessibilityLabel={tab.label}
               accessibilityState={{ selected: isActive }}
               key={tab.key}
               onPress={() => onTabPress(tab.key)}
@@ -44,7 +46,7 @@ export function BottomNavigationBar({ activeTab, onTabPress }: BottomNavigationB
               ]}
             >
               <View style={[styles.iconShell, isActive && styles.activeIconShell]}>
-                <Text style={[styles.icon, isActive && styles.activeIcon]}>{tab.icon}</Text>
+                <Image source={tab.icon} style={[styles.icon, !isActive && styles.inactiveIcon]} />
               </View>
               <Text style={[styles.label, isActive && styles.activeLabel]}>{tab.label}</Text>
             </Pressable>
@@ -57,18 +59,20 @@ export function BottomNavigationBar({ activeTab, onTabPress }: BottomNavigationB
 
 const styles = StyleSheet.create({
   wrap: {
-    marginBottom: spacing.sm,
+    alignSelf: 'center',
+    maxWidth: 720,
+    width: '100%',
   },
   bar: {
     alignItems: 'center',
-    borderColor: 'rgba(232,190,97,0.25)',
-    borderRadius: radius.xl,
-    borderWidth: 1,
+    borderColor: 'rgba(216,168,78,0.3)',
+    borderTopWidth: 1,
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    shadowColor: colors.shadow,
+    minHeight: 72,
+    paddingHorizontal: 4,
+    paddingVertical: 5,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 18 },
     shadowOpacity: 0.45,
     shadowRadius: 24,
@@ -77,13 +81,12 @@ const styles = StyleSheet.create({
   item: {
     alignItems: 'center',
     flex: 1,
-    gap: spacing.xs,
+    gap: 2,
     justifyContent: 'center',
-    minHeight: 58,
+    minHeight: 60,
   },
   activeItem: {
-    backgroundColor: 'rgba(232,190,97,0.08)',
-    borderRadius: radius.lg,
+    backgroundColor: 'transparent',
   },
   pressedItem: {
     opacity: 0.78,
@@ -91,28 +94,30 @@ const styles = StyleSheet.create({
   },
   iconShell: {
     alignItems: 'center',
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: 'rgba(216,168,78,0.16)',
     borderRadius: radius.full,
     borderWidth: 1,
-    height: 34,
+    height: 40,
     justifyContent: 'center',
-    width: 34,
+    width: 40,
   },
   activeIconShell: {
-    backgroundColor: colors.gold,
-    borderColor: colors.goldSoft,
-    shadowColor: colors.gold,
+    backgroundColor: '#72121A',
+    borderColor: '#E4BE65',
+    borderWidth: 2,
+    shadowColor: '#A91827',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.28,
     shadowRadius: 14,
   },
   icon: {
-    color: colors.textSubtle,
-    fontSize: 16,
-    fontWeight: typography.weights.black,
+    height: 32,
+    resizeMode: 'contain',
+    width: 32,
   },
-  activeIcon: {
-    color: colors.backgroundDeep,
+  inactiveIcon: {
+    opacity: 0.44,
+    transform: [{ scale: 0.88 }],
   },
   label: {
     color: colors.textSubtle,
@@ -122,6 +127,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   activeLabel: {
-    color: colors.goldSoft,
+    color: '#F6D77E',
+    fontWeight: typography.weights.black,
   },
 });

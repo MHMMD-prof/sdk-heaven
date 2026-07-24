@@ -9,7 +9,6 @@ const authUser = {
   avatarLabel: 'S',
   displayName: 'Salem',
   email: 'salem@example.com',
-  emailVerified: true,
   uid: 'uid-1',
 };
 

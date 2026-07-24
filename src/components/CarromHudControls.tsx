@@ -1,42 +1,83 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import {
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
-import { colors, radius, spacing, typography } from '../theme';
+import { radius, spacing, typography } from '../theme';
 import { CarromCoinKind, CarromPlayer } from '../types/carrom';
-import { ShotHistoryItem, getCoinLabel, getHistoryToneStyle } from '../utils/carromPresentation';
+import { ShotHistoryItem, getHistoryToneStyle } from '../utils/carromPresentation';
+
+const royalConceptImage = require('../../assets/carrom/concepts/gameplay-1-royal-majlis.jpg');
+const ROYAL_CONCEPT_HEIGHT = 1280;
+const CAPTURE_DOTS = [0, 1, 2, 3, 4];
+
+const ROYAL = {
+  gold: '#D7A03D',
+  goldBright: '#F3D178',
+  goldDeep: '#7A4B18',
+  ivory: '#F5E8CE',
+  muted: '#A89378',
+  ruby: '#B11C28',
+};
 
 type CarromHeaderProps = {
-  compact: boolean;
-  kicker: string;
   onBack: () => void;
   onReset: () => void;
   title: string;
 };
 
-export function CarromHeader({ compact, kicker, onBack, onReset, title }: CarromHeaderProps) {
+type RoyalReferenceSliceProps = {
+  sliceHeight: number;
+  sourceY: number;
+  style?: StyleProp<ViewStyle>;
+};
+
+function RoyalReferenceSlice({ sliceHeight, sourceY, style }: RoyalReferenceSliceProps) {
+  const imageHeight = `${(ROYAL_CONCEPT_HEIGHT / sliceHeight) * 100}%` as `${number}%`;
+  const imageTop = `${-(sourceY / sliceHeight) * 100}%` as `${number}%`;
+
   return (
-    <View style={[styles.header, compact && styles.headerCompact]}>
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      pointerEvents="none"
+      style={[styles.referenceSlice, { aspectRatio: 720 / sliceHeight }, style]}
+    >
+      <Image
+        resizeMode="stretch"
+        source={royalConceptImage}
+        style={[styles.referenceSliceImage, { height: imageHeight, top: imageTop }]}
+      />
+    </View>
+  );
+}
+
+export function CarromHeader({ onBack, onReset, title }: CarromHeaderProps) {
+  return (
+    <View style={styles.referenceHeader}>
+      <RoyalReferenceSlice sliceHeight={145} sourceY={0} />
+      <Text numberOfLines={1} style={styles.referenceHeaderTitle}>{title}</Text>
       <Pressable
+        accessibilityLabel="رجوع"
+        accessibilityRole="button"
+        hitSlop={6}
         onPress={onBack}
-        style={[styles.iconButton, compact && styles.iconButtonCompact]}
-      >
-        <Text style={[styles.iconButtonText, compact && styles.iconButtonTextCompact]}>‹</Text>
-      </Pressable>
-
-      <View style={styles.headerCenter}>
-        <Text numberOfLines={1} style={[styles.kicker, compact && styles.kickerCompact]}>
-          {kicker}
-        </Text>
-        <Text numberOfLines={1} style={[styles.title, compact && styles.titleCompact]}>
-          {title}
-        </Text>
-      </View>
-
+        style={({ pressed }) => [styles.headerTap, styles.headerTapLeft, pressed && styles.pressed]}
+      />
       <Pressable
+        accessibilityLabel="إعادة الجولة"
+        accessibilityRole="button"
+        hitSlop={6}
         onPress={onReset}
-        style={[styles.iconButton, compact && styles.iconButtonCompact]}
-      >
-        <Text style={[styles.resetIcon, compact && styles.resetIconCompact]}>↻</Text>
-      </Pressable>
+        style={({ pressed }) => [styles.headerTap, styles.headerTapRight, pressed && styles.pressed]}
+      />
     </View>
   );
 }
@@ -44,9 +85,7 @@ export function CarromHeader({ compact, kicker, onBack, onReset, title }: Carrom
 type CarromPlayerRailProps = {
   compact: boolean;
   currentPlayer: CarromPlayer;
-  moving: boolean;
   playerCoins: Record<CarromPlayer, CarromCoinKind>;
-  queenLabel: string;
   remaining: Record<CarromPlayer, number>;
   scores: Record<CarromPlayer, number>;
 };
@@ -54,9 +93,7 @@ type CarromPlayerRailProps = {
 export function CarromPlayerRail({
   compact,
   currentPlayer,
-  moving,
   playerCoins,
-  queenLabel,
   remaining,
   scores,
 }: CarromPlayerRailProps) {
@@ -64,32 +101,82 @@ export function CarromPlayerRail({
     <View style={[styles.playerRail, compact && styles.playerRailCompact]}>
       <PlayerBadge
         active={currentPlayer === 2}
-        compact={compact}
         coinKind={playerCoins[2]}
+        compact={compact}
         player={2}
         remaining={remaining[2]}
         score={scores[2]}
       />
-      <View style={[styles.turnCenter, compact && styles.turnCenterCompact]}>
-        <Text numberOfLines={1} style={[styles.turnLabel, compact && styles.turnLabelCompact]}>
-          {moving ? 'الضربة قيد الحركة' : `دور اللاعب ${currentPlayer}`}
-        </Text>
-        <Text
-          numberOfLines={compact ? 1 : 2}
-          style={[styles.targetLabel, compact && styles.targetLabelCompact]}
-        >
-          {queenLabel}
-        </Text>
-      </View>
+      <LinearGradient
+        colors={['#FFE28A', '#C18425', '#5B2B08']}
+        style={[styles.turnMedallion, compact && styles.turnMedallionCompact]}
+      >
+        <View style={styles.turnMedallionInner}>
+          <SymbolView
+            name={{ ios: 'sun.max.fill', android: 'light_mode', web: 'light_mode' }}
+            size={compact ? 23 : 27}
+            style={styles.turnSymbol}
+            tintColor="#171008"
+          />
+        </View>
+      </LinearGradient>
       <PlayerBadge
         active={currentPlayer === 1}
-        compact={compact}
         coinKind={playerCoins[1]}
+        compact={compact}
         player={1}
         remaining={remaining[1]}
         score={scores[1]}
       />
     </View>
+  );
+}
+
+type PlayerBadgeProps = {
+  active: boolean;
+  compact: boolean;
+  coinKind: CarromCoinKind;
+  player: CarromPlayer;
+  remaining: number;
+  score: number;
+};
+
+function PlayerBadge({ active, compact, coinKind, player, remaining, score }: PlayerBadgeProps) {
+  const isBlack = coinKind === 'black';
+
+  return (
+    <LinearGradient
+      accessibilityLabel={`اللاعب ${player}، النتيجة ${score}، متبقي ${remaining}`}
+      accessible
+      colors={isBlack ? ['#171515', '#030303'] : ['#FFF8E9', '#CCB78F']}
+      style={[
+        styles.playerBadge,
+        !isBlack && styles.playerBadgeIvory,
+        compact && styles.playerBadgeCompact,
+        active && styles.playerBadgeActive,
+      ]}
+    >
+      <View style={[styles.scoreCoin, isBlack ? styles.scoreCoinBlack : styles.scoreCoinIvory]}>
+        <View style={[styles.scoreCoinRing, isBlack ? styles.scoreCoinRingBlack : styles.scoreCoinRingIvory]}>
+          <View style={[styles.scoreCoinCore, isBlack ? styles.scoreCoinCoreBlack : styles.scoreCoinCoreIvory]} />
+        </View>
+      </View>
+      <View style={styles.scoreCopy}>
+        <Text style={[styles.scoreValue, !isBlack && styles.scoreValueDark]}>{score}</Text>
+        <View style={styles.captureDots}>
+          {CAPTURE_DOTS.map((dot) => (
+            <View
+              key={dot}
+              style={[
+                styles.captureDot,
+                !isBlack && styles.captureDotLight,
+                dot < score && (isBlack ? styles.captureDotBlackFilled : styles.captureDotIvoryFilled),
+              ]}
+            />
+          ))}
+        </View>
+      </View>
+    </LinearGradient>
   );
 }
 
@@ -116,50 +203,98 @@ export function CarromSettingsRail({
     <View style={[styles.settingsRail, compact && styles.settingsRailCompact]}>
       <SettingToggle
         active={soundEnabled}
-        compact={compact}
         label="الصوت"
+        name={{ ios: 'speaker.wave.2.fill', android: 'volume_up', web: 'volume_up' }}
         onPress={onToggleSound}
       />
       <SettingToggle
         active={aimAssistEnabled}
-        compact={compact}
-        label="المساعدة"
+        label="مساعدة التصويب"
+        name={{ ios: 'scope', android: 'my_location', web: 'my_location' }}
         onPress={onToggleAimAssist}
       />
       <SettingToggle
         active={effectsEnabled}
-        compact={compact}
-        label="الحركة"
+        label="المؤثرات"
+        name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
         onPress={onToggleEffects}
       />
     </View>
   );
 }
 
-type CarromControlDockProps = {
-  compact: boolean;
-  statusSubtitle: string;
-  statusText: string;
+type SettingToggleProps = {
+  active: boolean;
+  label: string;
+  name: SymbolViewProps['name'];
+  onPress: () => void;
 };
 
-export function CarromControlDock({ compact, statusSubtitle, statusText }: CarromControlDockProps) {
+function SettingToggle({ active, label, name, onPress }: SettingToggleProps) {
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: active }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.settingTouch, pressed && styles.pressed]}
+    >
+      <View style={[styles.settingChrome, active && styles.settingChromeActive]}>
+        <SymbolView
+          name={name}
+          size={18}
+          style={styles.settingSymbol}
+          tintColor={active ? ROYAL.ivory : ROYAL.muted}
+        />
+      </View>
+      <View style={[styles.settingLight, active && styles.settingLightActive]} />
+    </Pressable>
+  );
+}
+
+type CarromControlDockProps = {
+  blackRemaining: number;
+  compact: boolean;
+  queenPocketed: boolean;
+  whiteRemaining: number;
+};
+
+export function CarromControlDock({
+  blackRemaining,
+  compact,
+  queenPocketed,
+  whiteRemaining,
+}: CarromControlDockProps) {
   return (
     <View style={[styles.controlDock, compact && styles.controlDockCompact]}>
-      <View style={styles.statusCopy}>
-        <Text numberOfLines={1} style={[styles.statusTitle, compact && styles.statusTitleCompact]}>
-          {statusText}
-        </Text>
-        <Text
-          numberOfLines={compact ? 2 : 3}
-          style={[styles.statusSubtitle, compact && styles.statusSubtitleCompact]}
-        >
-          {statusSubtitle}
-        </Text>
-      </View>
-      <View style={[styles.strikerChip, compact && styles.strikerChipCompact]}>
-        <View style={[styles.strikerDot, compact && styles.strikerDotCompact]} />
-        <Text style={styles.strikerText}>Striker</Text>
-      </View>
+      <RoyalReferenceSlice sliceHeight={140} sourceY={985} />
+      <LinearGradient
+        colors={['#130908', '#2A080B', '#100706']}
+        end={{ x: 1, y: 0.5 }}
+        start={{ x: 0, y: 0.5 }}
+        style={styles.controlDockLiveArea}
+      >
+        <View style={styles.pieceSummary}>
+          <PieceCount count={blackRemaining} kind="black" />
+          <PieceCount count={queenPocketed ? 0 : 1} kind="queen" />
+          <PieceCount count={whiteRemaining} kind="white" />
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
+
+function PieceCount({ count, kind }: { count: number; kind: 'black' | 'queen' | 'white' }) {
+  const coinStyle = kind === 'black'
+    ? styles.miniCoinBlack
+    : kind === 'queen'
+      ? styles.miniCoinQueen
+      : styles.miniCoinWhite;
+
+  return (
+    <View style={styles.pieceCount}>
+      <View style={[styles.miniCoin, coinStyle]} />
+      <Text style={styles.pieceCountText}>{count}</Text>
     </View>
   );
 }
@@ -168,6 +303,7 @@ type CarromShotHistoryPanelProps = {
   compact: boolean;
   expanded: boolean;
   items: ShotHistoryItem[];
+  notice?: string;
   onToggle: () => void;
 };
 
@@ -175,491 +311,281 @@ export function CarromShotHistoryPanel({
   compact,
   expanded,
   items,
+  notice,
   onToggle,
 }: CarromShotHistoryPanelProps) {
-  const visibleItemCount = expanded ? 5 : 1;
+  const tokenItems = items.slice(0, 5);
 
   return (
-    <Pressable
-      onPress={onToggle}
-      style={[styles.historyPanel, compact && styles.historyPanelCompact]}
-    >
-      <View style={styles.historyHeader}>
-        <Text style={styles.historyTitle}>سجل الضربات</Text>
-        <Text style={styles.historyToggle}>{expanded ? 'إخفاء' : 'عرض'}</Text>
-      </View>
-      {items.length > 0 ? (
-        <View style={styles.historyList}>
-          {items.map((item, index) =>
-            index < visibleItemCount ? (
-              <View key={item.id} style={styles.historyItem}>
-                <View style={[styles.historyDot, styles[getHistoryToneStyle(item.tone)]]} />
-                <Text numberOfLines={expanded ? 2 : 1} style={styles.historyText}>
-                  {item.message}
-                </Text>
-              </View>
-            ) : null,
+    <View style={styles.historySection}>
+      <Pressable
+        accessibilityLabel={expanded ? 'إخفاء سجل الضربات' : 'عرض سجل الضربات'}
+        accessibilityRole="button"
+        onPress={onToggle}
+        style={({ pressed }) => [
+          styles.royalHistoryPanel,
+          compact && styles.royalHistoryPanelCompact,
+          pressed && styles.pressed,
+        ]}
+      >
+        <RoyalReferenceSlice sliceHeight={120} sourceY={1110} />
+        {tokenItems.length > 0 ? (
+          <View style={styles.historyLiveArea}>
+            {tokenItems.map((item, index) => (
+            <View key={item.id} style={styles.historyTokenGroup}>
+              <HistoryToken tone={item.tone} />
+              {index < tokenItems.length - 1 ? <View style={styles.historyTokenSeparator} /> : null}
+            </View>
+            ))}
+          </View>
+        ) : null}
+      </Pressable>
+
+      {notice ? (
+        <View style={styles.royalHistoryDetails}>
+          <Text numberOfLines={2} style={styles.historyNotice}>{notice}</Text>
+        </View>
+      ) : expanded ? (
+        <View style={styles.royalHistoryDetails}>
+          <Text style={styles.historyTitle}>سجل الضربات</Text>
+          {items.length > 0 ? (
+            <View style={styles.historyList}>
+              {items.slice(0, 3).map((item) => (
+                <View key={item.id} style={styles.historyItem}>
+                  <View style={[styles.historyDot, styles[getHistoryToneStyle(item.tone)]]} />
+                  <Text numberOfLines={2} style={styles.historyText}>{item.message}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.historyEmpty}>ستظهر نتيجة كل ضربة هنا</Text>
           )}
         </View>
-      ) : (
-        <Text numberOfLines={1} style={styles.historyEmpty}>
-          ستظهر نتيجة كل ضربة هنا
-        </Text>
-      )}
-    </Pressable>
+      ) : null}
+    </View>
   );
 }
 
-type PlayerBadgeProps = {
-  active: boolean;
-  compact: boolean;
-  coinKind: CarromCoinKind;
-  player: CarromPlayer;
-  remaining: number;
-  score: number;
-};
+function HistoryToken({ tone }: Pick<ShotHistoryItem, 'tone'>) {
+  const toneStyle = tone === 'queen'
+    ? styles.historyTokenQueen
+    : tone === 'success'
+      ? styles.historyTokenWhite
+      : tone === 'foul'
+        ? styles.historyTokenRuby
+        : styles.historyTokenBlack;
 
-function PlayerBadge({ active, compact, coinKind, player, remaining, score }: PlayerBadgeProps) {
   return (
-    <View
-      style={[
-        styles.playerBadge,
-        compact && styles.playerBadgeCompact,
-        active && styles.playerBadgeActive,
-      ]}
-    >
-      <View
-        style={[
-          styles.avatar,
-          compact && styles.avatarCompact,
-          coinKind === 'black' && styles.avatarBlack,
-        ]}
-      >
-        <Text style={[styles.avatarText, compact && styles.avatarTextCompact]}>{player}</Text>
-      </View>
-      <View style={styles.playerCopy}>
-        <Text numberOfLines={1} style={[styles.playerName, compact && styles.playerNameCompact]}>
-          اللاعب {player}
-        </Text>
-        <Text numberOfLines={1} style={[styles.playerMeta, compact && styles.playerMetaCompact]}>
-          {getCoinLabel(coinKind)} {score}/9 • متبقي {remaining}
-        </Text>
+    <View style={[styles.historyToken, toneStyle]}>
+      <View style={styles.historyTokenRing}>
+        <View style={styles.historyTokenCore} />
       </View>
     </View>
   );
 }
 
-type SettingToggleProps = {
-  active: boolean;
-  compact: boolean;
-  label: string;
-  onPress: () => void;
-};
-
-function SettingToggle({ active, compact, label, onPress }: SettingToggleProps) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.settingToggle,
-        compact && styles.settingToggleCompact,
-        active && styles.settingToggleActive,
-      ]}
-    >
-      <Text numberOfLines={1} style={[styles.settingToggleText, compact && styles.settingToggleTextCompact]}>
-        {label}
-      </Text>
-      <View style={[styles.settingSwitch, active && styles.settingSwitchActive]}>
-        <View style={[styles.settingSwitchThumb, active && styles.settingSwitchThumbActive]} />
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  avatar: {
-    alignItems: 'center',
-    backgroundColor: colors.input,
-    borderColor: colors.borderGold,
+  captureDot: {
+    borderColor: '#675642',
     borderRadius: radius.full,
     borderWidth: 1,
-    height: 32,
-    justifyContent: 'center',
-    width: 32,
+    height: 6,
+    width: 6,
   },
-  avatarBlack: {
-    backgroundColor: '#16131C',
-    borderColor: 'rgba(255,255,255,0.35)',
-  },
-  avatarCompact: {
-    height: 26,
-    width: 26,
-  },
-  avatarText: {
-    color: colors.goldSoft,
-    fontSize: typography.sizes.body,
-    fontWeight: typography.weights.black,
-  },
-  avatarTextCompact: {
-    fontSize: 12,
-  },
+  captureDotBlackFilled: { backgroundColor: ROYAL.gold, borderColor: ROYAL.goldBright },
+  captureDotIvoryFilled: { backgroundColor: '#6B3C17', borderColor: '#6B3C17' },
+  captureDotLight: { borderColor: '#A99470' },
+  captureDots: { flexDirection: 'row', gap: 3 },
   controlDock: {
+    alignSelf: 'center',
+    maxWidth: 720,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '100%',
+  },
+  controlDockCompact: {},
+  controlDockLiveArea: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderColor: colors.border,
-    borderRadius: radius.xl,
+    borderColor: 'rgba(232,184,90,0.58)',
+    borderRadius: 13,
     borderWidth: 1,
-    flexDirection: 'row-reverse',
-    gap: spacing.md,
-    justifyContent: 'space-between',
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  controlDockCompact: {
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  headerCenter: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  headerCompact: {
-    gap: spacing.xs,
-    marginBottom: spacing.xs,
-  },
-  historyDot: {
-    borderRadius: radius.full,
-    height: 8,
-    width: 8,
-  },
-  historyDotFoul: {
-    backgroundColor: '#FF8E9F',
-  },
-  historyDotNeutral: {
-    backgroundColor: colors.textSubtle,
-  },
-  historyDotQueen: {
-    backgroundColor: colors.goldSoft,
-  },
-  historyDotSuccess: {
-    backgroundColor: '#63F4C4',
-  },
-  historyEmpty: {
-    color: colors.textSubtle,
-    fontSize: 10,
-    fontWeight: typography.weights.semibold,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  historyHeader: {
-    alignItems: 'center',
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    marginBottom: spacing.xs,
-  },
-  historyItem: {
-    alignItems: 'center',
-    flexDirection: 'row-reverse',
-    gap: spacing.xs,
-    minHeight: 20,
-  },
-  historyList: {
-    gap: spacing.xs,
-  },
-  historyPanel: {
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    marginTop: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  historyPanelCompact: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  historyText: {
-    color: colors.textMuted,
-    flex: 1,
-    fontSize: 10,
-    fontWeight: typography.weights.semibold,
-    lineHeight: 14,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  historyTitle: {
-    color: colors.text,
-    fontSize: typography.sizes.caption,
-    fontWeight: typography.weights.black,
-    writingDirection: 'rtl',
-  },
-  historyToggle: {
-    color: colors.goldSoft,
-    fontSize: 10,
-    fontWeight: typography.weights.bold,
-    writingDirection: 'rtl',
-  },
-  iconButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderColor: colors.border,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    height: 42,
+    bottom: '22%',
     justifyContent: 'center',
-    width: 42,
+    left: '20%',
+    overflow: 'hidden',
+    position: 'absolute',
+    right: '20%',
+    top: '25%',
   },
-  iconButtonCompact: {
-    height: 36,
-    width: 36,
+  headerTap: { height: 44, position: 'absolute', top: '25%', width: 44 },
+  headerTapLeft: { left: '7.5%' },
+  headerTapRight: { right: '7.5%' },
+  historyDot: { borderRadius: radius.full, height: 7, width: 7 },
+  historyDotFoul: { backgroundColor: '#EF7B82' },
+  historyDotNeutral: { backgroundColor: ROYAL.muted },
+  historyDotQueen: { backgroundColor: ROYAL.goldBright },
+  historyDotSuccess: { backgroundColor: ROYAL.gold },
+  historyEmpty: { color: ROYAL.muted, fontSize: 9, textAlign: 'right', writingDirection: 'rtl' },
+  historyItem: { alignItems: 'center', flexDirection: 'row-reverse', gap: spacing.xs, minHeight: 18 },
+  historyList: { gap: 3, marginTop: 3 },
+  historyNotice: { color: '#EE9397', fontSize: 9, marginTop: 3, textAlign: 'right', writingDirection: 'rtl' },
+  historySection: { alignItems: 'center', marginTop: -2, width: '100%' },
+  royalHistoryPanel: {
+    alignSelf: 'center',
+    maxWidth: 720,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '100%',
   },
-  iconButtonText: {
-    color: colors.text,
-    fontSize: 34,
-    fontWeight: typography.weights.medium,
-    lineHeight: 36,
+  royalHistoryPanelCompact: {},
+  historyLiveArea: {
+    alignItems: 'center',
+    backgroundColor: '#2A090B',
+    borderRadius: 7,
+    bottom: '27%',
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    left: '19%',
+    overflow: 'hidden',
+    paddingHorizontal: spacing.sm,
+    position: 'absolute',
+    right: '25%',
+    top: '30%',
   },
-  iconButtonTextCompact: {
-    fontSize: 30,
-    lineHeight: 32,
+  royalHistoryDetails: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(38,7,9,0.96)',
+    borderColor: 'rgba(217,164,65,0.42)',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: -3,
+    maxWidth: 560,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    width: '76%',
   },
-  kicker: {
-    color: colors.goldSoft,
-    fontSize: typography.sizes.caption,
-    fontWeight: typography.weights.bold,
-    writingDirection: 'rtl',
-  },
-  kickerCompact: {
-    fontSize: 10,
-  },
+  historyToken: { alignItems: 'center', borderRadius: radius.full, borderWidth: 1, height: 22, justifyContent: 'center', width: 22 },
+  historyTokenBlack: { backgroundColor: '#090909', borderColor: '#8B6A3D' },
+  historyTokenCore: { backgroundColor: 'rgba(255,255,255,0.13)', borderRadius: radius.full, height: 5, width: 5 },
+  historyTokenGroup: { alignItems: 'center', flexDirection: 'row', gap: 5 },
+  historyTokenQueen: { backgroundColor: ROYAL.ruby, borderColor: ROYAL.goldBright },
+  historyTokenRing: { alignItems: 'center', borderColor: 'rgba(246,217,145,0.34)', borderRadius: radius.full, borderWidth: 1, height: 14, justifyContent: 'center', width: 14 },
+  historyTokenRuby: { backgroundColor: '#721119', borderColor: ROYAL.gold },
+  historyTokenSeparator: { backgroundColor: ROYAL.goldBright, borderRadius: radius.full, height: 5, width: 5 },
+  historyTokenWhite: { backgroundColor: '#F1E1BE', borderColor: ROYAL.gold },
+  historyText: { color: '#C9B79D', flex: 1, fontSize: 9, lineHeight: 13, textAlign: 'right', writingDirection: 'rtl' },
+  historyTitle: { color: ROYAL.ivory, fontSize: 12, fontWeight: typography.weights.black, writingDirection: 'rtl' },
+  miniCoin: { borderRadius: radius.full, borderWidth: 1, height: 20, width: 20 },
+  miniCoinBlack: { backgroundColor: '#0B0B0C', borderColor: '#6B5842' },
+  miniCoinQueen: { backgroundColor: ROYAL.ruby, borderColor: ROYAL.goldBright },
+  miniCoinWhite: { backgroundColor: '#F0E0BD', borderColor: ROYAL.gold },
+  pieceCount: { alignItems: 'center', flexDirection: 'row', gap: 5 },
+  pieceCountText: { color: ROYAL.ivory, fontSize: 15, fontWeight: typography.weights.black },
+  pieceSummary: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-evenly', width: '100%' },
   playerBadge: {
     alignItems: 'center',
-    borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: radius.lg,
+    borderColor: 'rgba(217,164,65,0.64)',
+    borderRadius: 14,
     borderWidth: 1,
     flex: 1,
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     gap: spacing.sm,
-    justifyContent: 'center',
-    minHeight: 54,
+    height: 50,
+    overflow: 'hidden',
     paddingHorizontal: spacing.sm,
   },
   playerBadgeActive: {
-    backgroundColor: 'rgba(232,190,97,0.13)',
-    borderColor: 'rgba(232,190,97,0.45)',
+    borderColor: ROYAL.goldBright,
+    borderWidth: 2,
+    shadowColor: ROYAL.gold,
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
   },
-  playerBadgeCompact: {
-    gap: spacing.xs,
-    minHeight: 44,
-    paddingHorizontal: spacing.xs,
-  },
-  playerCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  playerMeta: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontWeight: typography.weights.semibold,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  playerMetaCompact: {
-    fontSize: 9,
-  },
-  playerName: {
-    color: colors.text,
-    fontSize: typography.sizes.caption,
-    fontWeight: typography.weights.bold,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  playerNameCompact: {
-    fontSize: 10,
-  },
+  playerBadgeIvory: { flexDirection: 'row-reverse' },
+  playerBadgeCompact: { gap: spacing.xs, height: 46, paddingHorizontal: spacing.xs },
   playerRail: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    borderColor: colors.borderGold,
-    borderRadius: radius.xl,
-    borderWidth: 1,
+    alignSelf: 'center',
     flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-    padding: spacing.sm,
-  },
-  playerRailCompact: {
-    gap: spacing.xs,
-    marginBottom: spacing.xs,
-    padding: spacing.xs,
-  },
-  resetIcon: {
-    color: colors.goldSoft,
-    fontSize: 22,
-    fontWeight: typography.weights.black,
-    lineHeight: 26,
-  },
-  resetIconCompact: {
-    fontSize: 19,
-    lineHeight: 23,
-  },
-  settingSwitch: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderRadius: radius.full,
-    height: 16,
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-    width: 30,
-  },
-  settingSwitchActive: {
-    backgroundColor: 'rgba(246,217,145,0.92)',
-  },
-  settingSwitchThumb: {
-    backgroundColor: 'rgba(255,255,255,0.72)',
-    borderRadius: radius.full,
-    height: 12,
-    transform: [{ translateX: 0 }],
-    width: 12,
-  },
-  settingSwitchThumbActive: {
-    backgroundColor: colors.backgroundDeep,
-    transform: [{ translateX: 14 }],
-  },
-  settingToggle: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: radius.full,
-    borderWidth: 1,
-    flexDirection: 'row-reverse',
-    gap: spacing.xs,
-    minHeight: 32,
+    marginTop: 1,
+    maxWidth: 330,
     paddingHorizontal: spacing.sm,
+    width: '82%',
   },
-  settingToggleActive: {
-    backgroundColor: 'rgba(232,190,97,0.12)',
-    borderColor: 'rgba(232,190,97,0.42)',
+  playerRailCompact: { width: '84%' },
+  pressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
+  referenceHeader: {
+    alignSelf: 'center',
+    aspectRatio: 720 / 145,
+    maxWidth: 720,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '100%',
   },
-  settingToggleCompact: {
-    minHeight: 28,
-    paddingHorizontal: spacing.xs,
+  referenceSlice: {
+    overflow: 'hidden',
+    position: 'relative',
+    width: '100%',
   },
-  settingToggleText: {
-    color: colors.text,
-    fontSize: 10,
-    fontWeight: typography.weights.bold,
+  referenceSliceImage: {
+    left: 0,
+    position: 'absolute',
+    width: '100%',
+  },
+  referenceHeaderTitle: {
+    bottom: '5%',
+    color: '#E8C879',
+    fontSize: 11,
+    fontWeight: typography.weights.black,
+    left: '35%',
+    position: 'absolute',
+    right: '35%',
+    textAlign: 'center',
     writingDirection: 'rtl',
   },
-  settingToggleTextCompact: {
-    fontSize: 9,
-  },
-  settingsRail: {
+  scoreCoin: { alignItems: 'center', borderRadius: radius.full, height: 38, justifyContent: 'center', width: 38 },
+  scoreCoinBlack: { backgroundColor: '#080808', borderColor: '#6B5944', borderWidth: 1 },
+  scoreCoinCore: { borderRadius: radius.full, height: 10, width: 10 },
+  scoreCoinCoreBlack: { backgroundColor: '#101010', borderColor: '#4C4842', borderWidth: 1 },
+  scoreCoinCoreIvory: { backgroundColor: '#F6E7C5', borderColor: '#B17A28', borderWidth: 1 },
+  scoreCoinIvory: { backgroundColor: '#EAD8B3', borderColor: ROYAL.goldBright, borderWidth: 1 },
+  scoreCoinRing: { alignItems: 'center', borderRadius: radius.full, borderWidth: 1, height: 27, justifyContent: 'center', width: 27 },
+  scoreCoinRingBlack: { borderColor: '#4D4842' },
+  scoreCoinRingIvory: { borderColor: '#B98B3D' },
+  scoreCopy: { alignItems: 'center', gap: 2 },
+  scoreValue: { color: ROYAL.ivory, fontSize: 25, fontWeight: typography.weights.black, lineHeight: 27 },
+  scoreValueDark: { color: '#3B2919' },
+  settingChrome: {
     alignItems: 'center',
-    flexDirection: 'row-reverse',
-    gap: spacing.sm,
+    backgroundColor: '#100908',
+    borderColor: ROYAL.goldDeep,
+    borderRadius: 9,
+    borderWidth: 1,
+    height: 34,
     justifyContent: 'center',
-    marginBottom: spacing.xs,
+    width: 34,
   },
-  settingsRailCompact: {
-    gap: spacing.xs,
-  },
-  statusCopy: {
-    flex: 1,
-  },
-  statusSubtitle: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.caption,
-    fontWeight: typography.weights.semibold,
-    lineHeight: 17,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  statusSubtitleCompact: {
-    fontSize: 10,
-    lineHeight: 14,
-  },
-  statusTitle: {
-    color: colors.text,
-    fontSize: typography.sizes.bodyLarge,
-    fontWeight: typography.weights.black,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  statusTitleCompact: {
-    fontSize: typography.sizes.body,
-  },
-  strikerChip: {
+  settingChromeActive: { backgroundColor: '#261209', borderColor: ROYAL.gold },
+  settingLight: { backgroundColor: '#4A3522', borderRadius: radius.full, bottom: 2, height: 3, position: 'absolute', width: 3 },
+  settingLightActive: { backgroundColor: ROYAL.goldBright, shadowColor: ROYAL.goldBright, shadowOpacity: 0.95, shadowRadius: 5 },
+  settingSymbol: { height: 20, width: 20 },
+  settingTouch: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },
+  settingsRail: { alignItems: 'center', flexDirection: 'row', justifyContent: 'center', marginTop: 1 },
+  settingsRailCompact: { marginTop: 0 },
+  turnMedallion: {
     alignItems: 'center',
-    gap: 3,
-  },
-  strikerChipCompact: {
-    gap: 1,
-  },
-  strikerDot: {
-    backgroundColor: '#CF6334',
-    borderColor: colors.goldSoft,
     borderRadius: radius.full,
-    borderWidth: 2,
-    height: 30,
-    width: 30,
+    height: 50,
+    justifyContent: 'center',
+    marginHorizontal: -2,
+    padding: 4,
+    shadowColor: ROYAL.gold,
+    shadowOpacity: 0.7,
+    shadowRadius: 8,
+    width: 50,
+    zIndex: 3,
   },
-  strikerDotCompact: {
-    height: 24,
-    width: 24,
-  },
-  strikerText: {
-    color: colors.textSubtle,
-    fontSize: 10,
-    fontWeight: typography.weights.bold,
-  },
-  targetLabel: {
-    color: colors.textSubtle,
-    fontSize: 10,
-    fontWeight: typography.weights.semibold,
-    textAlign: 'center',
-    writingDirection: 'rtl',
-  },
-  targetLabelCompact: {
-    fontSize: 8,
-    maxWidth: 78,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 26,
-    fontWeight: typography.weights.black,
-    lineHeight: 32,
-    writingDirection: 'rtl',
-  },
-  titleCompact: {
-    fontSize: 21,
-    lineHeight: 25,
-  },
-  turnCenter: {
-    alignItems: 'center',
-    minWidth: 92,
-  },
-  turnCenterCompact: {
-    minWidth: 66,
-  },
-  turnLabel: {
-    color: colors.goldSoft,
-    fontSize: typography.sizes.caption,
-    fontWeight: typography.weights.black,
-    textAlign: 'center',
-    writingDirection: 'rtl',
-  },
-  turnLabelCompact: {
-    fontSize: 10,
-  },
+  turnMedallionCompact: { height: 48, width: 48 },
+  turnMedallionInner: { alignItems: 'center', backgroundColor: '#E1AD45', borderColor: '#FFF0AD', borderRadius: radius.full, borderWidth: 1, height: '100%', justifyContent: 'center', width: '100%' },
+  turnSymbol: { height: 28, width: 28 },
 });

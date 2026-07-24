@@ -6,6 +6,7 @@ export const mockVoiceRooms: VoiceRoom[] = [
     title: 'مجلس السهرة الملكية',
     hostId: 'host-salem',
     type: 'voice',
+    countryCode: 'IQ',
     participantCount: 28,
     speakers: [
       { id: 'host-salem', displayName: 'سالم', avatarLabel: 'س' },
@@ -23,6 +24,7 @@ export const mockVoiceRooms: VoiceRoom[] = [
     title: 'ديوانية الكاروم الهادئة',
     hostId: 'host-rakan',
     type: 'game',
+    countryCode: 'SA',
     participantCount: 16,
     currentGameId: 'carrom-royal',
     speakers: [
@@ -39,6 +41,7 @@ export const mockVoiceRooms: VoiceRoom[] = [
     title: 'مجلس الترحيب باللاعبين',
     hostId: 'host-dana',
     type: 'voice',
+    countryCode: 'YE',
     participantCount: 9,
     speakers: [
       { id: 'host-dana', displayName: 'دانا', avatarLabel: 'د' },

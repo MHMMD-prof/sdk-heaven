@@ -1,17 +1,15 @@
 import { ProfileStatus } from './types';
 
-export type AuthGateRoute = 'login' | 'email-verification' | 'profile-setup' | 'main' | 'loading';
+export type AuthGateRoute = 'login' | 'profile-setup' | 'main' | 'loading';
 
 type ResolveAuthGateRouteInput = {
   initializing: boolean;
   userExists: boolean;
-  isEmailVerified: boolean;
   profileStatus: ProfileStatus;
 };
 
 export function resolveAuthGateRoute({
   initializing,
-  isEmailVerified,
   profileStatus,
   userExists,
 }: ResolveAuthGateRouteInput): AuthGateRoute {
@@ -21,10 +19,6 @@ export function resolveAuthGateRoute({
 
   if (!userExists) {
     return 'login';
-  }
-
-  if (!isEmailVerified) {
-    return 'email-verification';
   }
 
   if (profileStatus === 'loading') {

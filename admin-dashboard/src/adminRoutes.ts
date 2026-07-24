@@ -1,0 +1,88 @@
+export type AdminRouteKey = 'overview' | 'users' | 'rooms' | 'reports' | 'store' | 'audit' | 'settings';
+
+export type DashboardRoute = {
+  detail: string;
+  key: AdminRouteKey;
+  label: string;
+  navigation: 'primary' | 'footer';
+  path: string;
+  subtitle: string;
+  title: string;
+};
+
+export const adminRoutes: readonly DashboardRoute[] = [
+  {
+    detail: 'لا توجد ملخصات تشغيلية محمّلة.',
+    key: 'overview',
+    label: 'نظرة عامة',
+    navigation: 'primary',
+    path: '/',
+    subtitle: 'نظرة عامة',
+    title: 'لوحة الإدارة',
+  },
+  {
+    detail: 'لا توجد سجلات مستخدمين محمّلة.',
+    key: 'users',
+    label: 'المستخدمون',
+    navigation: 'primary',
+    path: '/users',
+    subtitle: 'إدارة المجتمع',
+    title: 'المستخدمون',
+  },
+  {
+    detail: 'لا توجد سجلات غرف محمّلة.',
+    key: 'rooms',
+    label: 'الغرف',
+    navigation: 'primary',
+    path: '/rooms',
+    subtitle: 'المجتمع المباشر',
+    title: 'الغرف',
+  },
+  {
+    detail: 'لا توجد بلاغات محمّلة.',
+    key: 'reports',
+    label: 'البلاغات',
+    navigation: 'primary',
+    path: '/reports',
+    subtitle: 'الثقة والأمان',
+    title: 'البلاغات',
+  },
+  {
+    detail: 'لا توجد عناصر متجر محمّلة.',
+    key: 'store',
+    label: 'المتجر',
+    navigation: 'primary',
+    path: '/store',
+    subtitle: 'الاقتصاد والكتالوج',
+    title: 'إدارة المتجر',
+  },
+  {
+    detail: 'لا توجد أحداث تدقيق محمّلة.',
+    key: 'audit',
+    label: 'سجل التدقيق',
+    navigation: 'primary',
+    path: '/audit',
+    subtitle: 'التدقيق والأمان',
+    title: 'سجل التدقيق',
+  },
+  {
+    detail: 'إعدادات الإدارة والتفضيلات المحلية.',
+    key: 'settings',
+    label: 'الإعدادات',
+    navigation: 'footer',
+    path: '/settings',
+    subtitle: 'التفضيلات والأمان',
+    title: 'الإعدادات',
+  },
+] as const;
+
+export const primaryAdminRoutes = adminRoutes.filter((route) => route.navigation === 'primary');
+
+export function getAdminRouteByKey(key: AdminRouteKey): DashboardRoute {
+  return adminRoutes.find((route) => route.key === key) ?? adminRoutes[0] as DashboardRoute;
+}
+
+export function getAdminRouteFromPath(pathname: string): DashboardRoute {
+  const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  return adminRoutes.find((route) => route.path === normalizedPath) ?? adminRoutes[0] as DashboardRoute;
+}

@@ -1,12 +1,19 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  envDir: '..',
+  envPrefix: ['VITE_', 'EXPO_PUBLIC_'],
   build: {
-    sourcemap: true,
+    sourcemap: false,
   },
   server: {
-    host: '127.0.0.1',
+    host: 'localhost',
     port: 5174,
-    strictPort: false,
+    strictPort: true,
+  },
+  preview: {
+    host: 'localhost',
+    port: 5174,
+    strictPort: true,
   },
 });

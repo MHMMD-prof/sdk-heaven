@@ -1,0 +1,104 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.keys().hasAll(['admin'])
+        && request.auth.token.admin == true;
+    }
+
+    function roomPath(roomId) {
+      return /databases/(default)/documents/rooms/$(roomId);
+    }
+
+    function roomMediaPath(roomId, mediaId) {
+      return /databases/(default)/documents/rooms/$(roomId)/media/$(mediaId);
+    }
+
+    function isRoomOwner(roomId) {
+      return signedIn()
+        && firestore.get(roomPath(roomId)).data.ownerUid == request.auth.uid;
+    }
+
+    function roomMediaEnabled() {
+      let path = /databases/(default)/documents/appConfig/voiceRoomFeatures;
+      let config = firestore.get(path).data;
+      return config.voice_room_command_center == true
+        && config.voice_room_media == true;
+    }
+
+    match /avatars/{userId}/profile.jpg {
+      allow read: if signedIn();
+      allow create, update: if isOwner(userId)
+        && request.resource != null
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType == 'image/jpeg';
+      allow delete: if isOwner(userId);
+    }
+
+    match /store-assets/{itemId}/{assetName} {
+      allow read: if signedIn();
+      allow create, update: if isAdmin()
+        && itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && (assetName == 'thumbnail' || assetName == 'preview')
+        && request.resource != null
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isAdmin()
+        && itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && (assetName == 'thumbnail' || assetName == 'preview');
+    }
+
+    match /store-assets/{itemId}/{assetName}/{version} {
+      allow read: if signedIn();
+      allow create, update: if isAdmin()
+        && itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && (assetName == 'thumbnail' || assetName == 'preview')
+        && version.matches('^[A-Za-z0-9_-]{16,80}$')
+        && request.resource != null
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isAdmin()
+        && itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && (assetName == 'thumbnail' || assetName == 'preview')
+        && version.matches('^[A-Za-z0-9_-]{16,80}$');
+    }
+
+    match /room-media/{roomId}/{mediaId}/source {
+      allow read: if signedIn()
+        && (
+          isAdmin()
+          || isRoomOwner(roomId)
+          || (
+            firestore.get(roomMediaPath(roomId, mediaId)).data.status == 'approved'
+          )
+        );
+      allow create: if signedIn()
+        && request.auth.token.email_verified == true
+        && resource == null
+        && roomId.matches('^[^/]{1,128}$')
+        && mediaId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{15,79}$')
+        && isRoomOwner(roomId)
+        && roomMediaEnabled()
+        && request.resource != null
+        && request.resource.size <= 4 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)')
+        && request.resource.metadata.uploaderUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

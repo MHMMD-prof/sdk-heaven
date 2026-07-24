@@ -30,7 +30,7 @@ export function LoginScreen({ navigation: _navigation }: LoginScreenProps) {
   const introText = useMemo(
     () =>
       isSignUp
-        ? 'أنشئ حسابك ثم أكد بريدك الإلكتروني قبل الدخول.'
+        ? 'أنشئ حسابك ثم أكمل ملفك الشخصي للدخول.'
         : 'سجل دخولك للمتابعة إلى سكاي رويال.',
     [isSignUp],
   );
@@ -54,7 +54,7 @@ export function LoginScreen({ navigation: _navigation }: LoginScreenProps) {
     try {
       if (isSignUp) {
         await signUp(email, password);
-        setSuccessMessage('تم إنشاء الحساب. تحقق من بريدك الإلكتروني.');
+        setSuccessMessage('تم إنشاء الحساب. أكمل ملفك الشخصي.');
       } else {
         await signIn(email, password);
       }

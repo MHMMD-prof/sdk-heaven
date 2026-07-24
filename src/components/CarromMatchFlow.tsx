@@ -141,8 +141,8 @@ function ReadySeat({ label, ready }: ReadySeatProps) {
 
 const styles = StyleSheet.create({
   matchFlowPanel: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: colors.borderGold,
+    backgroundColor: 'rgba(21,7,7,0.94)',
+    borderColor: 'rgba(217,164,65,0.62)',
     borderRadius: radius.xl,
     borderWidth: 1,
     gap: spacing.md,
@@ -156,20 +156,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   matchFlowKicker: {
-    color: colors.goldSoft,
+    color: '#D9A441',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
     writingDirection: 'rtl',
   },
   matchFlowTitle: {
-    color: colors.text,
+    color: '#F4E7CD',
     fontSize: typography.sizes.title,
     fontWeight: typography.weights.black,
     marginTop: spacing.xs,
     writingDirection: 'rtl',
   },
   matchFlowSubtitle: {
-    color: colors.textMuted,
+    color: '#B9A58C',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.semibold,
     lineHeight: 18,
@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   tableCard: {
-    backgroundColor: 'rgba(8,5,15,0.5)',
+    backgroundColor: 'rgba(6,4,4,0.84)',
     borderRadius: radius.lg,
     borderWidth: 1,
     gap: spacing.sm,
@@ -202,14 +202,14 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   tableTitle: {
-    color: colors.text,
+    color: '#F4E7CD',
     fontSize: typography.sizes.bodyLarge,
     fontWeight: typography.weights.black,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   tableMeta: {
-    color: colors.textMuted,
+    color: '#A9957D',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
     marginTop: 2,
@@ -222,13 +222,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   tableStat: {
-    color: colors.goldSoft,
+    color: '#F4D27A',
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.black,
     writingDirection: 'rtl',
   },
   tablePrize: {
-    color: colors.textSubtle,
+    color: '#A9957D',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
     writingDirection: 'rtl',
@@ -236,8 +236,8 @@ const styles = StyleSheet.create({
   matchFlowGhostButton: {
     alignItems: 'center',
     alignSelf: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(58,10,13,0.78)',
+    borderColor: 'rgba(217,164,65,0.38)',
     borderRadius: radius.full,
     borderWidth: 1,
     justifyContent: 'center',
@@ -246,15 +246,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   matchFlowGhostText: {
-    color: colors.text,
+    color: '#F4E7CD',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
     writingDirection: 'rtl',
   },
   readyTableBadge: {
     alignItems: 'center',
-    backgroundColor: 'rgba(8,5,15,0.52)',
-    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(5,3,3,0.78)',
+    borderColor: 'rgba(217,164,65,0.28)',
     borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row-reverse',
@@ -267,8 +267,8 @@ const styles = StyleSheet.create({
   },
   readySeat: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(61,10,13,0.42)',
+    borderColor: 'rgba(217,164,65,0.24)',
     borderRadius: radius.lg,
     borderWidth: 1,
     flex: 1,
@@ -278,8 +278,8 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
   },
   readySeatActive: {
-    backgroundColor: 'rgba(43,203,136,0.12)',
-    borderColor: 'rgba(99,244,196,0.42)',
+    backgroundColor: 'rgba(217,164,65,0.12)',
+    borderColor: 'rgba(244,210,122,0.58)',
   },
   readyDot: {
     backgroundColor: colors.textSubtle,
@@ -288,16 +288,16 @@ const styles = StyleSheet.create({
     width: 12,
   },
   readyDotActive: {
-    backgroundColor: '#63F4C4',
+    backgroundColor: '#F4D27A',
   },
   readySeatLabel: {
-    color: colors.text,
+    color: '#F4E7CD',
     fontSize: typography.sizes.body,
     fontWeight: typography.weights.black,
     writingDirection: 'rtl',
   },
   readySeatStatus: {
-    color: colors.textMuted,
+    color: '#A9957D',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
     writingDirection: 'rtl',
@@ -308,13 +308,13 @@ const styles = StyleSheet.create({
     minHeight: 86,
   },
   readyTitle: {
-    color: colors.text,
+    color: '#F4E7CD',
     fontSize: typography.sizes.title,
     fontWeight: typography.weights.black,
     writingDirection: 'rtl',
   },
   readySubtitle: {
-    color: colors.textMuted,
+    color: '#B9A58C',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.semibold,
     lineHeight: 18,
@@ -328,13 +328,13 @@ const styles = StyleSheet.create({
     minHeight: 128,
   },
   countdownLabel: {
-    color: colors.textMuted,
+    color: '#B9A58C',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.bold,
     writingDirection: 'rtl',
   },
   countdownValue: {
-    color: colors.goldSoft,
+    color: '#F4D27A',
     fontSize: 58,
     fontWeight: typography.weights.black,
     lineHeight: 66,
@@ -347,8 +347,8 @@ const styles = StyleSheet.create({
   },
   readyButton: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(58,10,13,0.82)',
+    borderColor: 'rgba(217,164,65,0.34)',
     borderRadius: radius.full,
     borderWidth: 1,
     flex: 1,
@@ -357,20 +357,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   readyButtonPrimary: {
-    backgroundColor: colors.gold,
-    borderColor: colors.goldSoft,
+    backgroundColor: '#D9A441',
+    borderColor: '#F4D27A',
   },
   readyButtonDisabled: {
     opacity: 0.58,
   },
   readyButtonText: {
-    color: colors.text,
+    color: '#F4E7CD',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
     writingDirection: 'rtl',
   },
   readyButtonPrimaryText: {
-    color: colors.backgroundDeep,
+    color: '#140804',
     fontSize: typography.sizes.caption,
     fontWeight: typography.weights.black,
     writingDirection: 'rtl',

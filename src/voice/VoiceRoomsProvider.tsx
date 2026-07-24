@@ -3,19 +3,25 @@ import {
   collection,
   doc,
   increment,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
   setDoc,
+  Timestamp,
   where,
   writeBatch,
 } from 'firebase/firestore';
+import type { DocumentData, QuerySnapshot } from 'firebase/firestore';
+import { AppState, InteractionManager } from 'react-native';
 
 import { useAuth } from '../auth/AuthProvider';
 import { firebaseDb } from '../auth/firebase';
 import { mockVoiceRooms } from '../data/mockVoiceRooms';
-import { VoiceRoom, VoiceRoomType } from '../types/voice';
+import { RoomCountryCode, VoiceRoom, VoiceRoomType } from '../types/voice';
+import { debugError, debugLog } from '../utils/debugLog';
 import { createMockVoiceRoomDraft } from './createMockVoiceRoomDraft';
 import {
   CreateRoomInput,
@@ -24,45 +30,112 @@ import {
   canJoinRoomWithInvite,
   createRoomDocument,
   createRoomMemberDocument,
-  mapRoomDocument,
+  mapRoomDocumentResult,
   mapRoomDocumentToVoiceRoom,
   mapRoomMemberDocument,
+  selectMostRecentRoomDocument,
 } from './roomProfile';
 import { applyRoomPresence, mapRoomPresenceDocument } from './roomPresence';
+import {
+  MAX_ROOM_SEATS,
+  createVacantRoomSeatDocument,
+  mapRoomSeatDocument,
+  roomSeatDocumentId,
+} from './roomV2Contract';
+import {
+  VisitedRoomSummary,
+  createVisitedRoomSummary,
+  loadVisitedRooms,
+  normalizeVisitedRooms,
+  removeVisitedRoom,
+  saveVisitedRooms,
+  shouldApplyVisitedRoomsForUser,
+  upsertVisitedRoom,
+} from './visitedRooms';
 
 type VoiceRoomsContextValue = {
   rooms: VoiceRoom[];
   roomsStatus: RoomsStatus;
+  myActiveRoom?: VoiceRoom;
+  myActiveRoomStatus: RoomsStatus;
+  isMyActiveRoomLoading: boolean;
+  visitedRooms: VisitedRoomSummary[];
   createRoom: (input: CreateRoomInput) => Promise<VoiceRoom>;
-  createDraftRoom: (type: VoiceRoomType, title?: string) => Promise<VoiceRoom>;
+  createDraftRoom: (type: VoiceRoomType, title?: string, countryCode?: RoomCountryCode) => Promise<VoiceRoom>;
   createPrivateRoom: (input: CreateRoomInput) => Promise<VoiceRoom>;
   getRoomById: (roomId: string) => VoiceRoom;
   joinRoom: (roomId: string) => Promise<VoiceRoom>;
   joinPrivateRoom: (input: JoinPrivateRoomInput) => Promise<VoiceRoom>;
+  forgetVisitedRoom: (roomId: string) => Promise<void>;
   startRoomPresence: (roomId: string) => void;
   stopRoomPresence: (roomId: string) => Promise<void>;
 };
+
+const hostedRoomLookupTimeoutMs = 4_000;
+const roomSyncInteractionFallbackMs = 350;
+
+function mapCompatibleRoomDocument(data: unknown, roomId: string, source: string) {
+  const result = mapRoomDocumentResult(data, roomId);
+
+  if (result.status === 'unsupported') {
+    debugLog('voice.rooms', 'roomSchema:unsupported', {
+      roomId,
+      schemaVersion: result.schemaVersion,
+      source,
+    });
+  }
+
+  return result.status === 'ready' ? result.room : null;
+}
 
 export const VoiceRoomsContext = createContext<VoiceRoomsContextValue | undefined>(undefined);
 
 export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   const { authUser } = useAuth();
-  const [firestoreRooms, setFirestoreRooms] = useState<VoiceRoom[]>([]);
+  const [isRoomSyncReady, setRoomSyncReady] = useState(false);
+  const [firestoreActivityRooms, setFirestoreActivityRooms] = useState<VoiceRoom[]>([]);
+  const [firestorePopularRooms, setFirestorePopularRooms] = useState<VoiceRoom[]>([]);
   const [joinedRoomOverrides, setJoinedRoomOverrides] = useState<Record<string, VoiceRoom>>({});
   const [activePresenceRoomIds, setActivePresenceRoomIds] = useState<string[]>([]);
   const [roomsStatus, setRoomsStatus] = useState<RoomsStatus>('loading');
+  const [myActiveRoom, setMyActiveRoom] = useState<VoiceRoom>();
+  const [myActiveRoomStatus, setMyActiveRoomStatus] = useState<RoomsStatus>('loading');
+  const [visitedRooms, setVisitedRooms] = useState<VisitedRoomSummary[]>([]);
   const joinedRoomBaseRef = useRef<Record<string, VoiceRoom>>({});
   const joinedRoomOverridesRef = useRef(joinedRoomOverrides);
   const presenceJoinedRoomIdsRef = useRef<Set<string>>(new Set());
+  const presenceSessionIdsRef = useRef<Record<string, string>>({});
+  const presenceAppStateRef = useRef(AppState.currentState);
+  const visitedRoomsRef = useRef<VisitedRoomSummary[]>([]);
+  const visitedRoomsOwnerIdRef = useRef<string | undefined>(undefined);
+  const visitedRoomsWriteRef = useRef(Promise.resolve());
+  const currentAuthUserIdRef = useRef(authUser?.uid);
+  currentAuthUserIdRef.current = authUser?.uid;
+  const firestoreRooms = useMemo(() => {
+    const roomsById = new Map<string, VoiceRoom>();
+
+    [...firestoreActivityRooms, ...firestorePopularRooms].forEach((room) => {
+      roomsById.set(room.id, room);
+    });
+
+    return [...roomsById.values()];
+  }, [firestoreActivityRooms, firestorePopularRooms]);
   const rooms = useMemo(
     () => {
-      const sourceRooms = firestoreRooms.length > 0 ? firestoreRooms : mockVoiceRooms;
+      const sourceRooms = roomsStatus === 'error' ? mockVoiceRooms : firestoreRooms;
 
       return sourceRooms.map((room) => joinedRoomOverrides[room.id] ?? room);
     },
-    [firestoreRooms, joinedRoomOverrides],
+    [firestoreRooms, joinedRoomOverrides, roomsStatus],
   );
-  const joinedRoomIds = useMemo(() => Object.keys(joinedRoomOverrides).sort(), [joinedRoomOverrides]);
+  const joinedRoomIds = useMemo(
+    () =>
+      Object.entries(joinedRoomOverrides)
+        .filter(([, room]) => room.localMember?.id === authUser?.uid && room.localMember?.status !== 'removed')
+        .map(([roomId]) => roomId)
+        .sort(),
+    [authUser?.uid, joinedRoomOverrides],
+  );
   const joinedRoomIdsKey = joinedRoomIds.join('|');
   const activePresenceRoomIdsKey = activePresenceRoomIds.join('|');
 
@@ -72,30 +145,266 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!authUser) {
-      setFirestoreRooms([]);
+      visitedRoomsOwnerIdRef.current = undefined;
+      visitedRoomsRef.current = [];
+      setVisitedRooms([]);
+      return undefined;
+    }
+
+    const userId = authUser.uid;
+    let cancelled = false;
+    visitedRoomsOwnerIdRef.current = userId;
+    visitedRoomsRef.current = [];
+    setVisitedRooms([]);
+
+    void loadVisitedRooms(userId).then((storedRooms) => {
+      if (
+        cancelled ||
+        !shouldApplyVisitedRoomsForUser(userId, currentAuthUserIdRef.current) ||
+        visitedRoomsOwnerIdRef.current !== userId
+      ) {
+        return;
+      }
+
+      const mergedRooms = normalizeVisitedRooms([...visitedRoomsRef.current, ...storedRooms]);
+      visitedRoomsRef.current = mergedRooms;
+      setVisitedRooms(mergedRooms);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.uid]);
+
+  const queueVisitedRoomsSave = useCallback((userId: string, nextRooms: VisitedRoomSummary[]) => {
+    visitedRoomsWriteRef.current = visitedRoomsWriteRef.current
+      .then(() => saveVisitedRooms(userId, nextRooms))
+      .then(() => undefined);
+  }, []);
+
+  const recordVisitedRoom = useCallback(
+    (room: VoiceRoom) => {
+      if (!authUser) {
+        return;
+      }
+
+      const userId = authUser.uid;
+
+      if (!shouldApplyVisitedRoomsForUser(userId, currentAuthUserIdRef.current)) {
+        return;
+      }
+
+      if (visitedRoomsOwnerIdRef.current !== userId) {
+        visitedRoomsOwnerIdRef.current = userId;
+        visitedRoomsRef.current = [];
+      }
+
+      const nextRooms = upsertVisitedRoom(visitedRoomsRef.current, createVisitedRoomSummary(room));
+      visitedRoomsRef.current = nextRooms;
+      setVisitedRooms(nextRooms);
+      queueVisitedRoomsSave(userId, nextRooms);
+    },
+    [authUser, queueVisitedRoomsSave],
+  );
+
+  const forgetVisitedRoom = useCallback(
+    async (roomId: string) => {
+      if (!authUser) {
+        return;
+      }
+
+      const userId = authUser.uid;
+
+      if (!shouldApplyVisitedRoomsForUser(userId, currentAuthUserIdRef.current)) {
+        return;
+      }
+
+      if (visitedRoomsOwnerIdRef.current !== userId) {
+        visitedRoomsOwnerIdRef.current = userId;
+        visitedRoomsRef.current = [];
+      }
+
+      const nextRooms = removeVisitedRoom(visitedRoomsRef.current, roomId);
+      visitedRoomsRef.current = nextRooms;
+      setVisitedRooms(nextRooms);
+      queueVisitedRoomsSave(userId, nextRooms);
+      await visitedRoomsWriteRef.current;
+    },
+    [authUser, queueVisitedRoomsSave],
+  );
+
+  useEffect(() => {
+    if (!authUser) {
+      setRoomSyncReady(false);
+      return undefined;
+    }
+
+    setRoomSyncReady(false);
+    let hasStartedRoomSync = false;
+    const startRoomSync = () => {
+      if (hasStartedRoomSync) {
+        return;
+      }
+
+      hasStartedRoomSync = true;
+      setRoomSyncReady(true);
+    };
+    const interactionHandle = InteractionManager.runAfterInteractions(startRoomSync);
+    const fallbackTimer = setTimeout(startRoomSync, roomSyncInteractionFallbackMs);
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      interactionHandle.cancel();
+    };
+  }, [authUser]);
+
+  useEffect(() => {
+    if (!authUser) {
+      setFirestoreActivityRooms([]);
+      setFirestorePopularRooms([]);
       setRoomsStatus('ready');
       return undefined;
     }
 
+    if (!isRoomSyncReady) {
+      setRoomsStatus('loading');
+      return undefined;
+    }
+
     setRoomsStatus('loading');
+    let activityReady = false;
+    let popularReady = false;
+    let hasFailed = false;
+    const markSnapshotReady = (kind: 'activity' | 'popular') => {
+      activityReady = activityReady || kind === 'activity';
+      popularReady = popularReady || kind === 'popular';
 
-    return onSnapshot(
-      query(collection(firebaseDb, 'rooms'), where('status', '==', 'active'), where('visibility', '==', 'public')),
-      (snapshot) => {
-        const nextRooms = snapshot.docs
-          .map((roomSnapshot) => mapRoomDocument(roomSnapshot.data(), roomSnapshot.id))
-          .filter((room): room is NonNullable<typeof room> => room !== null)
-          .map((room) => mapRoomDocumentToVoiceRoom(room));
-
-        setFirestoreRooms(nextRooms);
+      if (!hasFailed && activityReady && popularReady) {
         setRoomsStatus('ready');
+      }
+    };
+    const handleSnapshotError = (kind: 'activity' | 'popular') => {
+      hasFailed = true;
+      debugLog('voice.rooms', 'publicRoomsSnapshot:error', { kind });
+      setFirestoreActivityRooms([]);
+      setFirestorePopularRooms([]);
+      setRoomsStatus('error');
+    };
+    const mapSnapshotRooms = (snapshot: QuerySnapshot<DocumentData>) =>
+      snapshot.docs
+        .map((roomSnapshot) => mapCompatibleRoomDocument(roomSnapshot.data(), roomSnapshot.id, 'public-list'))
+        .filter((room): room is NonNullable<typeof room> => room !== null)
+        .map((room) => mapRoomDocumentToVoiceRoom(room));
+
+    const unsubscribeActivity = onSnapshot(
+      query(
+        collection(firebaseDb, 'rooms'),
+        where('status', '==', 'active'),
+        where('visibility', '==', 'public'),
+        orderBy('updatedAt', 'desc'),
+        limit(40),
+      ),
+      (snapshot) => {
+        debugLog('voice.rooms', 'publicRoomsSnapshot', { count: snapshot.docs.length, kind: 'activity' });
+        setFirestoreActivityRooms(mapSnapshotRooms(snapshot));
+        markSnapshotReady('activity');
       },
-      () => {
-        setFirestoreRooms([]);
-        setRoomsStatus('error');
+      () => handleSnapshotError('activity'),
+    );
+    const unsubscribePopular = onSnapshot(
+      query(
+        collection(firebaseDb, 'rooms'),
+        where('status', '==', 'active'),
+        where('visibility', '==', 'public'),
+        orderBy('participantCount', 'desc'),
+        limit(40),
+      ),
+      (snapshot) => {
+        debugLog('voice.rooms', 'publicRoomsSnapshot', { count: snapshot.docs.length, kind: 'popular' });
+        setFirestorePopularRooms(mapSnapshotRooms(snapshot));
+        markSnapshotReady('popular');
+      },
+      () => handleSnapshotError('popular'),
+    );
+
+    return () => {
+      unsubscribeActivity();
+      unsubscribePopular();
+    };
+  }, [authUser, isRoomSyncReady]);
+
+  useEffect(() => {
+    if (!authUser) {
+      setMyActiveRoom(undefined);
+      setMyActiveRoomStatus('ready');
+      return undefined;
+    }
+
+    if (!isRoomSyncReady) {
+      setMyActiveRoom(undefined);
+      setMyActiveRoomStatus('loading');
+      return undefined;
+    }
+
+    setMyActiveRoomStatus('loading');
+    let hasHostedRoomSnapshotSettled = false;
+    const hostedRoomLookupTimeout = setTimeout(() => {
+      if (hasHostedRoomSnapshotSettled) {
+        return;
+      }
+
+      debugLog('voice.rooms', 'hostedRoomsSnapshot:timeout', {
+        timeoutMs: hostedRoomLookupTimeoutMs,
+        uid: authUser.uid,
+      });
+      setMyActiveRoom(undefined);
+      setMyActiveRoomStatus('error');
+    }, hostedRoomLookupTimeoutMs);
+    const unsubscribeHostedRooms = onSnapshot(
+      query(
+        collection(firebaseDb, 'rooms'),
+        where('hostId', '==', authUser.uid),
+        where('status', '==', 'active'),
+      ),
+      (snapshot) => {
+        hasHostedRoomSnapshotSettled = true;
+        clearTimeout(hostedRoomLookupTimeout);
+        const hostedRooms = snapshot.docs
+          .map((roomSnapshot) => mapCompatibleRoomDocument(roomSnapshot.data(), roomSnapshot.id, 'owner-list'))
+          .filter((room): room is NonNullable<typeof room> => room !== null);
+        const latestRoom = selectMostRecentRoomDocument(hostedRooms);
+
+        setMyActiveRoom(
+          latestRoom
+            ? {
+                ...mapRoomDocumentToVoiceRoom(latestRoom),
+                localMember: {
+                  id: authUser.uid,
+                  displayName: authUser.displayName,
+                  avatarLabel: authUser.avatarLabel,
+                  role: 'host',
+                  status: 'active',
+                  canPublishAudio: true,
+                },
+              }
+            : undefined,
+        );
+        setMyActiveRoomStatus('ready');
+      },
+      (error) => {
+        hasHostedRoomSnapshotSettled = true;
+        clearTimeout(hostedRoomLookupTimeout);
+        debugError('voice.rooms', 'hostedRoomsSnapshot:error', error, { uid: authUser.uid });
+        setMyActiveRoom(undefined);
+        setMyActiveRoomStatus('error');
       },
     );
-  }, [authUser]);
+
+    return () => {
+      clearTimeout(hostedRoomLookupTimeout);
+      unsubscribeHostedRooms();
+    };
+  }, [authUser, isRoomSyncReady]);
 
   useEffect(() => {
     if (!authUser || joinedRoomIds.length === 0) {
@@ -107,90 +416,130 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       const memberRef = doc(firebaseDb, 'rooms', roomId, 'members', authUser.uid);
 
       return [
-        onSnapshot(roomRef, (snapshot) => {
-          const roomDocument = snapshot.exists() ? mapRoomDocument(snapshot.data(), snapshot.id) : null;
+        onSnapshot(
+          roomRef,
+          (snapshot) => {
+            const roomDocument = snapshot.exists()
+              ? mapCompatibleRoomDocument(snapshot.data(), snapshot.id, 'joined-room-snapshot')
+              : null;
 
-          if (!roomDocument) {
-            return;
-          }
-
-          setJoinedRoomOverrides((currentRooms) => {
-            const currentRoom = currentRooms[roomId];
-
-            if (!currentRoom) {
-              return currentRooms;
+            if (!roomDocument) {
+              return;
             }
 
-            const nextBaseRoom = {
-              ...mapRoomDocumentToVoiceRoom(roomDocument),
-              localMember: currentRoom.localMember,
-            };
-            joinedRoomBaseRef.current = {
-              ...joinedRoomBaseRef.current,
-              [roomId]: nextBaseRoom,
-            };
+            setJoinedRoomOverrides((currentRooms) => {
+              const currentRoom = currentRooms[roomId];
 
-            return {
-              ...currentRooms,
-              [roomId]: nextBaseRoom,
-            };
-          });
-        }),
-        onSnapshot(memberRef, (snapshot) => {
-          const memberDocument = snapshot.exists() ? mapRoomMemberDocument(snapshot.data()) : null;
+              if (!currentRoom) {
+                return currentRooms;
+              }
 
-          if (!memberDocument) {
-            return;
-          }
+              const nextBaseRoom = {
+                ...mapRoomDocumentToVoiceRoom(roomDocument),
+                localMember: currentRoom.localMember,
+                seats: currentRoom.seats,
+              };
+              joinedRoomBaseRef.current = {
+                ...joinedRoomBaseRef.current,
+                [roomId]: nextBaseRoom,
+              };
 
-          setJoinedRoomOverrides((currentRooms) => {
-            const currentRoom = currentRooms[roomId];
+              return {
+                ...currentRooms,
+                [roomId]: nextBaseRoom,
+              };
+            });
+          },
+          (error) => {
+            debugError('voice.rooms', 'roomSnapshot:error', error, { roomId });
+          },
+        ),
+        onSnapshot(
+          memberRef,
+          (snapshot) => {
+            const memberDocument = snapshot.exists() ? mapRoomMemberDocument(snapshot.data()) : null;
 
-            if (!currentRoom) {
-              return currentRooms;
+            if (!memberDocument) {
+              return;
             }
 
-            const baseRoom = joinedRoomBaseRef.current[roomId] ?? currentRoom;
-            const nextBaseRoom = {
-              ...baseRoom,
-              localMember: {
-                id: memberDocument.uid,
-                displayName: memberDocument.displayName,
-                avatarLabel: memberDocument.avatarLabel,
-                role: memberDocument.role,
-                status: memberDocument.status,
-                canPublishAudio: memberDocument.canPublishAudio,
-              },
-            };
-            joinedRoomBaseRef.current = {
-              ...joinedRoomBaseRef.current,
-              [roomId]: nextBaseRoom,
-            };
+            setJoinedRoomOverrides((currentRooms) => {
+              const currentRoom = currentRooms[roomId];
 
-            return {
-              ...currentRooms,
-              [roomId]: nextBaseRoom,
-            };
-          });
-        }),
-        onSnapshot(collection(firebaseDb, 'rooms', roomId, 'presence'), (snapshot) => {
-          const presenceDocuments = snapshot.docs
-            .map((presenceSnapshot) => mapRoomPresenceDocument(presenceSnapshot.data()))
-            .filter((presence): presence is NonNullable<typeof presence> => presence !== null);
+              if (!currentRoom) {
+                return currentRooms;
+              }
 
-          setJoinedRoomOverrides((currentRooms) => {
-            const currentRoom = currentRooms[roomId];
+              const baseRoom = joinedRoomBaseRef.current[roomId] ?? currentRoom;
+              const nextBaseRoom = {
+                ...baseRoom,
+                localMember: {
+                  id: memberDocument.uid,
+                  displayName: memberDocument.displayName,
+                  avatarLabel: memberDocument.avatarLabel,
+                  role: memberDocument.role,
+                  status: memberDocument.status,
+                  canPublishAudio: memberDocument.canPublishAudio,
+                  authorityRole: memberDocument.authorityRole,
+                  seatId: memberDocument.seatId,
+                },
+              };
+              joinedRoomBaseRef.current = {
+                ...joinedRoomBaseRef.current,
+                [roomId]: nextBaseRoom,
+              };
 
-            if (!currentRoom) {
-              return currentRooms;
-            }
+              return {
+                ...currentRooms,
+                [roomId]: nextBaseRoom,
+              };
+            });
+          },
+          (error) => {
+            debugError('voice.rooms', 'memberSnapshot:error', error, { roomId, uid: authUser.uid });
+          },
+        ),
+        onSnapshot(
+          collection(firebaseDb, 'rooms', roomId, 'seats'),
+          (snapshot) => {
+            const seats = snapshot.docs
+              .map((seatSnapshot) => mapRoomSeatDocument(seatSnapshot.data(), seatSnapshot.id))
+              .filter((seat): seat is NonNullable<typeof seat> => seat !== null)
+              .sort((left, right) => left.seatNumber - right.seatNumber);
+            setJoinedRoomOverrides((currentRooms) => {
+              const currentRoom = currentRooms[roomId];
+              if (!currentRoom) return currentRooms;
+              const nextBaseRoom = { ...(joinedRoomBaseRef.current[roomId] ?? currentRoom), seats };
+              joinedRoomBaseRef.current = { ...joinedRoomBaseRef.current, [roomId]: nextBaseRoom };
+              return { ...currentRooms, [roomId]: nextBaseRoom };
+            });
+          },
+          (error) => debugError('voice.rooms', 'seatSnapshot:error', error, { roomId, uid: authUser.uid }),
+        ),
+        onSnapshot(
+          collection(firebaseDb, 'rooms', roomId, 'presence'),
+          (snapshot) => {
+            const presenceDocuments = snapshot.docs
+              .map((presenceSnapshot) => mapRoomPresenceDocument(presenceSnapshot.data()))
+              .filter((presence): presence is NonNullable<typeof presence> => presence !== null);
 
-            return {
-              ...currentRooms,
-              [roomId]: applyRoomPresence(joinedRoomBaseRef.current[roomId] ?? currentRoom, presenceDocuments),
-            };
-          });
-        }),
+            setJoinedRoomOverrides((currentRooms) => {
+              const currentRoom = currentRooms[roomId];
+
+              if (!currentRoom) {
+                return currentRooms;
+              }
+
+              return {
+                ...currentRooms,
+                [roomId]: applyRoomPresence(joinedRoomBaseRef.current[roomId] ?? currentRoom, presenceDocuments),
+              };
+            });
+          },
+          (error) => {
+            debugError('voice.rooms', 'presenceSnapshot:error', error, { roomId, uid: authUser.uid });
+          },
+        ),
       ];
     });
 
@@ -200,7 +549,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   }, [authUser, authUser?.uid, joinedRoomIdsKey]);
 
   const writeRoomPresence = useCallback(
-    async (room: VoiceRoom, status: 'online' | 'stale') => {
+    async (room: VoiceRoom, status: 'online' | 'reconnecting' | 'stale') => {
       if (!authUser || room.status !== 'active' || room.localMember?.status === 'removed') {
         return;
       }
@@ -212,6 +561,10 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       }
 
       const hasJoinedPresence = presenceJoinedRoomIdsRef.current.has(room.id);
+      const sessionId = presenceSessionIdsRef.current[room.id]
+        ?? `presence_${authUser.uid}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+      presenceSessionIdsRef.current[room.id] = sessionId;
+      const nowMs = Date.now();
       const presencePayload = {
         uid: authUser.uid,
         displayName: member.displayName,
@@ -219,13 +572,33 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         role: member.role,
         status,
         canPublishAudio: member.canPublishAudio,
+        authorityRole: member.authorityRole ?? (member.role === 'host' ? 'owner' : 'member'),
+        seatId: member.seatId ?? null,
+        sessionId,
+        leaseExpiresAt: Timestamp.fromMillis(status === 'online' ? nowMs + 45_000 : nowMs),
         lastSeenAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         ...(hasJoinedPresence ? {} : { joinedAt: serverTimestamp() }),
       };
 
-      await setDoc(doc(firebaseDb, 'rooms', room.id, 'presence', authUser.uid), presencePayload, { merge: true });
-      presenceJoinedRoomIdsRef.current.add(room.id);
+      try {
+        await setDoc(doc(firebaseDb, 'rooms', room.id, 'presence', authUser.uid), presencePayload, { merge: true });
+        debugLog('voice.presence', 'write:success', {
+          roomId: room.id,
+          status,
+          role: member.role,
+          canPublishAudio: member.canPublishAudio,
+        });
+        presenceJoinedRoomIdsRef.current.add(room.id);
+      } catch (error) {
+        debugError('voice.presence', 'write:error', error, {
+          roomId: room.id,
+          status,
+          role: member.role,
+          canPublishAudio: member.canPublishAudio,
+        });
+        throw error;
+      }
     },
     [authUser],
   );
@@ -240,11 +613,12 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
     }
 
     const heartbeat = () => {
+      if (presenceAppStateRef.current !== 'active') return;
       activePresenceRoomIds
         .map((roomId) => joinedRoomOverridesRef.current[roomId])
         .filter((room): room is VoiceRoom => !!room)
         .forEach((room) => {
-          void writeRoomPresence(room, 'online');
+          void writeRoomPresence(room, 'online').catch(() => undefined);
         });
     };
     heartbeat();
@@ -257,12 +631,30 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         .map((roomId) => joinedRoomOverridesRef.current[roomId])
         .filter((room): room is VoiceRoom => !!room)
         .forEach((room) => {
-          void writeRoomPresence(room, 'stale');
+          void writeRoomPresence(room, 'stale').catch(() => undefined);
         });
     };
   }, [activePresenceRoomIds, activePresenceRoomIdsKey, authUser, writeRoomPresence]);
 
+  useEffect(() => {
+    if (!authUser || activePresenceRoomIds.length === 0) return undefined;
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = presenceAppStateRef.current;
+      presenceAppStateRef.current = nextState;
+      if (previousState === nextState) return;
+      const status = nextState === 'active' ? 'online' : 'reconnecting';
+      activePresenceRoomIds
+        .map((roomId) => joinedRoomOverridesRef.current[roomId])
+        .filter((room): room is VoiceRoom => !!room)
+        .forEach((room) => void writeRoomPresence(room, status).catch(() => undefined));
+    });
+    return () => subscription.remove();
+  }, [activePresenceRoomIds, activePresenceRoomIdsKey, authUser, writeRoomPresence]);
+
   const startRoomPresence = useCallback((roomId: string) => {
+    presenceSessionIdsRef.current[roomId] =
+      `presence_${roomId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+    presenceJoinedRoomIdsRef.current.delete(roomId);
     setActivePresenceRoomIds((currentRoomIds) =>
       currentRoomIds.includes(roomId) ? currentRoomIds : [...currentRoomIds, roomId].sort(),
     );
@@ -277,6 +669,8 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       if (room) {
         await writeRoomPresence(room, 'stale');
       }
+      delete presenceSessionIdsRef.current[roomId];
+      presenceJoinedRoomIdsRef.current.delete(roomId);
     },
     [writeRoomPresence],
   );
@@ -293,6 +687,13 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       const memberDocument = createRoomMemberDocument(authUser, 'host');
       const batch = writeBatch(firebaseDb);
 
+      debugLog('voice.rooms', 'createRoom:commit:start', {
+        roomId: roomRef.id,
+        type: roomDocument.type,
+        visibility: roomDocument.visibility,
+        hostId: authUser.uid,
+      });
+
       batch.set(roomRef, {
         ...roomDocument,
         createdAt: serverTimestamp(),
@@ -303,11 +704,38 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         joinedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      for (let seatNumber = 1; seatNumber <= MAX_ROOM_SEATS; seatNumber += 1) {
+        const seatRef = doc(firebaseDb, 'rooms', roomRef.id, 'seats', roomSeatDocumentId(seatNumber));
+        batch.set(seatRef, {
+          ...createVacantRoomSeatDocument(seatNumber),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
-      await batch.commit();
+      try {
+        await batch.commit();
+      } catch (error) {
+        debugError('voice.rooms', 'createRoom:commit:error', error, {
+          roomId: roomRef.id,
+          visibility: roomDocument.visibility,
+        });
+        throw error;
+      }
 
+      debugLog('voice.rooms', 'createRoom:commit:success', {
+        roomId: roomRef.id,
+        memberRole: memberDocument.role,
+      });
+
+      if (currentAuthUserIdRef.current !== authUser.uid) {
+        throw new Error('The signed-in account changed while creating the room.');
+      }
+
+      const now = Date.now();
       const room = {
         ...mapRoomDocumentToVoiceRoom(roomDocument, [memberDocument]),
+        createdAtMs: now,
+        updatedAtMs: now,
         localMember: {
           id: memberDocument.uid,
           displayName: memberDocument.displayName,
@@ -320,14 +748,18 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       setJoinedRoomOverrides((currentRooms) => ({ ...currentRooms, [room.id]: room }));
       joinedRoomBaseRef.current = { ...joinedRoomBaseRef.current, [room.id]: room };
+      setMyActiveRoom(room);
+      setMyActiveRoomStatus('ready');
+      recordVisitedRoom(room);
 
       return room;
     },
-    [authUser],
+    [authUser, recordVisitedRoom],
   );
 
   const createDraftRoom = useCallback(
-    (type: VoiceRoomType, title?: string) => createRoom({ type, title }),
+    (type: VoiceRoomType, title?: string, countryCode: RoomCountryCode = 'IQ') =>
+      createRoom({ type, title, countryCode }),
     [createRoom],
   );
 
@@ -344,12 +776,15 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       const fallbackRoom = mockVoiceRooms.find((room) => room.id === roomId);
 
-      if (fallbackRoom && (roomsStatus === 'error' || firestoreRooms.length === 0)) {
+      if (fallbackRoom && roomsStatus === 'error') {
+        recordVisitedRoom(fallbackRoom);
         return fallbackRoom;
       }
 
       const roomRef = doc(firebaseDb, 'rooms', roomId);
       const memberRef = doc(firebaseDb, 'rooms', roomId, 'members', authUser.uid);
+
+      debugLog('voice.rooms', 'joinRoom:transaction:start', { roomId, uid: authUser.uid });
 
       const room = await runTransaction(firebaseDb, async (transaction) => {
         const roomSnapshot = await transaction.get(roomRef);
@@ -358,7 +793,11 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
           throw new Error('Room was not found.');
         }
 
-        const roomDocument = mapRoomDocument(roomSnapshot.data(), roomSnapshot.id);
+        const roomMapping = mapRoomDocumentResult(roomSnapshot.data(), roomSnapshot.id);
+        if (roomMapping.status === 'unsupported') {
+          throw new Error('This room requires a newer app version.');
+        }
+        const roomDocument = roomMapping.status === 'ready' ? roomMapping.room : null;
 
         if (!roomDocument || roomDocument.status !== 'active') {
           throw new Error('Room is not available.');
@@ -374,7 +813,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
           existingMemberData?.role === 'host' || existingMemberData?.role === 'speaker'
             ? existingMemberData.role
             : 'listener';
-        const memberDocument = createRoomMemberDocument(authUser, role);
+        const memberDocument = createRoomMemberDocument(authUser, role, undefined, existingMemberData);
         transaction.set(
           memberRef,
           {
@@ -403,14 +842,28 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
             canPublishAudio: memberDocument.canPublishAudio,
           },
         };
+      }).catch((error) => {
+        debugError('voice.rooms', 'joinRoom:transaction:error', error, { roomId, uid: authUser.uid });
+        throw error;
       });
+
+      debugLog('voice.rooms', 'joinRoom:transaction:success', {
+        roomId: room.id,
+        localRole: room.localMember?.role,
+        localCanPublishAudio: room.localMember?.canPublishAudio,
+      });
+
+      if (currentAuthUserIdRef.current !== authUser.uid) {
+        throw new Error('The signed-in account changed while joining the room.');
+      }
 
       setJoinedRoomOverrides((currentRooms) => ({ ...currentRooms, [room.id]: room }));
       joinedRoomBaseRef.current = { ...joinedRoomBaseRef.current, [room.id]: room };
+      recordVisitedRoom(room);
 
       return room;
     },
-    [authUser, firestoreRooms.length, roomsStatus],
+    [authUser, recordVisitedRoom, roomsStatus],
   );
 
   const joinPrivateRoom = useCallback(
@@ -422,6 +875,12 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       const roomRef = doc(firebaseDb, 'rooms', input.roomId);
       const memberRef = doc(firebaseDb, 'rooms', input.roomId, 'members', authUser.uid);
 
+      debugLog('voice.rooms', 'joinPrivateRoom:transaction:start', {
+        roomId: input.roomId,
+        uid: authUser.uid,
+        hasInviteCode: Boolean(input.inviteCode),
+      });
+
       const room = await runTransaction(firebaseDb, async (transaction) => {
         const roomSnapshot = await transaction.get(roomRef);
 
@@ -429,7 +888,11 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
           throw new Error('Room was not found.');
         }
 
-        const roomDocument = mapRoomDocument(roomSnapshot.data(), roomSnapshot.id);
+        const roomMapping = mapRoomDocumentResult(roomSnapshot.data(), roomSnapshot.id);
+        if (roomMapping.status === 'unsupported') {
+          throw new Error('This room requires a newer app version.');
+        }
+        const roomDocument = roomMapping.status === 'ready' ? roomMapping.room : null;
 
         if (!roomDocument || roomDocument.status !== 'active' || roomDocument.visibility !== 'private') {
           throw new Error('Private room is not available.');
@@ -446,7 +909,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
           existingMemberData?.role === 'host' || existingMemberData?.role === 'speaker'
             ? existingMemberData.role
             : 'listener';
-        const memberDocument = createRoomMemberDocument(authUser, role, input.inviteCode);
+        const memberDocument = createRoomMemberDocument(authUser, role, input.inviteCode, existingMemberData);
 
         transaction.set(
           memberRef,
@@ -476,20 +939,38 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
             canPublishAudio: memberDocument.canPublishAudio,
           },
         };
+      }).catch((error) => {
+        debugError('voice.rooms', 'joinPrivateRoom:transaction:error', error, {
+          roomId: input.roomId,
+          uid: authUser.uid,
+        });
+        throw error;
       });
+
+      debugLog('voice.rooms', 'joinPrivateRoom:transaction:success', {
+        roomId: room.id,
+        localRole: room.localMember?.role,
+        localCanPublishAudio: room.localMember?.canPublishAudio,
+      });
+
+      if (currentAuthUserIdRef.current !== authUser.uid) {
+        throw new Error('The signed-in account changed while joining the private room.');
+      }
 
       setJoinedRoomOverrides((currentRooms) => ({ ...currentRooms, [room.id]: room }));
       joinedRoomBaseRef.current = { ...joinedRoomBaseRef.current, [room.id]: room };
+      recordVisitedRoom(room);
 
       return room;
     },
-    [authUser],
+    [authUser, recordVisitedRoom],
   );
 
   const getRoomById = useCallback(
     (roomId: string) => {
       return (
         joinedRoomOverrides[roomId] ??
+        (myActiveRoom?.id === roomId ? myActiveRoom : undefined) ??
         rooms.find((room) => room.id === roomId) ??
         createMockVoiceRoomDraft({
           host: authUser
@@ -504,7 +985,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         })
       );
     },
-    [authUser, joinedRoomOverrides, rooms],
+    [authUser, joinedRoomOverrides, myActiveRoom, rooms],
   );
 
   const value = useMemo(
@@ -512,25 +993,34 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       createDraftRoom,
       createPrivateRoom,
       createRoom,
+      forgetVisitedRoom,
       getRoomById,
+      isMyActiveRoomLoading: myActiveRoomStatus === 'loading',
       joinPrivateRoom,
       joinRoom,
+      myActiveRoom,
+      myActiveRoomStatus,
       rooms,
       roomsStatus,
       startRoomPresence,
       stopRoomPresence,
+      visitedRooms,
     }),
     [
       createDraftRoom,
       createPrivateRoom,
       createRoom,
+      forgetVisitedRoom,
       getRoomById,
       joinPrivateRoom,
       joinRoom,
+      myActiveRoom,
+      myActiveRoomStatus,
       rooms,
       roomsStatus,
       startRoomPresence,
       stopRoomPresence,
+      visitedRooms,
     ],
   );
 

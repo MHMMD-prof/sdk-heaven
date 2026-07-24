@@ -8,7 +8,33 @@
   },
   "scripts": {
     "admin:claim": "node scripts/setAdminClaim.js",
-    "lint": "node --check index.js && node --check livekitTokenCore.js && node --check roomCommandCore.js && node --check adminClaimsCore.js && node --check adminDashboardCore.js && node --check scripts/setAdminClaim.js",
+    "representative:badges": "node scripts/backfillRepresentativeBadges.js --dry-run",
+    "representative:badges:apply": "node scripts/backfillRepresentativeBadges.js --apply",
+    "auth:test-account": "node scripts/createTestAccount.js",
+    "social:backfill": "node scripts/backfillPublicProfiles.js --dry-run",
+    "social:backfill:apply": "node scripts/backfillPublicProfiles.js --apply",
+    "wallet:migrate": "node scripts/migrateWallets.js --dry-run",
+    "wallet:migrate:apply": "node scripts/migrateWallets.js --apply",
+    "rooms:v2:migrate": "node scripts/migrateRoomsV2.js --dry-run",
+    "rooms:v2:migrate:apply": "node scripts/migrateRoomsV2.js --apply",
+    "rooms:super-scope": "node scripts/setSuperModeratorScope.js --dry-run",
+    "rooms:super-scope:apply": "node scripts/setSuperModeratorScope.js --apply",
+    "rooms:seats:flags": "node scripts/setVoiceRoomSeatFlags.js",
+    "rooms:seats:enable": "node scripts/setVoiceRoomSeatFlags.js --apply",
+    "rooms:seats:disable": "node scripts/setVoiceRoomSeatFlags.js --apply --disable",
+    "rooms:seats:activate": "node scripts/activateRoomSeatEngine.js",
+    "rooms:seats:activate:apply": "node scripts/activateRoomSeatEngine.js --apply",
+    "rooms:command-center:flag": "node scripts/setVoiceRoomCommandCenterFlag.js",
+    "rooms:command-center:enable": "node scripts/setVoiceRoomCommandCenterFlag.js --apply",
+    "rooms:command-center:disable": "node scripts/setVoiceRoomCommandCenterFlag.js --apply --disable",
+    "rooms:media:flag": "node scripts/setVoiceRoomMediaFlag.js",
+    "rooms:media:enable": "node scripts/setVoiceRoomMediaFlag.js --apply",
+    "rooms:media:disable": "node scripts/setVoiceRoomMediaFlag.js --apply --disable",
+    "rooms:chat:flags": "node scripts/setVoiceRoomChatFlags.js",
+    "rooms:chat:enable": "node scripts/setVoiceRoomChatFlags.js --apply",
+    "rooms:chat:disable": "node scripts/setVoiceRoomChatFlags.js --apply --disable",
+    "social:flags": "node scripts/setSocialFeatureFlags.js",
+    "lint": "node --check index.js && node --check livekitTokenCore.js && node --check roomChatCore.js && node --check roomChatService.js && node --check roomCommandCore.js && node --check roomCommandService.js && node --check roomMediaCore.js && node --check roomMediaService.js && node --check roomSeatCore.js && node --check roomSeatService.js && node --check roomV2Core.js && node --check adminClaimsCore.js && node --check adminDashboardCore.js && node --check adminStoreInsightsCore.js && node --check adminUserContextCore.js && node --check adminUserHistoryCore.js && node --check adminWalletService.js && node --check adminStoreService.js && node --check representativeCore.js && node --check representativePinCore.js && node --check representativePortalCore.js && node --check representativePortalService.js && node --check representativeService.js && node --check storeCore.js && node --check storePurchaseCore.js && node --check storeService.js && node --check socialProfileCore.js && node --check socialProfileService.js && node --check socialDiscoveryCore.js && node --check socialDiscoveryService.js && node --check socialFriendsCore.js && node --check socialFriendsService.js && node --check socialWalletCore.js && node --check socialWalletService.js && node --check socialGiftsCore.js && node --check socialGiftsService.js && node --check socialCouplesCore.js && node --check socialCouplesService.js && node --check socialNotificationsCore.js && node --check socialNotificationsService.js && node --check scripts/setAdminClaim.js && node --check scripts/createTestAccount.js && node --check scripts/backfillPublicProfiles.js && node --check scripts/backfillRepresentativeBadges.js && node --check scripts/migrateWallets.js && node --check scripts/migrateRoomsV2.js && node --check scripts/setSuperModeratorScope.js && node --check scripts/setSocialFeatureFlags.js && node --check scripts/setVoiceRoomSeatFlags.js && node --check scripts/setVoiceRoomCommandCenterFlag.js && node --check scripts/setVoiceRoomMediaFlag.js && node --check scripts/setVoiceRoomChatFlags.js",
     "serve": "npx firebase-tools emulators:start --only functions",
     "deploy": "npx firebase-tools deploy --only functions",
     "logs": "npx firebase-tools functions:log"
@@ -16,6 +42,7 @@
   "dependencies": {
     "firebase-admin": "^13.5.0",
     "firebase-functions": "^6.6.0",
-    "livekit-server-sdk": "^2.13.3"
+    "livekit-server-sdk": "^2.13.3",
+    "sharp": "^0.34.5"
   }
 }

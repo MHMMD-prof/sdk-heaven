@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { AdminFeedbackProvider } from './AdminFeedback';
 import { App } from './App';
 import './styles.css';
 
@@ -12,6 +13,8 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <React.StrictMode>
-    <App />
+    <AdminFeedbackProvider>
+      <App />
+    </AdminFeedbackProvider>
   </React.StrictMode>,
 );

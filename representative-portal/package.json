@@ -1,0 +1,26 @@
+{
+  "name": "sdk-heaven-representative-portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1 --port 5174",
+    "dev:mock-api": "node scripts/mockPortalServer.mjs",
+    "preview": "vite preview --host 127.0.0.1 --port 4174",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "@types/react-dom": "~19.2.2",
+    "typescript": "~6.0.3",
+    "vite": "^7.2.7",
+    "vitest": "^4.1.8"
+  }
+}

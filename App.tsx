@@ -5,9 +5,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootNavigator } from './src/navigation/RootNavigator';
-import { activeVoiceProviderConfig } from './src/voice/activeVoiceProviderConfig';
-import { VoiceProvider } from './src/voice/VoiceProvider';
-import { VoiceRoomsProvider } from './src/voice/VoiceRoomsProvider';
 import { AuthProvider } from './src/auth/AuthProvider';
 
 export default function App() {
@@ -20,11 +17,7 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         <AuthProvider>
-          <VoiceProvider config={activeVoiceProviderConfig}>
-            <VoiceRoomsProvider>
-              <RootNavigator />
-            </VoiceRoomsProvider>
-          </VoiceProvider>
+          <RootNavigator />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

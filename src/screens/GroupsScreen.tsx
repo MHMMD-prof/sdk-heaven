@@ -2,13 +2,15 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ReactNode, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CreateRoomModal } from '../components/CreateRoomModal';
 import { GlassCard } from '../components/GlassCard';
 import { LuxuryInput } from '../components/LuxuryInput';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionHeader } from '../components/SectionHeader';
 import { colors, radius, spacing, typography } from '../theme';
 import { RootStackParamList } from '../types/navigation';
-import { VoiceRoom, VoiceRoomType } from '../types/voice';
+import { RoomCountryCode, VoiceRoom, VoiceRoomType } from '../types/voice';
+import { debugError, debugLog } from '../utils/debugLog';
 import { normalizeInviteCode } from '../voice/roomProfile';
 import { useVoiceRooms } from '../voice/useVoiceRooms';
 
@@ -26,6 +28,7 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
   const [joinInviteCode, setJoinInviteCode] = useState('');
   const [pendingRoomId, setPendingRoomId] = useState<string | null>(null);
   const [privateRoomId, setPrivateRoomId] = useState('');
+  const [selectedCountryCode, setSelectedCountryCode] = useState<RoomCountryCode>('IQ');
   const [selectedRoomType, setSelectedRoomType] = useState<VoiceRoomType>('voice');
   const { createPrivateRoom, createRoom, joinPrivateRoom, joinRoom, rooms, roomsStatus } = useVoiceRooms();
 
@@ -35,14 +38,33 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
 
     try {
       const normalizedInviteCode = normalizeInviteCode(createInviteCode);
+      debugLog('voice.groups', 'createRoom:start', {
+        isPrivateRoom,
+        selectedRoomType,
+        hasInviteCode: Boolean(normalizedInviteCode),
+      });
       const room = isPrivateRoom
-        ? await createPrivateRoom({ type: selectedRoomType, inviteCode: normalizedInviteCode })
-        : await createRoom({ type: selectedRoomType });
+        ? await createPrivateRoom({
+            type: selectedRoomType,
+            countryCode: selectedCountryCode,
+            inviteCode: normalizedInviteCode,
+          })
+        : await createRoom({ type: selectedRoomType, countryCode: selectedCountryCode });
+      debugLog('voice.groups', 'createRoom:success', {
+        roomId: room.id,
+        visibility: room.visibility,
+        type: room.type,
+        participantCount: room.participantCount,
+      });
       setCreateModalVisible(false);
       setCreateInviteCode('');
       setPrivateRoom(false);
       navigation.navigate('VoiceRoom', { roomId: room.id });
     } catch (error) {
+      debugError('voice.groups', 'createRoom:error', error, {
+        isPrivateRoom,
+        selectedRoomType,
+      });
       setErrorMessage(error instanceof Error ? error.message : 'Unable to create room.');
     } finally {
       setPendingRoomId(null);
@@ -54,15 +76,27 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
     setPendingRoomId('join-private');
 
     try {
+      debugLog('voice.groups', 'joinPrivateRoom:start', {
+        hasInviteCode: Boolean(normalizeInviteCode(joinInviteCode)),
+        roomId: privateRoomId.trim(),
+      });
       const room = await joinPrivateRoom({
         inviteCode: joinInviteCode,
         roomId: privateRoomId.trim(),
+      });
+      debugLog('voice.groups', 'joinPrivateRoom:success', {
+        roomId: room.id,
+        localRole: room.localMember?.role,
+        localCanPublishAudio: room.localMember?.canPublishAudio,
       });
       setJoinPrivateModalVisible(false);
       setJoinInviteCode('');
       setPrivateRoomId('');
       navigation.navigate('VoiceRoom', { roomId: room.id });
     } catch (error) {
+      debugError('voice.groups', 'joinPrivateRoom:error', error, {
+        roomId: privateRoomId.trim(),
+      });
       setErrorMessage(error instanceof Error ? error.message : 'Unable to join private room.');
     } finally {
       setPendingRoomId(null);
@@ -74,9 +108,17 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
     setPendingRoomId(roomId);
 
     try {
+      debugLog('voice.groups', 'joinRoom:start', { roomId });
       const room = await joinRoom(roomId);
+      debugLog('voice.groups', 'joinRoom:success', {
+        roomId: room.id,
+        visibility: room.visibility,
+        localRole: room.localMember?.role,
+        localCanPublishAudio: room.localMember?.canPublishAudio,
+      });
       navigation.navigate('VoiceRoom', { roomId: room.id });
     } catch (error) {
+      debugError('voice.groups', 'joinRoom:error', error, { roomId });
       setErrorMessage(error instanceof Error ? error.message : 'Unable to join room.');
     } finally {
       setPendingRoomId(null);
@@ -106,7 +148,10 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
       ) : null}
 
       <Pressable
-        onPress={() => setCreateModalVisible(true)}
+        onPress={() => {
+          setErrorMessage('');
+          setCreateModalVisible(true);
+        }}
         style={({ pressed }) => [styles.createRoom, pressed && styles.pressed]}
       >
         <Text style={styles.createIcon}>＋</Text>
@@ -135,16 +180,22 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
         ))}
       </View>
 
-      <CreateGroupModal
-        isVisible={isCreateModalVisible}
-        isCreating={pendingRoomId === 'create'}
-        onClose={() => setCreateModalVisible(false)}
-        onCreate={handleCreateRoom}
-        onSelectType={setSelectedRoomType}
+      <CreateRoomModal
+        errorMessage={errorMessage}
         inviteCode={createInviteCode}
+        isCreating={pendingRoomId === 'create'}
         isPrivateRoom={isPrivateRoom}
+        isVisible={isCreateModalVisible}
+        onClose={() => {
+          setErrorMessage('');
+          setCreateModalVisible(false);
+        }}
+        onCreate={handleCreateRoom}
         onInviteCodeChange={setCreateInviteCode}
+        onSelectCountryCode={setSelectedCountryCode}
+        onSelectType={setSelectedRoomType}
         onTogglePrivateRoom={() => setPrivateRoom((current) => !current)}
+        selectedCountryCode={selectedCountryCode}
         selectedType={selectedRoomType}
       />
       <JoinPrivateRoomModal
@@ -158,98 +209,6 @@ export function GroupsScreen({ bottomNavigation, navigation }: GroupsScreenProps
         roomId={privateRoomId}
       />
     </ScreenContainer>
-  );
-}
-
-type CreateGroupModalProps = {
-  isVisible: boolean;
-  isCreating: boolean;
-  inviteCode: string;
-  isPrivateRoom: boolean;
-  selectedType: VoiceRoomType;
-  onClose: () => void;
-  onCreate: () => void;
-  onInviteCodeChange: (inviteCode: string) => void;
-  onSelectType: (type: VoiceRoomType) => void;
-  onTogglePrivateRoom: () => void;
-};
-
-function CreateGroupModal({
-  inviteCode,
-  isPrivateRoom,
-  isVisible,
-  isCreating,
-  onClose,
-  onCreate,
-  onInviteCodeChange,
-  onSelectType,
-  onTogglePrivateRoom,
-  selectedType,
-}: CreateGroupModalProps) {
-  const normalizedInviteCode = normalizeInviteCode(inviteCode);
-  const isCreateDisabled = isCreating || (isPrivateRoom && normalizedInviteCode.length < 6);
-
-  return (
-    <Modal animationType="fade" onRequestClose={onClose} transparent visible={isVisible}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
-          <View style={styles.modalHeader}>
-            <Pressable onPress={onClose} style={styles.modalCloseButton}>
-              <Text style={styles.modalCloseText}>×</Text>
-            </Pressable>
-            <View style={styles.modalCopy}>
-              <Text style={styles.modalEyebrow}>إنشاء تجريبي</Text>
-              <Text style={styles.modalTitle}>مجموعة جديدة</Text>
-              <Text style={styles.modalSubtitle}>
-                يتم إنشاء مجموعة محلية للمعاينة فقط. يمكن ربطها لاحقا بمنطق Backend عند الحاجة.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.typeRow}>
-            <TypeChoice
-              isSelected={selectedType === 'voice'}
-              label="مجموعة صوت"
-              onPress={() => onSelectType('voice')}
-            />
-            <TypeChoice
-              isSelected={selectedType === 'game'}
-              label="مجموعة لعبة"
-              onPress={() => onSelectType('game')}
-            />
-          </View>
-
-          <Pressable
-            onPress={onTogglePrivateRoom}
-            style={[styles.privateToggle, isPrivateRoom && styles.privateToggleActive]}
-          >
-            <View style={[styles.privateToggleDot, isPrivateRoom && styles.privateToggleDotActive]} />
-            <View style={styles.privateToggleCopy}>
-              <Text style={styles.privateToggleTitle}>مجموعة خاصة</Text>
-              <Text style={styles.privateToggleText}>تظهر فقط لمن يملك رقم المجموعة ورمز الدعوة.</Text>
-            </View>
-          </Pressable>
-
-          {isPrivateRoom ? (
-            <LuxuryInput
-              autoCapitalize="characters"
-              label="رمز الدعوة"
-              onChangeText={onInviteCodeChange}
-              placeholder="مثال: MAJLIS7"
-              value={inviteCode}
-            />
-          ) : null}
-
-          <Pressable
-            disabled={isCreateDisabled}
-            onPress={onCreate}
-            style={[styles.modalCreateButton, isCreateDisabled && styles.disabledButton]}
-          >
-            <Text style={styles.modalCreateText}>إنشاء مجموعة تجريبية</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -317,26 +276,6 @@ function JoinPrivateRoomModal({
         </View>
       </View>
     </Modal>
-  );
-}
-
-type TypeChoiceProps = {
-  isSelected: boolean;
-  label: string;
-  onPress: () => void;
-};
-
-function TypeChoice({ isSelected, label, onPress }: TypeChoiceProps) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.typeChoice, isSelected && styles.typeChoiceSelected]}
-    >
-      <View style={[styles.typeDot, isSelected && styles.typeDotSelected]} />
-      <Text style={[styles.typeChoiceText, isSelected && styles.typeChoiceTextSelected]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -666,91 +605,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     textAlign: 'right',
     writingDirection: 'rtl',
-  },
-  typeRow: {
-    flexDirection: 'row-reverse',
-    gap: spacing.md,
-  },
-  privateToggle: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    flexDirection: 'row-reverse',
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  privateToggleActive: {
-    backgroundColor: 'rgba(40, 183, 133, 0.12)',
-    borderColor: colors.emerald,
-  },
-  privateToggleDot: {
-    backgroundColor: colors.surfaceStrong,
-    borderColor: colors.border,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    height: 24,
-    width: 24,
-  },
-  privateToggleDotActive: {
-    backgroundColor: colors.emerald,
-    borderColor: colors.emerald,
-  },
-  privateToggleCopy: {
-    flex: 1,
-  },
-  privateToggleTitle: {
-    color: colors.text,
-    fontSize: typography.sizes.body,
-    fontWeight: typography.weights.bold,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  privateToggleText: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.caption,
-    marginTop: 2,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  typeChoice: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row-reverse',
-    gap: spacing.sm,
-    minHeight: 54,
-    paddingHorizontal: spacing.md,
-  },
-  typeChoiceSelected: {
-    backgroundColor: 'rgba(232, 190, 97, 0.12)',
-    borderColor: colors.borderGold,
-  },
-  typeDot: {
-    borderColor: colors.textSubtle,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    height: 16,
-    width: 16,
-  },
-  typeDotSelected: {
-    backgroundColor: colors.gold,
-    borderColor: colors.goldSoft,
-  },
-  typeChoiceText: {
-    color: colors.textMuted,
-    flex: 1,
-    fontSize: typography.sizes.caption,
-    fontWeight: typography.weights.bold,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  typeChoiceTextSelected: {
-    color: colors.goldSoft,
   },
   modalCreateButton: {
     alignItems: 'center',

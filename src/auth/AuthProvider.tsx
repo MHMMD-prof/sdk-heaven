@@ -1,17 +1,6 @@
-import {
-  User,
-  createUserWithEmailAndPassword,
-  onAuthStateChanged,
-  reload,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signOut as firebaseSignOut,
-} from '@firebase/auth';
+import type { User } from '@firebase/auth';
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 
-import { firebaseAuth, firebaseDb } from './firebase';
 import { AccountDeletionRequestInput, createAccountDeletionRequestPayload } from './accountLifecycle';
 import { createProfilePayload, isCompleteProfile, mapUserProfileDocument, validateProfileInput } from './profile';
 import { AuthUser, ProfileStatus, SaveProfileInput, UserProfile } from './types';
@@ -19,7 +8,6 @@ import { AuthUser, ProfileStatus, SaveProfileInput, UserProfile } from './types'
 type AuthContextValue = {
   authUser: AuthUser | null;
   initializing: boolean;
-  isEmailVerified: boolean;
   profile: UserProfile | null;
   profileStatus: ProfileStatus;
   refreshUser: () => Promise<void>;
@@ -27,7 +15,6 @@ type AuthContextValue = {
   saveProfile: (input: SaveProfileInput) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   sendPasswordResetForCurrentUser: () => Promise<void>;
-  sendVerificationEmail: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
@@ -48,15 +35,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    return onAuthStateChanged(firebaseAuth, (nextUser) => {
-      setUser(nextUser);
-      setAuthRevision((revision) => revision + 1);
-      setInitializing(false);
-    });
+    let unsubscribe: (() => void) | undefined;
+    let isActive = true;
+
+    void Promise.all([import('./firebase'), import('@firebase/auth')])
+      .then(([{ firebaseAuth }, { onAuthStateChanged }]) => {
+        if (!isActive) {
+          return;
+        }
+
+        unsubscribe = onAuthStateChanged(firebaseAuth, (nextUser) => {
+          setUser(nextUser);
+          setAuthRevision((revision) => revision + 1);
+          setInitializing(false);
+        });
+      })
+      .catch(() => {
+        if (isActive) {
+          setUser(null);
+          setInitializing(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+      unsubscribe?.();
+    };
   }, []);
 
   useEffect(() => {
-    if (!user || !user.emailVerified) {
+    if (!user) {
       setProfile(null);
       setProfileStatus('missing');
       return undefined;
@@ -64,28 +72,49 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     setProfileStatus('loading');
 
-    return onSnapshot(
-      doc(firebaseDb, 'users', user.uid),
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          setProfile(null);
-          setProfileStatus('missing');
+    let unsubscribe: (() => void) | undefined;
+    let isActive = true;
+
+    void Promise.all([import('./firebase'), import('firebase/firestore')])
+      .then(([{ firebaseDb }, { doc, onSnapshot }]) => {
+        if (!isActive) {
           return;
         }
 
-        const nextProfile = mapUserProfileDocument(snapshot.data());
-        setProfile(nextProfile);
-        setProfileStatus(isCompleteProfile(nextProfile) ? 'complete' : 'missing');
-      },
-      () => {
-        setProfile(null);
-        setProfileStatus('error');
-      },
-    );
-  }, [user?.emailVerified, user?.uid]);
+        unsubscribe = onSnapshot(
+          doc(firebaseDb, 'users', user.uid),
+          (snapshot) => {
+            if (!snapshot.exists()) {
+              setProfile(null);
+              setProfileStatus('missing');
+              return;
+            }
+
+            const nextProfile = mapUserProfileDocument(snapshot.data());
+            setProfile(nextProfile);
+            setProfileStatus(isCompleteProfile(nextProfile) ? 'complete' : 'missing');
+          },
+          () => {
+            setProfile(null);
+            setProfileStatus('error');
+          },
+        );
+      })
+      .catch(() => {
+        if (isActive) {
+          setProfile(null);
+          setProfileStatus('error');
+        }
+      });
+
+    return () => {
+      isActive = false;
+      unsubscribe?.();
+    };
+  }, [user?.uid]);
 
   const authUser = useMemo<AuthUser | null>(() => {
-    if (!user || !user.emailVerified || !isCompleteProfile(profile)) {
+    if (!user || !isCompleteProfile(profile)) {
       return null;
     }
 
@@ -93,7 +122,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       avatarLabel: profile.avatarLabel,
       displayName: profile.displayName,
       email: profile.email,
-      emailVerified: user.emailVerified,
       uid: user.uid,
     };
   }, [profile, user]);
@@ -102,10 +130,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     () => ({
       authUser,
       initializing,
-      isEmailVerified: user?.emailVerified ?? false,
       profile,
       profileStatus,
       refreshUser: async () => {
+        const [{ firebaseAuth }, { reload }] = await Promise.all([import('./firebase'), import('@firebase/auth')]);
         const currentUser = firebaseAuth.currentUser;
 
         if (!currentUser) {
@@ -118,10 +146,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setAuthRevision((revision) => revision + 1);
       },
       saveProfile: async (input) => {
+        const [
+          { firebaseAuth, firebaseDb },
+          { doc, getDoc, serverTimestamp, setDoc },
+        ] = await Promise.all([import('./firebase'), import('firebase/firestore')]);
         const currentUser = firebaseAuth.currentUser;
 
-        if (!currentUser?.email || !currentUser.emailVerified) {
-          throw new Error('A verified signed-in user is required to save a profile.');
+        if (!currentUser?.email) {
+          throw new Error('A signed-in user is required to save a profile.');
         }
 
         const validation = validateProfileInput(input);
@@ -151,10 +183,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
         );
       },
       requestAccountDeletion: async (input) => {
+        const [
+          { firebaseAuth, firebaseDb },
+          { addDoc, collection, serverTimestamp },
+        ] = await Promise.all([import('./firebase'), import('firebase/firestore')]);
         const currentUser = firebaseAuth.currentUser;
 
-        if (!currentUser?.email || !currentUser.emailVerified || !authUser) {
-          throw new Error('A complete verified account is required to request account deletion.');
+        if (!currentUser?.email || !authUser) {
+          throw new Error('A complete account is required to request account deletion.');
         }
 
         const payload = createAccountDeletionRequestPayload(authUser, input);
@@ -170,9 +206,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         });
       },
       sendPasswordReset: async (email) => {
+        const [{ firebaseAuth }, { sendPasswordResetEmail }] = await Promise.all([
+          import('./firebase'),
+          import('@firebase/auth'),
+        ]);
+
         await sendPasswordResetEmail(firebaseAuth, email);
       },
       sendPasswordResetForCurrentUser: async () => {
+        const [{ firebaseAuth }, { sendPasswordResetEmail }] = await Promise.all([
+          import('./firebase'),
+          import('@firebase/auth'),
+        ]);
         const currentEmail = firebaseAuth.currentUser?.email;
 
         if (!currentEmail) {
@@ -181,24 +226,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         await sendPasswordResetEmail(firebaseAuth, currentEmail);
       },
-      sendVerificationEmail: async () => {
-        const currentUser = firebaseAuth.currentUser;
-
-        if (!currentUser) {
-          throw new Error('No signed-in user is available for email verification.');
-        }
-
-        await sendEmailVerification(currentUser);
-      },
       signIn: async (email, password) => {
+        const [{ firebaseAuth }, { signInWithEmailAndPassword }] = await Promise.all([
+          import('./firebase'),
+          import('@firebase/auth'),
+        ]);
+
         await signInWithEmailAndPassword(firebaseAuth, email, password);
       },
       signOut: async () => {
+        const [{ firebaseAuth }, { signOut: firebaseSignOut }] = await Promise.all([
+          import('./firebase'),
+          import('@firebase/auth'),
+        ]);
+
+        try {
+          const { unregisterCurrentDevice } = await import('../notifications/pushNotifications');
+          await unregisterCurrentDevice();
+        } catch {
+          // Signing out must remain available even when push services are offline.
+        }
         await firebaseSignOut(firebaseAuth);
       },
       signUp: async (email, password) => {
-        const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
-        await sendEmailVerification(credential.user);
+        const [{ firebaseAuth }, { createUserWithEmailAndPassword }] = await Promise.all([
+          import('./firebase'),
+          import('@firebase/auth'),
+        ]);
+
+        await createUserWithEmailAndPassword(firebaseAuth, email, password);
       },
       user,
     }),

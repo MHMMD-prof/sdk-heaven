@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" fill="none">
+  <defs>
+    <pattern id="mashrabiya" width="58" height="58" patternUnits="userSpaceOnUse">
+      <path d="m29 2 9 18 18 9-18 9-9 18-9-18-18-9 18-9L29 2Z" stroke="#b7813f" stroke-width=".55" opacity=".34"/>
+      <path d="m29 14 15 15-15 15-15-15 15-15Z" stroke="#b7813f" stroke-width=".45" opacity=".24"/>
+      <circle cx="29" cy="29" r="6" stroke="#b7813f" stroke-width=".45" opacity=".24"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#b7813f" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#b7813f" stop-opacity=".08"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M0 616h385v284H0z" fill="url(#mashrabiya)" opacity=".36"/>
+  <g stroke="url(#fade)" stroke-width="1.05" opacity=".62">
+    <path d="M22 790V355c0-106 72-191 160-191s160 85 160 191v435"/>
+    <path d="M62 790V370c0-81 54-146 120-146s120 65 120 146v420"/>
+    <path d="M405 790V425c0-86 59-156 132-156s132 70 132 156v365"/>
+    <path d="M443 790V438c0-61 42-111 94-111s94 50 94 111v352"/>
+    <path d="M725 790V385c0-95 65-172 145-172s145 77 145 172v405"/>
+    <path d="M765 790V400c0-69 47-125 105-125s105 56 105 125v390"/>
+    <path d="M0 790h1200M0 820h1200"/>
+    <path d="M155 164V75h54v89M168 75l14-46 14 46M152 75h60"/>
+    <path d="M174 29h16M182 29V8"/>
+    <path d="M537 268V121h44v147M548 121l11-39 11 39M534 121h50"/>
+    <path d="M850 212V83h47v129M861 83l12-42 12 42M847 83h53M865 41h16M873 41V18"/>
+  </g>
+
+  <g stroke="#b7813f" stroke-width=".68" opacity=".23">
+    <path d="M0 94h1200M0 114h1200"/>
+    <path d="m12 52 22-22 22 22-22 22-22-22Zm74 0 22-22 22 22-22 22-22-22Zm74 0 22-22 22 22-22 22-22-22Z"/>
+    <path d="M22 355h320M405 425h264M725 385h290"/>
+    <path d="M22 408h320M405 478h264M725 438h290"/>
+    <path d="M42 790V355M82 790V304M122 790V264M242 790V264M282 790V304M322 790V355"/>
+    <path d="M425 790V425M465 790V370M609 790V370M649 790V425"/>
+    <path d="M745 790V385M785 790V330M955 790V330M995 790V385"/>
+  </g>
+
+  <g stroke="#b7813f" opacity=".18">
+    <path d="M22 790h1015M0 842h590"/>
+    <path d="m58 676 124-124 124 124M429 680l108-108 108 108M756 664l114-114 114 114"/>
+    <path d="M0 636c85-10 148-54 182-132 34 78 97 122 182 132M382 676c72-12 123-54 155-126 32 72 83 114 155 126"/>
+  </g>
+</svg>

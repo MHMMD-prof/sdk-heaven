@@ -1,4 +1,3 @@
-import { LiveKitVoiceClient } from './LiveKitVoiceClient';
 import { MockVoiceClient } from './MockVoiceClient';
 import { VoiceClient } from './VoiceClient';
 import { VoiceProviderConfig } from './types';
@@ -9,6 +8,8 @@ export function createVoiceClient(config: VoiceProviderConfig): VoiceClient {
   }
 
   if (config.provider === 'livekit') {
+    const { LiveKitVoiceClient } = require('./LiveKitVoiceClient') as typeof import('./LiveKitVoiceClient');
+
     return new LiveKitVoiceClient();
   }
 

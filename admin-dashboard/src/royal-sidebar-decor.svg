@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 218 1024" fill="none">
+  <defs>
+    <pattern id="edge" width="10" height="20" patternUnits="userSpaceOnUse">
+      <path d="M0 10 5 0l5 10-5 10L0 10Z" stroke="#b9813c" stroke-width=".7" opacity=".65"/>
+    </pattern>
+    <pattern id="stars" width="52" height="52" patternUnits="userSpaceOnUse">
+      <path d="m26 3 7 16 16 7-16 7-7 16-7-16-16-7 16-7 7-16Z" stroke="#b9813c" stroke-width=".55" opacity=".15"/>
+      <circle cx="26" cy="26" r="10" stroke="#b9813c" stroke-width=".45" opacity=".12"/>
+    </pattern>
+  </defs>
+  <rect width="10" height="1024" fill="url(#edge)"/>
+  <rect x="10" width="208" height="230" fill="url(#stars)" opacity=".9"/>
+  <g stroke="#b9813c" stroke-width="1" opacity=".34">
+    <path d="M126 24c38 8 64 35 67 72-20-20-43-29-69-27 12-14 13-30 2-45Z"/>
+    <path d="M161 21c18 19 24 42 17 69M194 44c-17 8-29 21-35 39"/>
+    <path d="m186 13 8 15 16 7-16 8-8 15-8-15-16-8 16-7 8-15Z"/>
+  </g>
+  <g transform="translate(109 986)" stroke="#b9813c" opacity=".8">
+    <path d="M-68 0h27M41 0h27M-41 0c12 0 14-17 27-17C-3-17 1-7 0 0c1-7 3-17 14-17 13 0 15 17 27 17-12 0-14 17-27 17C3 17 1 7 0 0c1 7-3 17-14 17-13 0-15-17-27-17Z"/>
+    <path d="m-11 0 11-11L11 0 0 11-11 0Z"/>
+    <circle r="3"/>
+  </g>
+</svg>

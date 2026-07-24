@@ -11,7 +11,7 @@ service cloud.firestore {
     }
 
     function isOwner(userId) {
-      return verified() && request.auth.uid == userId;
+      return signedIn() && request.auth.uid == userId;
     }
 
     function isAdmin() {
@@ -23,7 +23,7 @@ service cloud.firestore {
     }
 
     function hasCompleteProfile() {
-      return verified()
+      return signedIn()
         && exists(profilePath(request.auth.uid))
         && get(profilePath(request.auth.uid)).data.uid == request.auth.uid
         && get(profilePath(request.auth.uid)).data.email == request.auth.token.email
@@ -54,6 +54,115 @@ service cloud.firestore {
         && data.avatarLabel is string
         && data.avatarLabel.size() >= 1
         && data.avatarLabel.size() <= 1
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function publicProfilePath(userId) {
+      return /databases/$(database)/documents/publicProfiles/$(userId);
+    }
+
+    function hasActivePublicProfile() {
+      return signedIn()
+        && exists(publicProfilePath(request.auth.uid))
+        && get(publicProfilePath(request.auth.uid)).data.uid == request.auth.uid
+        && get(publicProfilePath(request.auth.uid)).data.moderationStatus == 'active';
+    }
+
+    function blockPath(blockerId, blockedId) {
+      return /databases/$(database)/documents/blocks/$(blockerId)/blocked/$(blockedId);
+    }
+
+    function isBlockedBetween(userId) {
+      return exists(blockPath(request.auth.uid, userId))
+        || exists(blockPath(userId, request.auth.uid));
+    }
+
+    function validSocialCountryCode(countryCode) {
+      return countryCode == 'IQ'
+        || countryCode == 'SA'
+        || countryCode == 'SY'
+        || countryCode == 'LB'
+        || countryCode == 'YE'
+        || countryCode == 'DZ'
+        || countryCode == 'EG'
+        || countryCode == 'JO'
+        || countryCode == 'PS'
+        || countryCode == 'AE'
+        || countryCode == 'KW'
+        || countryCode == 'QA'
+        || countryCode == 'BH'
+        || countryCode == 'OM'
+        || countryCode == 'MA'
+        || countryCode == 'TN'
+        || countryCode == 'LY'
+        || countryCode == 'SD'
+        || countryCode == 'SO'
+        || countryCode == 'DJ'
+        || countryCode == 'MR'
+        || countryCode == 'KM';
+    }
+
+    function validPublicProfile(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'uid',
+          'publicId',
+          'specialId',
+          'displayName',
+          'normalizedName',
+          'avatarUrl',
+          'countryCode',
+          'bio',
+          'gender',
+          'giftScore',
+          'friendCount',
+          'coupleLevel',
+          'moderationStatus',
+          'avatarModerationStatus',
+          'createdAt',
+          'updatedAt',
+        ])
+        && data.keys().hasAll([
+          'uid',
+          'publicId',
+          'displayName',
+          'normalizedName',
+          'avatarUrl',
+          'countryCode',
+          'bio',
+          'giftScore',
+          'friendCount',
+          'coupleLevel',
+          'moderationStatus',
+          'avatarModerationStatus',
+          'createdAt',
+          'updatedAt',
+        ])
+        && data.uid == userId
+        && data.publicId is string
+        && data.publicId.matches('^[1-9][0-9]{6}$')
+        && (!('specialId' in data) || (data.specialId is string && data.specialId.matches('^[0-9]{7}$')))
+        && data.displayName is string
+        && data.displayName.size() >= 2
+        && data.displayName.size() <= 32
+        && data.normalizedName is string
+        && data.normalizedName.size() >= 2
+        && data.normalizedName.size() <= 64
+        && data.avatarUrl is string
+        && data.avatarUrl.size() <= 2048
+        && validSocialCountryCode(data.countryCode)
+        && data.bio is string
+        && data.bio.size() <= 160
+        && (!('gender' in data) || data.gender == 'male' || data.gender == 'female')
+        && data.giftScore is int
+        && data.giftScore >= 0
+        && data.friendCount is int
+        && data.friendCount >= 0
+        && data.coupleLevel is int
+        && data.coupleLevel >= 0
+        && (data.moderationStatus == 'active' || data.moderationStatus == 'suspended' || data.moderationStatus == 'removed')
+        && (data.avatarModerationStatus == 'clear' || data.avatarModerationStatus == 'pending' || data.avatarModerationStatus == 'removed')
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -94,6 +203,227 @@ service cloud.firestore {
       }
     }
 
+    match /publicProfiles/{userId} {
+      allow get: if signedIn()
+        && resource.data.uid == userId
+        && (
+          isOwner(userId)
+          || (
+            hasActivePublicProfile()
+            && resource.data.moderationStatus == 'active'
+            && !isBlockedBetween(userId)
+          )
+        );
+      // Wave 0 exposes single-profile reads only. Collection discovery must go
+      // through a server command so blocking can be enforced without treating
+      // security rules as query filters or exceeding document-access limits.
+      allow list: if false;
+      allow create, delete: if false;
+      allow update: if isOwner(userId)
+        && validPublicProfile(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'avatarUrl',
+          'countryCode',
+          'bio',
+          'gender',
+          'updatedAt',
+        ]);
+    }
+
+    match /appConfig/{configId} {
+      allow read: if signedIn() && (configId == 'socialFeatures' || configId == 'voiceRoomFeatures');
+      allow write: if false;
+    }
+
+    match /publicIds/{publicId} {
+      allow read, write: if false;
+    }
+
+    match /specialIds/{specialId} {
+      allow read, write: if false;
+    }
+
+    match /specialIdCatalog/{specialId} {
+      allow read, write: if false;
+    }
+
+    match /socialCommandRequests/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /socialRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /socialFriendRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /socialCoupleRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /socialNotificationRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /roomSafetyRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /pushDevices/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /pushTokenOwners/{tokenId} {
+      allow read, write: if false;
+    }
+
+    match /notificationPreferences/{userId} {
+      allow read, write: if false;
+    }
+
+    match /notificationDeliveries/{deliveryId} {
+      allow read, write: if false;
+    }
+
+    match /adminUserSearch/{userId} {
+      allow read, write: if false;
+    }
+
+    match /blocks/{blockerId}/{document=**} {
+      allow read: if hasActivePublicProfile() && request.auth.uid == blockerId;
+      allow write: if false;
+    }
+
+    match /friendRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /friendships/{friendshipId} {
+      allow read, write: if false;
+    }
+
+    match /walletSummaries/{userId} {
+      allow read, write: if false;
+    }
+
+    match /walletTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+
+    match /storeCatalog/{itemId} {
+      allow read, write: if false;
+    }
+
+    match /storeCustomIds/{customId} {
+      allow read, write: if false;
+    }
+
+    match /storeOwnerships/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /storeEquipment/{userId} {
+      allow read, write: if false;
+    }
+
+    match /storeTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+
+    match /storeGiftEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /representativePrivileges/{userId} {
+      allow read, write: if false;
+    }
+
+    match /representativeTransfers/{transferId} {
+      allow read, write: if false;
+    }
+
+    match /representativeTransferReversals/{transferId} {
+      allow read, write: if false;
+    }
+
+    match /representativeTransferCommands/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /representativePublicReferences/{referenceId} {
+      allow read, write: if false;
+    }
+
+    match /representativeTransferReceipts/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /representativePortalBootstrapTickets/{ticketId} {
+      allow read, write: if false;
+    }
+
+    match /representativePortalSessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /representativePortalHistoryCursors/{cursorId} {
+      allow read, write: if false;
+    }
+
+    match /representativeRecipientProofs/{proofId} {
+      allow read, write: if false;
+    }
+
+    match /representativePortalRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /representativePortalSecurityEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /representativeTransferPins/{userId} {
+      allow read, write: if false;
+    }
+
+    match /representativeTransferCounters/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /walletRechargeReceipts/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /giftCatalog/{giftId} {
+      allow read, write: if false;
+    }
+
+    match /giftEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /socialGiftRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /coupleRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /couples/{coupleId} {
+      allow read, write: if false;
+    }
+
+    match /coupleMemberships/{userId} {
+      allow read, write: if false;
+    }
+
+    match /activities/{activityId} {
+      allow read, write: if false;
+    }
+
     match /adminDashboard/{document=**} {
       allow read: if isAdmin();
       allow write: if false;
@@ -122,11 +452,97 @@ service cloud.firestore {
       return visibility == 'public' || visibility == 'private';
     }
 
+    function validRoomCountryCode(countryCode) {
+      return countryCode == 'IQ'
+        || countryCode == 'SA'
+        || countryCode == 'SY'
+        || countryCode == 'LB'
+        || countryCode == 'YE'
+        || countryCode == 'DZ'
+        || countryCode == 'EG'
+        || countryCode == 'JO'
+        || countryCode == 'PS'
+        || countryCode == 'AE'
+        || countryCode == 'KW'
+        || countryCode == 'QA'
+        || countryCode == 'BH'
+        || countryCode == 'OM'
+        || countryCode == 'MA'
+        || countryCode == 'TN'
+        || countryCode == 'LY'
+        || countryCode == 'SD'
+        || countryCode == 'SO'
+        || countryCode == 'DJ'
+        || countryCode == 'MR'
+        || countryCode == 'KM';
+    }
+
     function validInviteCode(inviteCode) {
       return inviteCode is string
         && inviteCode.size() >= 6
         && inviteCode.size() <= 12
         && inviteCode.matches('^[A-Z0-9]+$');
+    }
+
+    function validRoomSeatCount(seatTargetCount) {
+      return seatTargetCount == 5
+        || seatTargetCount == 10
+        || seatTargetCount == 15
+        || seatTargetCount == 20;
+    }
+
+    function validRoomSeatMode(seatMode) {
+      return seatMode == 'open'
+        || seatMode == 'request'
+        || seatMode == 'invite'
+        || seatMode == 'locked';
+    }
+
+    function validRoomV2Create(data) {
+      return (
+        !data.keys().hasAny([
+          'schemaVersion',
+          'ownerUid',
+          'ownerDisplayName',
+          'ownerAvatarLabel',
+          'revision',
+          'ownershipRevision',
+          'moderatorCount',
+          'audioLockdown',
+          'availability',
+          'seatTargetCount',
+          'seatMode',
+        ])
+      ) || (
+        data.schemaVersion == 2
+        && data.ownerUid == request.auth.uid
+        && data.ownerUid == data.hostId
+        && data.ownerDisplayName == data.hostDisplayName
+        && data.ownerAvatarLabel == data.hostAvatarLabel
+        && data.revision == 1
+        && (!('ownershipRevision' in data) || data.ownershipRevision == 1)
+        && (!('moderatorCount' in data) || data.moderatorCount == 0)
+        && (!('audioLockdown' in data) || data.audioLockdown == false)
+        && data.availability == 'active'
+        && validRoomSeatCount(data.seatTargetCount)
+        && validRoomSeatMode(data.seatMode)
+        && (!('announcement' in data) || (data.announcement is string && data.announcement.size() <= 160))
+        && (!('welcomeMessage' in data) || (data.welcomeMessage is string && data.welcomeMessage.size() <= 200))
+        && (!('themeId' in data) || data.themeId in ['midnight', 'royal', 'ocean', 'emerald'])
+        && (!('chatMode' in data) || data.chatMode in ['everyone', 'followers', 'off'])
+        && (!('slowModeSeconds' in data) || data.slowModeSeconds in [0, 5, 10, 30, 60])
+        && (!('historyVisibility' in data) || data.historyVisibility in ['everyone', 'after-join', 'hidden'])
+        && (!('keywordFilterMode' in data) || data.keywordFilterMode in ['off', 'standard', 'strict'])
+        && (!('effectsPolicy' in data) || data.effectsPolicy in ['full', 'reduced', 'off'])
+        && (!('roomImageReviewStatus' in data) || data.roomImageReviewStatus == 'none')
+        && (!('roomCustomizationSuspended' in data) || data.roomCustomizationSuspended == false)
+        && !data.keys().hasAny([
+          'activeRoomImageId',
+          'activeRoomImagePath',
+          'pendingRoomImageId',
+          'pendingRoomImagePath',
+        ])
+      );
     }
 
     function validActiveRoom(roomId) {
@@ -135,12 +551,35 @@ service cloud.firestore {
           'id',
           'title',
           'type',
+          'countryCode',
           'hostId',
+          'ownerUid',
+          'ownerDisplayName',
+          'ownerAvatarLabel',
           'hostDisplayName',
           'hostAvatarLabel',
           'status',
           'visibility',
           'participantCount',
+          'speakerCount',
+          'schemaVersion',
+          'revision',
+          'ownershipRevision',
+          'moderatorCount',
+          'audioLockdown',
+          'availability',
+          'seatTargetCount',
+          'seatMode',
+          'announcement',
+          'welcomeMessage',
+          'themeId',
+          'chatMode',
+          'slowModeSeconds',
+          'historyVisibility',
+          'keywordFilterMode',
+          'effectsPolicy',
+          'roomImageReviewStatus',
+          'roomCustomizationSuspended',
           'inviteCode',
           'currentGameId',
           'createdAt',
@@ -151,12 +590,18 @@ service cloud.firestore {
         && data.title.size() >= 2
         && data.title.size() <= 48
         && validRoomType(data.type)
+        && (!('countryCode' in data) || validRoomCountryCode(data.countryCode))
         && data.hostId == request.auth.uid
         && data.hostDisplayName == get(profilePath(request.auth.uid)).data.displayName
         && data.hostAvatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
         && data.status == 'active'
         && validRoomVisibility(data.visibility)
         && data.participantCount == 1
+        && (
+          (!('schemaVersion' in data) && !('speakerCount' in data))
+          || (data.schemaVersion == 2 && data.speakerCount == 0)
+        )
+        && validRoomV2Create(data)
         && (
           (data.visibility == 'public' && !('inviteCode' in data)) ||
           (data.visibility == 'private' && validInviteCode(data.inviteCode))
@@ -166,16 +611,36 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function validRoomStatus(status) {
-      return status == 'active' || status == 'closed';
-    }
-
     function roomPath(roomId) {
       return /databases/$(database)/documents/rooms/$(roomId);
     }
 
     function memberPath(roomId, userId) {
       return /databases/$(database)/documents/rooms/$(roomId)/members/$(userId);
+    }
+
+    function roomBanPath(roomId, userId) {
+      return /databases/$(database)/documents/rooms/$(roomId)/bans/$(userId);
+    }
+
+    function hasActiveRoomBan(roomId, userId) {
+      let path = roomBanPath(roomId, userId);
+      return exists(path)
+        && get(path).data.status == 'active'
+        && (!('expiresAt' in get(path).data) || get(path).data.expiresAt > request.time);
+    }
+
+    function validOptionalMemberV2(data, room) {
+      return (
+        !data.keys().hasAny(['schemaVersion', 'authorityRole', 'seatId', 'privileges'])
+      ) || (
+        data.schemaVersion == 2
+        && data.authorityRole == (room.hostId == request.auth.uid ? 'owner' : 'member')
+        && data.seatId == null
+        && data.privileges is map
+        && data.privileges.keys().hasOnly(['canManageMusic'])
+        && data.privileges.canManageMusic == false
+      );
     }
 
     function validMember(roomId, userId) {
@@ -188,6 +653,10 @@ service cloud.firestore {
           'role',
           'status',
           'canPublishAudio',
+          'schemaVersion',
+          'authorityRole',
+          'seatId',
+          'privileges',
           'inviteCodeUsed',
           'joinedAt',
           'updatedAt',
@@ -209,19 +678,68 @@ service cloud.firestore {
           )
         )
         && data.status == 'active'
+        && !hasActiveRoomBan(roomId, userId)
+        && validOptionalMemberV2(data, room)
         && data.joinedAt is timestamp
         && data.updatedAt is timestamp;
     }
 
     function validMemberRefresh(userId) {
       let data = request.resource.data;
-      return data.uid == userId
+      return data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'avatarLabel',
+          'role',
+          'status',
+          'canPublishAudio',
+          'schemaVersion',
+          'authorityRole',
+          'seatId',
+          'privileges',
+          'forceMuted',
+          'updatedBy',
+          'removedAt',
+          'removedBy',
+          'inviteCodeUsed',
+          'joinedAt',
+          'updatedAt',
+        ])
+        && data.uid == userId
         && data.uid == request.auth.uid
         && data.displayName == get(profilePath(request.auth.uid)).data.displayName
         && data.avatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
         && data.role == resource.data.role
         && data.status == resource.data.status
         && data.canPublishAudio == resource.data.canPublishAudio
+        && (
+          (!('forceMuted' in resource.data) && !('forceMuted' in data)) ||
+          data.forceMuted == resource.data.forceMuted
+        )
+        && (
+          (!('updatedBy' in resource.data) && !('updatedBy' in data)) ||
+          data.updatedBy == resource.data.updatedBy
+        )
+        && (
+          (!('removedAt' in resource.data) && !('removedAt' in data)) ||
+          data.removedAt == resource.data.removedAt
+        )
+        && (
+          (!('removedBy' in resource.data) && !('removedBy' in data)) ||
+          data.removedBy == resource.data.removedBy
+        )
+        && (
+          (
+            !resource.data.keys().hasAny(['schemaVersion', 'authorityRole', 'seatId', 'privileges'])
+            && !data.keys().hasAny(['schemaVersion', 'authorityRole', 'seatId', 'privileges'])
+          ) ||
+          (
+            data.schemaVersion == resource.data.schemaVersion
+            && data.authorityRole == resource.data.authorityRole
+            && data.seatId == resource.data.seatId
+            && data.privileges == resource.data.privileges
+          )
+        )
         && (
           (!('inviteCodeUsed' in resource.data) && !('inviteCodeUsed' in data)) ||
           data.inviteCodeUsed == resource.data.inviteCodeUsed
@@ -231,7 +749,57 @@ service cloud.firestore {
     }
 
     function validPresenceStatus(status) {
-      return status == 'online' || status == 'stale';
+      return status == 'online' || status == 'reconnecting' || status == 'stale';
+    }
+
+    function canManageRoomSeats(roomId) {
+      let room = get(roomPath(roomId)).data;
+      let member = get(memberPath(roomId, request.auth.uid)).data;
+      return hasCompleteProfile()
+        && exists(memberPath(roomId, request.auth.uid))
+        && member.status == 'active'
+        && (
+          request.auth.uid == room.ownerUid
+          || request.auth.uid == room.hostId
+          || member.authorityRole == 'moderator'
+        );
+    }
+
+    function roomSeatIdMatches(seatId, seatNumber) {
+      return (seatId == '01' && seatNumber == 1)
+        || (seatId == '02' && seatNumber == 2)
+        || (seatId == '03' && seatNumber == 3)
+        || (seatId == '04' && seatNumber == 4)
+        || (seatId == '05' && seatNumber == 5)
+        || (seatId == '06' && seatNumber == 6)
+        || (seatId == '07' && seatNumber == 7)
+        || (seatId == '08' && seatNumber == 8)
+        || (seatId == '09' && seatNumber == 9)
+        || (seatId == '10' && seatNumber == 10)
+        || (seatId == '11' && seatNumber == 11)
+        || (seatId == '12' && seatNumber == 12)
+        || (seatId == '13' && seatNumber == 13)
+        || (seatId == '14' && seatNumber == 14)
+        || (seatId == '15' && seatNumber == 15)
+        || (seatId == '16' && seatNumber == 16)
+        || (seatId == '17' && seatNumber == 17)
+        || (seatId == '18' && seatNumber == 18)
+        || (seatId == '19' && seatNumber == 19)
+        || (seatId == '20' && seatNumber == 20);
+    }
+
+    function validInitialRoomSeat(roomId, seatId) {
+      let data = request.resource.data;
+      let room = getAfter(roomPath(roomId)).data;
+      return hasCompleteProfile()
+        && room.schemaVersion == 2
+        && room.ownerUid == request.auth.uid
+        && data.keys().hasOnly(['schemaVersion', 'seatNumber', 'state', 'revision', 'updatedAt'])
+        && data.schemaVersion == 2
+        && roomSeatIdMatches(seatId, data.seatNumber)
+        && data.state == 'open'
+        && data.revision == 1
+        && data.updatedAt is timestamp;
     }
 
     function canReadPresence(roomId) {
@@ -239,6 +807,45 @@ service cloud.firestore {
         && get(roomPath(roomId)).data.status == 'active'
         && exists(memberPath(roomId, request.auth.uid))
         && get(memberPath(roomId, request.auth.uid)).data.status == 'active';
+    }
+
+    function voiceRoomFeaturePath() {
+      return /databases/$(database)/documents/appConfig/voiceRoomFeatures;
+    }
+
+    function roomChatEnabled() {
+      return exists(voiceRoomFeaturePath())
+        && get(voiceRoomFeaturePath()).data.voice_room_chat == true;
+    }
+
+    function roomPresencePath(roomId, userId) {
+      return /databases/$(database)/documents/rooms/$(roomId)/presence/$(userId);
+    }
+
+    function canReadRoomChat(roomId) {
+      return roomChatEnabled()
+        && canReadPresence(roomId);
+    }
+
+    function canReadRoomMessage(roomId) {
+      let room = get(roomPath(roomId)).data;
+      let member = get(memberPath(roomId, request.auth.uid)).data;
+      let presencePath = roomPresencePath(roomId, request.auth.uid);
+      return canReadRoomChat(roomId)
+        && (
+          resource.data.kind == 'moderation'
+          || !('historyVisibility' in room)
+          || room.historyVisibility == 'everyone'
+          || (
+            room.historyVisibility == 'after-join'
+            && resource.data.createdAt >= member.joinedAt
+          )
+          || (
+            room.historyVisibility == 'hidden'
+            && exists(presencePath)
+            && resource.data.createdAt >= get(presencePath).data.joinedAt
+          )
+        );
     }
 
     function validOwnPresence(roomId, userId) {
@@ -256,6 +863,10 @@ service cloud.firestore {
           'role',
           'status',
           'canPublishAudio',
+          'authorityRole',
+          'seatId',
+          'sessionId',
+          'leaseExpiresAt',
           'joinedAt',
           'lastSeenAt',
           'updatedAt',
@@ -265,6 +876,17 @@ service cloud.firestore {
         && data.avatarLabel == get(profilePath(request.auth.uid)).data.avatarLabel
         && data.role == member.role
         && data.canPublishAudio == member.canPublishAudio
+        && data.authorityRole == (
+          'authorityRole' in member
+            ? member.authorityRole
+            : (member.role == 'host' ? 'owner' : 'member')
+        )
+        && data.seatId == ('seatId' in member ? member.seatId : null)
+        && data.sessionId is string
+        && data.sessionId.size() >= 16
+        && data.sessionId.size() <= 160
+        && data.leaseExpiresAt is timestamp
+        && data.leaseExpiresAt <= request.time + duration.value(60, 's')
         && validPresenceStatus(data.status)
         && data.joinedAt is timestamp
         && data.lastSeenAt is timestamp
@@ -294,7 +916,10 @@ service cloud.firestore {
       allow get: if canReadRoom(roomId);
       allow list: if hasCompleteProfile()
         && resource.data.status == 'active'
-        && resource.data.visibility == 'public';
+        && (
+          resource.data.visibility == 'public' ||
+          resource.data.hostId == request.auth.uid
+        );
       allow create: if hasCompleteProfile()
         && validActiveRoom(roomId)
         && getAfter(memberPath(roomId, request.auth.uid)).data.role == 'host';
@@ -315,7 +940,53 @@ service cloud.firestore {
       }
 
       match /moderationEvents/{eventId} {
+        allow read: if canManageRoomSeats(roomId);
+        allow write: if false;
+      }
+
+      match /commandRequests/{requestId} {
         allow read, write: if false;
+      }
+
+      match /chatRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /chatRateLimits/{userId} {
+        allow read, write: if false;
+      }
+
+      match /chatState/{stateId} {
+        allow read: if canReadRoomChat(roomId);
+        allow write: if false;
+      }
+
+      match /seats/{seatId} {
+        allow read: if canReadPresence(roomId);
+        allow create: if validInitialRoomSeat(roomId, seatId);
+        allow update, delete: if false;
+      }
+
+      match /seatRequests/{requestId} {
+        allow read: if hasCompleteProfile()
+          && (request.auth.uid == resource.data.requesterUid || canManageRoomSeats(roomId));
+        allow write: if false;
+      }
+
+      match /seatInvites/{targetUid} {
+        allow read: if hasCompleteProfile()
+          && (request.auth.uid == targetUid || canManageRoomSeats(roomId));
+        allow write: if false;
+      }
+
+      match /messages/{messageId} {
+        allow read: if canReadRoomMessage(roomId);
+        allow write: if false;
+      }
+
+      match /bans/{userId} {
+        allow read: if canManageRoomSeats(roomId);
+        allow write: if false;
       }
 
       match /presence/{userId} {

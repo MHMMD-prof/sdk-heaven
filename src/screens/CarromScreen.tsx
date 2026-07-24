@@ -7,7 +7,11 @@ import {
 } from 'react-native';
 
 import { CarromBoardOverlays } from '../components/CarromBoardOverlays';
-import { CarromSkiaBoard, CarromSkiaBoardHandle } from '../components/CarromSkiaBoard';
+import {
+  CARROM_BOARD_VISIBLE_HEIGHT_RATIO,
+  CarromSkiaBoard,
+  CarromSkiaBoardHandle,
+} from '../components/CarromSkiaBoard';
 import {
   CarromControlDock,
   CarromHeader,
@@ -21,7 +25,6 @@ import { useCarromAudio } from '../hooks/useCarromAudio';
 import { useCarromEffects } from '../hooks/useCarromEffects';
 import { useCarromGameplay } from '../hooks/useCarromGameplay';
 import { useLocalCarromMatch } from '../hooks/useLocalCarromMatch';
-import { radius, spacing } from '../theme';
 import { CarromDisc, CarromGameState, CarromPlayer } from '../types/carrom';
 import { RootStackParamList } from '../types/navigation';
 import {
@@ -29,16 +32,13 @@ import {
   createShotHistoryItem,
   createPocketSparkles,
   getEventTone,
-  getQueenLabel,
   getRemainingCoinCounts,
-  getStatusSubtitle,
-  getStatusText,
   prependShotHistoryItem,
   shouldShowEventBanner,
 } from '../utils/carromPresentation';
 import { CARROM_WORLD_SIZE } from '../utils/carromEngine';
 
-const boardImage = require('../../assets/carrom/board-good.png');
+const boardImage = require('../../assets/carrom/board-royal-majlis-v3.png');
 const SHOW_CARROM_DEBUG_OVERLAY = false;
 const MATCH_COUNTDOWN_SECONDS = 3;
 const SHOW_CARROM_PERF_OVERLAY = false;
@@ -48,12 +48,14 @@ type CarromScreenProps = NativeStackScreenProps<RootStackParamList, 'Carrom'>;
 export function CarromScreen({ navigation }: CarromScreenProps) {
   const { height, width } = useWindowDimensions();
   const isCompactPhone = height < 720 || width < 380;
+  const contentWidth = Math.min(width, 680);
   const boardSize = Math.min(
-    width - spacing.sm * 2,
-    height * (isCompactPhone ? 0.56 : 0.68),
-    isCompactPhone ? 560 : 650,
+    contentWidth,
+    height * (isCompactPhone ? 0.59 : 0.55),
+    620,
   );
   const scale = boardSize / CARROM_WORLD_SIZE;
+  const visibleBoardHeight = boardSize * CARROM_BOARD_VISIBLE_HEIGHT_RATIO;
   const boardRef = useRef<CarromSkiaBoardHandle>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [aimAssistEnabled, setAimAssistEnabled] = useState(true);
@@ -210,23 +212,25 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
     handleMatchResetPress(reset);
   };
 
-  const statusText = getStatusText(game);
   const eventTone = getEventTone(game.message, game.status);
   const showEventBanner = !isMoving && shouldShowEventBanner(game);
   const remaining = useMemo(() => getRemainingCoinCounts(game), [game.discs, game.playerCoins]);
+  const blackPlayer: CarromPlayer = game.playerCoins[1] === 'black' ? 1 : 2;
+  const whitePlayer: CarromPlayer = blackPlayer === 1 ? 2 : 1;
 
   return (
     <ScreenContainer
-      horizontalPadding={isCompactPhone ? spacing.xs : spacing.sm}
+      decorativeGlows={false}
+      horizontalPadding={0}
       scroll={false}
-      topPadding={isCompactPhone ? 0 : spacing.xs}
+      topPadding={0}
+      variant="ruby"
     >
+      <View style={styles.page}>
       <CarromHeader
-        compact={isCompactPhone}
-        kicker="نموذج لعب محلي"
         onBack={() => navigation.goBack()}
         onReset={handleResetPress}
-        title="كاروم رويال"
+        title="كاروم ملكي"
       />
 
       {matchPhase === 'tableSelect' ? (
@@ -254,9 +258,7 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
       <CarromPlayerRail
         compact={isCompactPhone}
         currentPlayer={game.currentPlayer}
-        moving={game.status === 'moving'}
         playerCoins={game.playerCoins}
-        queenLabel={getQueenLabel(game)}
         remaining={remaining}
         scores={game.scores}
       />
@@ -271,16 +273,7 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
         soundEnabled={soundEnabled}
       />
 
-      <View style={styles.matchArea}>
-        <View
-          style={[
-            styles.boardGlow,
-            {
-              height: boardSize + (isCompactPhone ? 10 : 16),
-              width: boardSize + (isCompactPhone ? 10 : 16),
-            },
-          ]}
-        />
+      <View style={[styles.matchArea, { height: visibleBoardHeight }]}>
         <CarromSkiaBoard
           ref={boardRef}
           aimAssistEnabled={aimAssistEnabled}
@@ -321,40 +314,39 @@ export function CarromScreen({ navigation }: CarromScreenProps) {
       </View>
 
       <CarromControlDock
+        blackRemaining={remaining[blackPlayer]}
         compact={isCompactPhone}
-        statusSubtitle={matchError ?? getStatusSubtitle(game)}
-        statusText={statusText}
+        queenPocketed={game.queen.pocketed}
+        whiteRemaining={remaining[whitePlayer]}
       />
 
       <CarromShotHistoryPanel
         compact={isCompactPhone}
         expanded={historyExpanded}
         items={shotHistory}
+        notice={matchError ?? undefined}
         onToggle={() => setHistoryExpanded((expanded) => !expanded)}
       />
             </>
           ) : null}
         </>
       )}
+      </View>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  page: {
+    alignSelf: 'center',
+    flex: 1,
+    maxWidth: 680,
+    width: '100%',
+  },
   matchArea: {
     alignItems: 'center',
-    flex: 1,
     justifyContent: 'center',
-    minHeight: 0,
-  },
-  boardGlow: {
-    backgroundColor: 'rgba(25, 173, 154, 0.13)',
-    borderRadius: radius.xl,
-    position: 'absolute',
-    shadowColor: '#00D5C7',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.28,
-    shadowRadius: 28,
+    marginTop: 1,
   },
 
 });

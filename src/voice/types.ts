@@ -11,6 +11,7 @@ export type VoiceParticipant = {
   isMuted: boolean;
   isSpeaking: boolean;
   avatarLabel: string;
+  representativeBadgeActive?: boolean;
 };
 
 export type VoiceConnectOptions = {
@@ -28,7 +29,9 @@ export type VoiceProviderConfig = {
   provider: VoiceProviderKind;
   liveKit?: {
     tokenEndpoint: string;
+    roomChatCommandEndpoint?: string;
     roomCommandEndpoint?: string;
+    roomMediaCommandEndpoint?: string;
     canPublishAudio?: boolean;
   };
 };

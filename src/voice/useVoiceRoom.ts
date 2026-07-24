@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
 
+import { debugError, debugLog } from '../utils/debugLog';
 import { VoiceContext } from './VoiceProvider';
 import {
   VoiceConnectOptions,
@@ -43,6 +44,9 @@ export function useVoiceRoom() {
       }
 
       if (event.type === 'connectionStateChanged') {
+        debugLog('voice.session', 'event:connectionStateChanged', {
+          connectionState: event.connectionState,
+        });
         connectionStateRef.current = event.connectionState;
         dispatch({
           type: 'connectionStateChanged',
@@ -51,6 +55,7 @@ export function useVoiceRoom() {
       }
 
       if (event.type === 'error') {
+        debugLog('voice.session', 'event:error', { message: event.message });
         dispatch({
           type: 'connectionErrorChanged',
           errorMessage: event.message,
@@ -87,12 +92,20 @@ export function useVoiceRoom() {
       });
 
       try {
+        debugLog('voice.session', 'connect:start', {
+          roomId: options.roomId,
+          hasServerUrl: Boolean(options.serverUrl),
+          hasToken: Boolean(options.token),
+          canPublishAudio: options.canPublishAudio,
+          source: options.metadata?.source,
+        });
         await client.connect(options);
       } catch (error) {
         if (!isMountedRef.current || requestId !== connectRequestRef.current) {
           return;
         }
 
+        debugError('voice.session', 'connect:error', error, { roomId: nextRoomId });
         dispatch({
           type: 'connectionErrorChanged',
           errorMessage: getErrorMessage(error),
@@ -105,6 +118,10 @@ export function useVoiceRoom() {
       }
 
       const nextParticipants = await client.getParticipants();
+      debugLog('voice.session', 'connect:participantsLoaded', {
+        roomId: nextRoomId,
+        count: nextParticipants.length,
+      });
       dispatch({ type: 'participantsChanged', participants: nextParticipants });
     },
     [client],
@@ -114,8 +131,10 @@ export function useVoiceRoom() {
     connectRequestRef.current += 1;
     roomIdRef.current = undefined;
     try {
+      debugLog('voice.session', 'disconnect:start', { roomId: roomIdRef.current });
       await client.disconnect();
     } catch (error) {
+      debugError('voice.session', 'disconnect:error', error, { roomId: roomIdRef.current });
       dispatch({
         type: 'connectionErrorChanged',
         errorMessage: getErrorMessage(error),
@@ -277,6 +296,7 @@ function getErrorMessage(error: unknown) {
       error.message === 'Microphone setup failed.' ||
       error.message === 'Voice token request timed out.' ||
       error.message === 'Voice token request failed.' ||
+      error.message === 'Voice token request was denied.' ||
       error.message === 'Requested voice audio output is not available.'
     ) {
       return error.message;

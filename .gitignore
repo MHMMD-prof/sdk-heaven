@@ -4,12 +4,15 @@
 node_modules/
 functions/node_modules/
 functions/.secret.local
+*-firebase-adminsdk-*.json
 
 # Expo
 .expo/
 dist/
 web-build/
 expo-env.d.ts
+.wave4-android-export/
+.wave5-android-export/
 
 # Native
 .kotlin/

@@ -235,14 +235,14 @@ export function getEventGradient(tone: CarromEventTone) {
   }
 
   if (tone === 'queen') {
-    return ['rgba(126,53,174,0.94)', 'rgba(184,41,75,0.92)'] as const;
+    return ['rgba(157,29,36,0.96)', 'rgba(72,10,14,0.94)'] as const;
   }
 
   if (tone === 'success') {
-    return ['rgba(43,203,136,0.92)', 'rgba(12,80,68,0.92)'] as const;
+    return ['rgba(176,123,38,0.95)', 'rgba(75,31,9,0.94)'] as const;
   }
 
-  return ['rgba(8,5,15,0.92)', 'rgba(58,29,103,0.88)'] as const;
+  return ['rgba(23,10,8,0.94)', 'rgba(73,11,15,0.92)'] as const;
 }
 
 export function getSparkleColor(tone: CarromSparkleTone) {
@@ -251,10 +251,10 @@ export function getSparkleColor(tone: CarromSparkleTone) {
   }
 
   if (tone === 'striker') {
-    return '#FF8E9F';
+    return '#E08077';
   }
 
-  return '#63F4C4';
+  return '#F0C45C';
 }
 
 export function getStatusText(game: CarromGameState) {

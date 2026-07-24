@@ -1,0 +1,1 @@
+__d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.getCurrentFirebaseIdToken=async function(){const t=n.firebaseAuth.currentUser;if(!t)throw new Error('A signed-in user is required.');return t.getIdToken()};var n=r(d[0])},1896,[947]);

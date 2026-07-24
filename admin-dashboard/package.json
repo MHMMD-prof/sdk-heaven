@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite --host 127.0.0.1",
-    "preview": "vite preview --host 127.0.0.1",
-    "typecheck": "tsc --noEmit"
+    "bundle:check": "node scripts/check-bundle.mjs",
+    "dev": "vite",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test && npm run build && npm run bundle:check"
   },
   "dependencies": {
     "firebase": "^12.15.0",

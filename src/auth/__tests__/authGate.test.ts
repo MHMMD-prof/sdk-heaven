@@ -7,7 +7,6 @@ describe('resolveAuthGateRoute', () => {
     expect(
       resolveAuthGateRoute({
         initializing: true,
-        isEmailVerified: false,
         profileStatus: 'missing',
         userExists: false,
       }),
@@ -15,7 +14,6 @@ describe('resolveAuthGateRoute', () => {
     expect(
       resolveAuthGateRoute({
         initializing: false,
-        isEmailVerified: false,
         profileStatus: 'missing',
         userExists: false,
       }),
@@ -23,15 +21,6 @@ describe('resolveAuthGateRoute', () => {
     expect(
       resolveAuthGateRoute({
         initializing: false,
-        isEmailVerified: false,
-        profileStatus: 'missing',
-        userExists: true,
-      }),
-    ).toBe('email-verification');
-    expect(
-      resolveAuthGateRoute({
-        initializing: false,
-        isEmailVerified: true,
         profileStatus: 'missing',
         userExists: true,
       }),
@@ -39,7 +28,6 @@ describe('resolveAuthGateRoute', () => {
     expect(
       resolveAuthGateRoute({
         initializing: false,
-        isEmailVerified: true,
         profileStatus: 'complete',
         userExists: true,
       }),

@@ -50,10 +50,7 @@ describe('requestLiveKitConnectOptions', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://voice.example.test/token',
       expect.objectContaining({
-        body: JSON.stringify({
-          roomId: 'room-1',
-          canPublishAudio: false,
-        }),
+        body: JSON.stringify({ roomId: 'room-1' }),
         headers: {
           Authorization: 'Bearer id-token-1',
           'Content-Type': 'application/json',
@@ -63,7 +60,7 @@ describe('requestLiveKitConnectOptions', () => {
     );
   });
 
-  it('uses local room membership as the publish cap', async () => {
+  it('does not send client-computed publishing authority', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -93,10 +90,7 @@ describe('requestLiveKitConnectOptions', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://voice.example.test/token',
       expect.objectContaining({
-        body: JSON.stringify({
-          roomId: 'room-1',
-          canPublishAudio: false,
-        }),
+        body: JSON.stringify({ roomId: 'room-1' }),
       }),
     );
   });
@@ -126,6 +120,14 @@ describe('requestLiveKitConnectOptions', () => {
 
     await expect(requestLiveKitConnectOptions(room, config, async () => 'id-token-1')).rejects.toThrow(
       'LiveKit token response must include serverUrl and token.',
+    );
+  });
+
+  it('reports auth-denied token responses clearly', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'denied' }), { status: 403 }));
+
+    await expect(requestLiveKitConnectOptions(room, config, async () => 'id-token-1')).rejects.toThrow(
+      'Voice token request was denied.',
     );
   });
 });

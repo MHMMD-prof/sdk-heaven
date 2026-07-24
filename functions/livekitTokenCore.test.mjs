@@ -13,7 +13,6 @@ const {
 
 const decodedToken = {
   email: 'salem@example.com',
-  email_verified: true,
   uid: 'uid-1',
 };
 
@@ -87,21 +86,19 @@ describe('livekitTokenCore', () => {
     ).toEqual({
       ok: true,
       value: {
+        authorityRole: 'owner',
         avatarLabel: 'S',
         canPublish: true,
         displayName: 'Salem',
         participantId: 'uid-1',
         role: 'host',
         roomId: 'room-1',
+        seatId: '',
       },
     });
   });
 
-  it('rejects invalid room id, unverified email, missing profile, missing membership, and listener publish', () => {
-    expect(resolveTokenRequest({ body: {}, decodedToken, profile })).toMatchObject({
-      ok: false,
-      status: 400,
-    });
+  it('allows completed unverified accounts to request room tokens', () => {
     expect(
       resolveTokenRequest({
         body: { roomId: 'room-1' },
@@ -111,8 +108,18 @@ describe('livekitTokenCore', () => {
         room,
       }),
     ).toMatchObject({
+      ok: true,
+      value: {
+        participantId: 'uid-1',
+        roomId: 'room-1',
+      },
+    });
+  });
+
+  it('rejects invalid room id, missing profile, and missing membership', () => {
+    expect(resolveTokenRequest({ body: {}, decodedToken, profile })).toMatchObject({
       ok: false,
-      status: 403,
+      status: 400,
     });
     expect(resolveTokenRequest({ body: { roomId: 'room-1' }, decodedToken, room })).toMatchObject({
       ok: false,
@@ -148,19 +155,7 @@ describe('livekitTokenCore', () => {
     });
     expect(
       resolveTokenRequest({
-        body: { roomId: 'room-1' },
-        decodedToken,
-        membership: listenerMembership,
-        profile,
-        room,
-      }),
-    ).toMatchObject({
-      ok: false,
-      status: 403,
-    });
-    expect(
-      resolveTokenRequest({
-        body: { roomId: 'room-1', canPublishAudio: false },
+        body: { roomId: 'room-1', canPublishAudio: true },
         decodedToken,
         membership: listenerMembership,
         profile,
@@ -173,5 +168,30 @@ describe('livekitTokenCore', () => {
         role: 'listener',
       },
     });
+  });
+
+  it('derives publishing from authoritative seat, mute, lockdown, and ban state', () => {
+    const seated = { ...listenerMembership, seatId: '01', canPublishAudio: true, role: 'speaker' };
+    const seat = { seatNumber: 1, state: 'occupied', occupantUid: 'uid-1' };
+    const input = { body: { roomId: 'room-1', canPublishAudio: false }, decodedToken, membership: seated, profile, room, seat };
+
+    expect(resolveTokenRequest(input)).toMatchObject({ ok: true, value: { canPublish: true, seatId: '01' } });
+    expect(resolveTokenRequest({ ...input, membership: { ...seated, forceMuted: true } })).toMatchObject({
+      ok: true,
+      value: { canPublish: false },
+    });
+    expect(resolveTokenRequest({ ...input, room: { ...room, audioLockdown: true } })).toMatchObject({
+      ok: true,
+      value: { canPublish: false },
+    });
+    expect(resolveTokenRequest({ ...input, seat: { ...seat, occupantUid: 'other' } })).toMatchObject({
+      ok: true,
+      value: { canPublish: false },
+    });
+    expect(resolveTokenRequest({ ...input, ban: { status: 'active' } })).toMatchObject({ ok: false, status: 403 });
+    expect(resolveTokenRequest({
+      body: { roomId: 'room-1' }, decodedToken, membership: hostMembership, profile,
+      room: { ...room, seatEngineVersion: 1 },
+    })).toMatchObject({ ok: true, value: { canPublish: false, seatId: '' } });
   });
 });
