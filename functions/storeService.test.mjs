@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const { equipStoreItem, expireStoreOwnerships, getMyStoreItems, getStoreCatalog, giftStoreItem, purchaseStoreItem } = require('./storeService');
 
-const fieldValue = { serverTimestamp: () => timestamp(9_999) };
+const fieldValue = { delete: () => ({ __delete: true }), serverTimestamp: () => timestamp(9_999) };
 const clock = { nowMillis: () => 1_000, timestampFromMillis: (value) => timestamp(value) };
 
 describe('storeService', () => {
@@ -78,6 +78,38 @@ describe('storeService', () => {
     expect(db.documents.get('storeEquipment/self').slots).toEqual({});
   });
 
+  it('equips only an exact approved seat effect and clears every projection on expiry', async () => {
+    const db = storeDb();
+    const item = cosmeticItem('safe-seat', 'seat-effects', 'seat-effect');
+    approveCosmetic(db, item, 'seat-effect');
+    db.documents.set('storeCatalog/safe-seat', item);
+    db.documents.set('storeOwnerships/self/items/safe-seat', {
+      acquiredAt: timestamp(), category: 'seat-effects', cosmeticAsset: item.cosmeticAsset, duration: { kind: 'timed', unit: 'days', value: 1 },
+      equipped: false, expiresAt: timestamp(1_100), itemId: 'safe-seat', kind: 'store-ownership', ownershipId: 'safe-seat', state: 'active', uid: 'self', updatedAt: timestamp(),
+    });
+    expect(await equipStoreItem({ clock, db, fieldValue, input: { itemId: 'safe-seat' }, requestId: 'equip_safe_seat_001', uid: 'self' })).toMatchObject({ result: { itemId: 'safe-seat' } });
+    expect(db.documents.get('storeEquipment/self').cosmetics.seatEffect).toEqual({ ...item.cosmeticAsset, itemId: 'safe-seat' });
+    expect(db.documents.get('publicProfiles/self')['equippedCosmetics.seatEffect']).toEqual({ ...item.cosmeticAsset, itemId: 'safe-seat' });
+    clock.nowMillis = () => 1_200;
+    expect(await expireStoreOwnerships({ clock, db, fieldValue })).toEqual({ expired: 1, scanned: 1 });
+    expect(db.documents.get('storeEquipment/self').cosmetics).toBeUndefined();
+    expect(db.documents.get('publicProfiles/self')['equippedCosmetics.seatEffect']).toEqual({ __delete: true });
+    clock.nowMillis = () => 1_000;
+  });
+
+  it('rejects cosmetic equipment when publication is disabled', async () => {
+    const db = storeDb();
+    const item = cosmeticItem('unsafe-badge', 'cosmetic-badges', 'cosmetic-badge');
+    approveCosmetic(db, item, 'cosmetic-badge');
+    db.documents.get('cosmeticAssets/unsafe-badge').renderingEnabled = false;
+    db.documents.set('storeCatalog/unsafe-badge', item);
+    db.documents.set('storeOwnerships/self/items/unsafe-badge', {
+      acquiredAt: timestamp(), category: item.category, cosmeticAsset: item.cosmeticAsset, duration: { kind: 'permanent' }, equipped: false,
+      itemId: item.itemId, kind: 'store-ownership', ownershipId: item.itemId, state: 'active', uid: 'self', updatedAt: timestamp(),
+    });
+    expect(await equipStoreItem({ clock, db, fieldValue, input: { itemId: item.itemId }, requestId: 'equip_unsafe_badge', uid: 'self' })).toEqual({ errorCode: 'ITEM_UNAVAILABLE' });
+  });
+
   it('returns My Items and manually equips another active owned item', async () => {
     const db = storeDb();
     db.documents.set('storeCatalog/gold-car', catalogItem());
@@ -121,6 +153,13 @@ function storeDb() { return new FakeFirestore({
 }); }
 function publicProfile() { return { avatarModerationStatus: 'clear', avatarUrl: '', bio: '', countryCode: 'IQ', coupleLevel: 0, createdAt: timestamp(), displayName: 'Self', friendCount: 0, giftScore: 0, moderationStatus: 'active', normalizedName: 'self', publicId: '1234567', uid: 'self', updatedAt: timestamp() }; }
 function catalogItem(itemId = 'gold-car') { return { availability: 'available', category: 'cars', description: { ar: 'سيارة', en: 'Car' }, duration: { kind: 'permanent' }, itemId, name: { ar: 'ذهبية', en: 'Gold' }, order: 1, previewAssetUrl: 'https://cdn.example.com/preview.png', prices: { coins: 40, diamonds: 4 }, purchasingEnabled: true, stock: { kind: 'unlimited' }, thumbnailUrl: 'https://cdn.example.com/thumb.png' }; }
+function cosmeticItem(itemId, category, assetCategory) { return { ...catalogItem(itemId), category, cosmeticAsset: { assetId: itemId, assetVersionId: 'v1-123456789abc' }, description: { ar: 'زينة آمنة', en: 'Safe cosmetic' }, name: { ar: 'زينة', en: 'Cosmetic' }, previewAssetUrl: `https://cdn.example.com/${assetCategory}.png`, thumbnailUrl: `https://cdn.example.com/${assetCategory}-thumb.png` }; }
+function approveCosmetic(db, item, assetCategory) {
+  const { assetId, assetVersionId } = item.cosmeticAsset;
+  db.documents.set(`cosmeticAssets/${assetId}`, { approvalId: `${assetId}__${assetVersionId}`, approvedVersionId: assetVersionId, moderationStatus: 'approved', publicationStatus: 'published', publishedVersionId: assetVersionId, renderingEnabled: true });
+  db.documents.set(`cosmeticAssets/${assetId}/versions/${assetVersionId}`, { assetId, assetVersionId, category: assetCategory, format: 'png', sha256: 'abc' });
+  db.documents.set(`cosmeticAssetApprovals/${assetId}__${assetVersionId}`, { assetId, assetVersionId, authoritySeparationPassed: true, checksum: 'abc', decision: 'approved', readableIdentityPassed: true });
+}
 function timestamp(value = 1) { return { toMillis: () => value, toDate: () => new Date(value) }; }
 
 class FakeFirestore {

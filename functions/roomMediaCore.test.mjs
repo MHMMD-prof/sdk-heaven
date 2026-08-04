@@ -34,6 +34,7 @@ const ownerMembership = {
 const flags = {
   voice_room_command_center: true,
   voice_room_media: true,
+  voice_room_super_moderation: true,
 };
 
 function body(action, extra = {}) {
@@ -128,6 +129,32 @@ describe('roomMediaCore', () => {
       profile,
       room,
     })).toMatchObject({ ok: false, code: 'REGION_SCOPE_DENIED' });
+    expect(resolveRoomMediaCommand({
+      body: body('approve-room-image'),
+      decodedToken: token,
+      featureFlags: { ...flags, voice_room_super_moderation: false },
+      operatorProfile: {
+        regionCodes: ['IQ'],
+        role: 'super-moderator',
+        status: 'active',
+        uid: 'staff-1',
+      },
+      profile,
+      room,
+    })).toMatchObject({ ok: false, code: 'FEATURE_DISABLED' });
+    expect(resolveRoomMediaCommand({
+      body: body('remove-room-image', { reason: 'unsafe image' }),
+      decodedToken: { ...token, auth_time: 1 },
+      featureFlags: flags,
+      operatorProfile: {
+        regionCodes: ['IQ'],
+        role: 'super-moderator',
+        status: 'active',
+        uid: 'staff-1',
+      },
+      profile,
+      room,
+    })).toMatchObject({ ok: false, code: 'FRESH_AUTH_REQUIRED' });
   });
 
   it('checks declared type, decoded dimensions, landscape ratio, and byte ceiling', () => {

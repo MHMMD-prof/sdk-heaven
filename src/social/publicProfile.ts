@@ -1,4 +1,6 @@
 import { isRoomCountryCode } from '../voice/roomProfile';
+import { readAvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import { readEquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
 import type {
   ProfileGender,
   PublicProfilePresentationInput,
@@ -46,6 +48,8 @@ export function mapPublicUserProfile(data: unknown, expectedUid?: string): Publi
   }
 
   const gender = readGender(candidate.gender);
+  const equippedAvatarFrame = readAvatarFrameProjection(candidate);
+  const equippedCosmetics = readEquipmentCosmetics(candidate);
   return {
     avatarModerationStatus,
     avatarUrl: readBoundedString(candidate.avatarUrl, 2048),
@@ -54,6 +58,8 @@ export function mapPublicUserProfile(data: unknown, expectedUid?: string): Publi
     coupleLevel: readNonNegativeInteger(candidate.coupleLevel),
     createdAt: candidate.createdAt,
     displayName,
+    ...(equippedAvatarFrame ? { equippedAvatarFrame } : {}),
+    ...(Object.keys(equippedCosmetics).length ? { equippedCosmetics } : {}),
     friendCount: readNonNegativeInteger(candidate.friendCount),
     ...(gender ? { gender } : {}),
     giftScore: readNonNegativeInteger(candidate.giftScore),

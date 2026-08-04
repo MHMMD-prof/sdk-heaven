@@ -184,6 +184,27 @@ describe('socialProfileCore', () => {
     expect(malformed.representativeBadge).toBeUndefined();
   });
 
+  it('preserves bounded equipped cosmetics during profile repair', () => {
+    const profile = buildPublicProfileDocument({
+      existing: {
+        equippedAvatarFrame: { assetUrl: 'https://cdn.example/frame.png', itemId: 'frame-item' },
+        equippedCosmetics: {
+          avatarFrame: { assetId: 'frame-asset', assetVersionId: 'v1-123456789abc', itemId: 'frame-item' },
+          seatEffect: { assetId: 'seat-asset', assetVersionId: 'v1-123456789abc', itemId: 'seat-item' },
+          staffBadge: { assetId: 'fake-staff', assetVersionId: 'v1-123456789abc', itemId: 'fake-staff-item' },
+        },
+      },
+      privateProfile: { uid: 'u1', displayName: 'Ali', email: 'a@b.c', avatarLabel: 'A' },
+      publicId: '1234567',
+      timestamp: { toMillis: () => 2 },
+    });
+    expect(profile.equippedAvatarFrame).toEqual({ assetUrl: 'https://cdn.example/frame.png', itemId: 'frame-item' });
+    expect(profile.equippedCosmetics).toEqual({
+      avatarFrame: { assetId: 'frame-asset', assetVersionId: 'v1-123456789abc', itemId: 'frame-item' },
+      seatEffect: { assetId: 'seat-asset', assetVersionId: 'v1-123456789abc', itemId: 'seat-item' },
+    });
+  });
+
   it('requires the complete public schema and an owned permanent reservation', () => {
     const timestamp = { __serverTimestamp: true };
     const profile = buildPublicProfileDocument({

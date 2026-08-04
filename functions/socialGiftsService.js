@@ -8,6 +8,7 @@ const {
   normalizeSendGiftInput,
 } = require('./socialGiftsCore');
 const { inspectPublicProfile, isTimestampLike } = require('./socialProfileCore');
+const { readPublicAvatarFrameProjection } = require('./avatarFrameProjectionCore');
 const {
   applyWalletMutation,
   buildWalletDocument,
@@ -135,9 +136,11 @@ async function sendGift({ db, fieldValue, input, requestId, uid }) {
       nameAr: item.nameAr,
       price: item.price,
       recipientDisplayName: recipient.displayName,
+      ...(readPublicAvatarFrameProjection(recipient) ? { recipientAvatarFrame: readPublicAvatarFrameProjection(recipient) } : {}),
       recipientUid: targetUid,
       scoreValue: item.scoreValue,
       senderDisplayName: sender.displayName,
+      ...(readPublicAvatarFrameProjection(sender) ? { senderAvatarFrame: readPublicAvatarFrameProjection(sender) } : {}),
       senderUid: uid,
     });
     transaction.create(refs.walletTransaction, buildWalletTransaction({

@@ -13,7 +13,10 @@ export type DrawingGuessRouteMode = 'online' | 'local-simulated';
 export type DrawingGuessRouteSource = 'games' | 'voice-room';
 
 export type DrawingGuessRouteParams = {
+  displayName?: string;
+  playerId?: string;
   roomId?: string;
+  sessionId?: string;
   source?: DrawingGuessRouteSource;
   mode?: DrawingGuessRouteMode;
 };

@@ -17,6 +17,21 @@ service firebase.storage {
         && request.auth.token.admin == true;
     }
 
+    function isPlatformOwner() {
+      return isAdmin()
+        && request.auth.token.keys().hasAll(['adminRole'])
+        && request.auth.token.adminRole == 'owner';
+    }
+
+    function canManageCosmetics() {
+      return isAdmin()
+        && request.auth.token.keys().hasAll(['adminRole'])
+        && (
+          request.auth.token.adminRole == 'owner'
+          || request.auth.token.adminRole == 'catalog-manager'
+        );
+    }
+
     function roomPath(roomId) {
       return /databases/(default)/documents/rooms/$(roomId);
     }
@@ -35,6 +50,124 @@ service firebase.storage {
       let config = firestore.get(path).data;
       return config.voice_room_command_center == true
         && config.voice_room_media == true;
+    }
+
+    function directChatConversationPath(conversationId) {
+      return /databases/(default)/documents/directConversations/$(conversationId);
+    }
+
+    function directChatUploadPath(uploadId) {
+      return /databases/(default)/documents/directChatUploads/$(uploadId);
+    }
+
+    function directChatAuthorizationPath(userId, uploadId) {
+      return /databases/(default)/documents/directChatUploadAuthorizations/$(userId)/uploads/$(uploadId);
+    }
+
+    function directChatMember(conversationId) {
+      let conversation = firestore.get(directChatConversationPath(conversationId)).data;
+      return signedIn()
+        && conversation.memberUids is list
+        && conversation.memberUids.size() == 2
+        && request.auth.uid in conversation.memberUids;
+    }
+
+    function validDirectChatUpload(conversationId, uploadId) {
+      let authorization = firestore.get(directChatAuthorizationPath(request.auth.uid, uploadId)).data;
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && uploadId.matches('^dmu_[a-f0-9]{40}$')
+        && authorization.state == 'active'
+        && authorization.uid == request.auth.uid
+        && authorization.uploadId == uploadId
+        && authorization.conversationId == conversationId
+        && authorization.storagePath == 'direct-chat-quarantine/' + conversationId + '/' + uploadId + '/source'
+        && authorization.expiresAt > request.time
+        && request.resource != null
+        && request.resource.size == authorization.sizeBytes
+        && request.resource.contentType == authorization.contentType
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && request.resource.metadata.conversationId == conversationId
+        && request.resource.metadata.uploadId == uploadId
+        && request.resource.metadata.kind == authorization.kind
+        && (
+          (
+            authorization.kind == 'image'
+            && request.resource.size <= 6 * 1024 * 1024
+            && request.resource.contentType.matches('image/(jpeg|png|webp)')
+          )
+          || (
+            authorization.kind == 'voice-note'
+            && request.resource.size <= 5 * 1024 * 1024
+            && request.resource.contentType.matches('audio/(aac|mp4|x-m4a)')
+          )
+        );
+    }
+
+    function approvedDirectChatMedia(conversationId, uploadId) {
+      let upload = firestore.get(directChatUploadPath(uploadId)).data;
+      return directChatMember(conversationId)
+        && upload.state == 'finalized'
+        && upload.conversationId == conversationId
+        && upload.uploadId == uploadId;
+    }
+
+    function cosmeticAssetPath(assetId) {
+      return /databases/(default)/documents/cosmeticAssets/$(assetId);
+    }
+
+    function cosmeticVersionPath(assetId, versionId) {
+      return /databases/(default)/documents/cosmeticAssets/$(assetId)/versions/$(versionId);
+    }
+
+    function cosmeticUploadAuthorizationPath(userId) {
+      return /databases/(default)/documents/cosmeticUploadAuthorizations/$(userId);
+    }
+
+    function publishedCosmeticVersion(assetId, versionId) {
+      let asset = firestore.get(cosmeticAssetPath(assetId)).data;
+      let version = firestore.get(cosmeticVersionPath(assetId, versionId)).data;
+      return asset.schemaVersion == 1
+        && asset.publicationStatus == 'published'
+        && asset.renderingEnabled == true
+        && asset.publishedVersionId == versionId
+        && version.schemaVersion == 1
+        && version.assetId == assetId
+        && version.assetVersionId == versionId;
+    }
+
+    function validCosmeticUpload(assetId, versionId, assetName) {
+      return assetId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && versionId.matches('^v[1-9][0-9]{0,8}-[a-f0-9]{12}$')
+        && request.resource != null
+        && request.resource.size <= 10 * 1024 * 1024
+        && validCosmeticSourceType(assetName);
+    }
+
+    function validCosmeticSourceType(assetName) {
+      return (assetName == 'source.png' && request.resource.contentType == 'image/png')
+        || (assetName == 'source.jpg' && request.resource.contentType == 'image/jpeg')
+        || (assetName == 'source.webp' && request.resource.contentType == 'image/webp')
+        || (assetName == 'source.json' && request.resource.contentType == 'application/json')
+        || (assetName == 'source.mp4' && request.resource.contentType == 'video/mp4')
+        || (
+          assetName == 'source.m4a'
+          && request.resource.contentType.matches('^audio/(mp4|x-m4a)$')
+        );
+    }
+
+    function validCosmeticSubmission(userId, submissionId, versionId, assetName) {
+      let authorization = firestore.get(cosmeticUploadAuthorizationPath(userId)).data;
+      return authorization.active == true
+        && authorization.uid == userId
+        && authorization.submissionId == submissionId
+        && authorization.assetVersionId == versionId
+        && authorization.expiresAt > request.time
+        && authorization.maxBytes > 0
+        && authorization.maxBytes <= 10 * 1024 * 1024
+        && request.resource.size <= authorization.maxBytes
+        && authorization.contentType == request.resource.contentType
+        && validCosmeticSourceType(assetName);
     }
 
     match /avatars/{userId}/profile.jpg {
@@ -74,6 +207,76 @@ service firebase.storage {
         && version.matches('^[A-Za-z0-9_-]{16,80}$');
     }
 
+    match /room-theme-assets/{themeId}/{revision}/{assetName} {
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        && resource == null
+        && themeId.matches('^[a-z0-9][a-z0-9-]{2,63}$')
+        && revision.matches('^v[1-9][0-9]{0,8}$')
+        && assetName.matches('^(background|stage|empty-seat-frame|badge|dock|drawer)\\.(jpg|jpeg|png|webp)$')
+        && request.resource != null
+        && request.resource.size <= 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow update, delete: if false;
+    }
+
+    match /room-rockets/global-room-rocket/{revision}/{assetName} {
+      allow read: if signedIn();
+      allow create: if isPlatformOwner()
+        && resource == null
+        && revision.matches('^v[1-9][0-9]{0,8}$')
+        && request.resource != null
+        && (
+          (
+            assetName.matches('^static\\.(png|webp)$')
+            && request.resource.size <= 4 * 1024 * 1024
+            && request.resource.contentType.matches('image/(png|webp)')
+          )
+          || (
+            assetName == 'animation.webp'
+            && request.resource.size <= 12 * 1024 * 1024
+            && request.resource.contentType == 'image/webp'
+          )
+          || (
+            assetName.matches('^launch\\.(mp3|m4a)$')
+            && request.resource.size <= 2 * 1024 * 1024
+            && request.resource.contentType.matches('audio/(mpeg|mp4|x-m4a)')
+          )
+        );
+      allow update, delete: if false;
+    }
+
+    match /cosmetic-assets/platform/{assetId}/{versionId}/{assetName} {
+      allow read: if signedIn() && publishedCosmeticVersion(assetId, versionId);
+      allow create: if canManageCosmetics()
+        && resource == null
+        && validCosmeticUpload(assetId, versionId, assetName);
+      allow update, delete: if false;
+    }
+
+    match /cosmetic-assets/users/{userId}/{assetId}/{versionId}/{assetName} {
+      allow read: if signedIn()
+        && firestore.get(cosmeticVersionPath(assetId, versionId)).data.ownerType == 'user'
+        && firestore.get(cosmeticVersionPath(assetId, versionId)).data.ownerUid == userId
+        && publishedCosmeticVersion(assetId, versionId);
+      allow create: if canManageCosmetics()
+        && resource == null
+        && validCosmeticUpload(assetId, versionId, assetName);
+      allow update, delete: if false;
+    }
+
+    match /cosmetic-submissions/{userId}/{submissionId}/{versionId}/{assetName} {
+      allow read: if isAdmin() || isOwner(userId);
+      allow create: if isOwner(userId)
+        && resource == null
+        && submissionId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{15,79}$')
+        && versionId.matches('^v[1-9][0-9]{0,8}-[a-f0-9]{12}$')
+        && request.resource != null
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && validCosmeticSubmission(userId, submissionId, versionId, assetName);
+      allow update, delete: if false;
+    }
+
     match /room-media/{roomId}/{mediaId}/source {
       allow read: if signedIn()
         && (
@@ -95,6 +298,33 @@ service firebase.storage {
         && request.resource.contentType.matches('image/(jpeg|png|webp)')
         && request.resource.metadata.uploaderUid == request.auth.uid;
       allow update, delete: if false;
+    }
+
+    // Safety recording evidence: server Admin SDK only. No client read/write.
+    match /room-evidence/{roomId}/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Personal Chat Wave 5: clients can create one immutable quarantine source
+    // under a short backend authorization. Only participants can read a finalized
+    // derivative; all processing, mutation, and deletion remain backend-only.
+    match /direct-chat-media/{conversationId}/{uploadId}/{assetName} {
+      allow read: if approvedDirectChatMedia(conversationId, uploadId)
+        && (
+          (assetName == 'image.webp' && resource.contentType == 'image/webp')
+          || (assetName == 'voice.m4a' && resource.contentType == 'audio/mp4')
+          || (assetName == 'voice.aac' && resource.contentType == 'audio/aac')
+        );
+      allow write: if false;
+    }
+
+    match /direct-chat-quarantine/{conversationId}/{uploadId}/source {
+      allow create: if resource == null && validDirectChatUpload(conversationId, uploadId);
+      allow read, update, delete: if false;
+    }
+
+    match /direct-chat-evidence/{reportId}/{allPaths=**} {
+      allow read, write: if false;
     }
 
     match /{allPaths=**} {

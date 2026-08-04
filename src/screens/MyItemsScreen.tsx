@@ -31,11 +31,13 @@ import {
 } from '../store/mockStoreData';
 import { colors, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
+import { useCosmeticsFeatureFlags } from '../cosmetics/featureFlags';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MyItems'>;
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
 export function MyItemsScreen({ navigation }: Props) {
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const { profile } = useAuth();
   const { width } = useWindowDimensions();
   const compact = width < 390;
@@ -165,6 +167,7 @@ export function MyItemsScreen({ navigation }: Props) {
             busy={busy}
             catalogItems={catalogItems}
             compact={compact}
+            cosmeticsFlags={cosmeticsFlags}
             onEquip={(row) => void equip(row)}
             onOpenCategory={setSelectedCategory}
             owned={owned}

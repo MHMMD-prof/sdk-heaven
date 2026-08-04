@@ -16,4 +16,14 @@ describe('admin routes', () => {
     expect(primaryAdminRoutes.some((route) => route.key === 'settings')).toBe(false);
     expect(getAdminRouteByKey('settings').path).toBe('/settings');
   });
+
+  it('exposes the room incentives workspace as a direct primary route', () => {
+    expect(getAdminRouteFromPath('/incentives').key).toBe('incentives');
+    expect(primaryAdminRoutes.some((route) => route.key === 'incentives')).toBe(true);
+  });
+
+  it('exposes the cosmetics registry as a direct primary route', () => {
+    expect(getAdminRouteFromPath('/cosmetics').key).toBe('cosmetics');
+    expect(primaryAdminRoutes.some((route) => route.key === 'cosmetics')).toBe(true);
+  });
 });

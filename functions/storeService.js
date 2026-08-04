@@ -2,6 +2,17 @@ const { inspectPublicProfile, isTimestampLike } = require('./socialProfileCore')
 const { applyWalletMutation, buildWalletDocument, buildWalletTransaction, mapWalletSummary } = require('./socialWalletCore');
 const { mapStoreCatalogItem } = require('./storeCore');
 const {
+  buildAvatarFrameProjection,
+  buildCanonicalEquipmentFrame,
+} = require('./avatarFrameProjectionCore');
+const {
+  buildEquipmentCosmeticProfileUpdate,
+  getEquipmentCosmeticConfig,
+  inspectApprovedEquipmentCosmeticReference,
+  removeEquipmentCosmeticProjection,
+  setEquipmentCosmeticProjection,
+} = require('./equipmentCosmeticsCore');
+const {
   STORE_CATALOG_LIMIT,
   buildStoreOwnership,
   durationToMilliseconds,
@@ -67,6 +78,8 @@ async function purchaseStoreItem({ clock, db, fieldValue, input, requestId, uid 
     if (profile.moderationStatus !== 'active') return { errorCode: 'PERMISSION_DENIED' };
     const item = catalogSnapshot.exists ? mapStoreCatalogItem(catalogSnapshot.data(), itemId) : undefined;
     if (!item || item.availability !== 'available' || !item.purchasingEnabled) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (!(await isApprovedCanonicalCosmetic({ db, item, transaction }))) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (item.category === 'chat-themes') return { errorCode: 'ROOM_SELECTION_REQUIRED' };
     if (item.stock.kind === 'limited' && item.stock.remaining === 0) return { errorCode: 'OUT_OF_STOCK' };
     if (ownershipSnapshot.exists) return { errorCode: 'DUPLICATE_OWNERSHIP' };
     const price = item.prices[currency];
@@ -112,8 +125,13 @@ async function purchaseStoreItem({ clock, db, fieldValue, input, requestId, uid 
     });
     if (oldOwnership?.exists) transaction.update(oldOwnership.ref, { equipped: false, updatedAt: timestamp });
     slots[item.category] = itemId;
-    transaction.set(refs.equipment, { slots, uid, updatedAt: timestamp });
+    transaction.set(refs.equipment, buildEquipmentDocument(equipmentSnapshot.data(), slots, uid, timestamp, item));
     transaction.create(refs.ownership, buildStoreOwnership({ acquiredAt: timestamp, expiresAt, item, ownershipId: itemId, uid }));
+    if (item.category === 'avatar-frames') {
+      transaction.update(refs.profile, buildAvatarFrameProfileUpdate(item, fieldValue, timestamp));
+    } else if (getEquipmentCosmeticConfig(item.category)) {
+      transaction.update(refs.profile, buildEquipmentCosmeticProfileUpdate(item, fieldValue, timestamp));
+    }
     if (item.stock.kind === 'limited') transaction.update(refs.catalog, { stock: { kind: 'limited', remaining: item.stock.remaining - 1 }, updatedAt: timestamp });
     if (item.category === 'custom-ids') {
       transaction.create(db.doc(`specialIds/${item.customId}`), { purchasedAt: timestamp, transactionId: refs.storeTransaction.path.split('/').at(-1), uid });
@@ -147,11 +165,13 @@ async function equipStoreItem({ clock, db, fieldValue, input, requestId, uid }) 
   const { itemId } = validation.value;
   return db.runTransaction(async (transaction) => {
     const refs = {
+      catalog: db.doc(`storeCatalog/${itemId}`),
       command: db.doc(`socialCommandRequests/${uid}/requests/${requestId}`), equipment: db.doc(`storeEquipment/${uid}`),
       feature: db.doc('appConfig/socialFeatures'), ownership: db.doc(`storeOwnerships/${uid}/items/${itemId}`), profile: db.doc(`publicProfiles/${uid}`),
     };
-    const [feature, profileSnapshot, ownershipSnapshot, equipmentSnapshot, commandSnapshot] = await Promise.all([
+    const [feature, profileSnapshot, ownershipSnapshot, equipmentSnapshot, commandSnapshot, catalogSnapshot] = await Promise.all([
       transaction.get(refs.feature), transaction.get(refs.profile), transaction.get(refs.ownership), transaction.get(refs.equipment), transaction.get(refs.command),
+      transaction.get(refs.catalog),
     ]);
     if (commandSnapshot.exists) {
       const previous = commandSnapshot.data();
@@ -164,6 +184,10 @@ async function equipStoreItem({ clock, db, fieldValue, input, requestId, uid }) 
     if (profile.moderationStatus !== 'active') return { errorCode: 'PERMISSION_DENIED' };
     const ownership = ownershipSnapshot.exists ? mapStoreOwnership(ownershipSnapshot.data(), itemId) : undefined;
     if (!ownership) return { errorCode: 'NOT_FOUND' };
+    const item = catalogSnapshot.exists ? mapStoreCatalogItem(catalogSnapshot.data(), itemId) : undefined;
+    if (!item || item.category !== ownership.category) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (!(await isApprovedCanonicalCosmetic({ db, item, transaction }))) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (item.category === 'chat-themes') return { errorCode: 'ROOM_SELECTION_REQUIRED' };
     if (ownership.state !== 'active' || (ownership.expiresAt?.toMillis?.() ?? Infinity) <= clock.nowMillis()) return { errorCode: 'ITEM_UNAVAILABLE' };
     const slots = equipmentSnapshot.exists && equipmentSnapshot.data()?.slots && typeof equipmentSnapshot.data().slots === 'object' ? { ...equipmentSnapshot.data().slots } : {};
     const oldItemId = typeof slots[ownership.category] === 'string' ? slots[ownership.category] : '';
@@ -178,8 +202,13 @@ async function equipStoreItem({ clock, db, fieldValue, input, requestId, uid }) 
     const timestamp = fieldValue.serverTimestamp();
     if (oldOwnership?.exists) transaction.update(oldOwnership.ref, { equipped: false, updatedAt: timestamp });
     slots[ownership.category] = itemId;
-    transaction.set(refs.equipment, { slots, uid, updatedAt: timestamp });
+    transaction.set(refs.equipment, buildEquipmentDocument(equipmentSnapshot.data(), slots, uid, timestamp, item));
     transaction.update(refs.ownership, { equipped: true, updatedAt: timestamp });
+    if (ownership.category === 'avatar-frames') {
+      transaction.update(refs.profile, buildAvatarFrameProfileUpdate(item, fieldValue, timestamp));
+    } else if (getEquipmentCosmeticConfig(ownership.category)) {
+      transaction.update(refs.profile, buildEquipmentCosmeticProfileUpdate(item, fieldValue, timestamp));
+    }
     if (customId) transaction.update(refs.profile, { specialId: customId, updatedAt: timestamp });
     const result = { itemId, ownershipId: itemId };
     transaction.create(refs.command, { action: 'equip-store-item', createdAt: timestamp, itemId, requestId, result, uid });
@@ -224,6 +253,8 @@ async function giftStoreItem({ clock, db, fieldValue, input, requestId, uid }) {
     if (!inspectPublicProfile(recipient, identity.data(), recipientUid).ok || recipient.moderationStatus !== 'active') return { errorCode: 'INVALID_RECIPIENT' };
     const item = catalogSnapshot.exists ? mapStoreCatalogItem(catalogSnapshot.data(), itemId) : undefined;
     if (!item || item.availability !== 'available' || !item.purchasingEnabled) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (!(await isApprovedCanonicalCosmetic({ db, item, transaction }))) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (item.category === 'chat-themes') return { errorCode: 'GIFT_UNSUPPORTED' };
     if (item.stock.kind === 'limited' && item.stock.remaining === 0) return { errorCode: 'OUT_OF_STOCK' };
     if (ownershipSnapshot.exists) return { errorCode: 'DUPLICATE_OWNERSHIP' };
     const price = item.prices[currency];
@@ -254,8 +285,13 @@ async function giftStoreItem({ clock, db, fieldValue, input, requestId, uid }) {
     transaction.create(refs.storeTransaction, { amount: price, category: item.category, createdAt: timestamp, currency, itemId, kind: 'gift', recipientUid, requestId, senderUid: uid });
     if (oldOwnership?.exists) transaction.update(oldOwnership.ref, { equipped: false, updatedAt: timestamp });
     slots[item.category] = itemId;
-    transaction.set(refs.recipientEquipment, { slots, uid: recipientUid, updatedAt: timestamp });
+    transaction.set(refs.recipientEquipment, buildEquipmentDocument(equipmentSnapshot.data(), slots, recipientUid, timestamp, item));
     transaction.create(refs.recipientOwnership, buildStoreOwnership({ acquiredAt: timestamp, expiresAt, item, ownershipId: itemId, uid: recipientUid }));
+    if (item.category === 'avatar-frames') {
+      transaction.update(refs.recipientProfile, buildAvatarFrameProfileUpdate(item, fieldValue, timestamp));
+    } else if (getEquipmentCosmeticConfig(item.category)) {
+      transaction.update(refs.recipientProfile, buildEquipmentCosmeticProfileUpdate(item, fieldValue, timestamp));
+    }
     if (item.stock.kind === 'limited') transaction.update(refs.catalog, { stock: { kind: 'limited', remaining: item.stock.remaining - 1 }, updatedAt: timestamp });
     if (item.category === 'custom-ids') {
       transaction.create(db.doc(`specialIds/${item.customId}`), { purchasedAt: timestamp, transactionId: refs.storeTransaction.path.split('/').at(-1), uid: recipientUid });
@@ -279,15 +315,76 @@ async function expireStoreOwnerships({ clock, db, fieldValue, limit = 200 }) {
       const equipmentRef = db.doc(`storeEquipment/${data.uid}`);
       const equipment = await transaction.get(equipmentRef);
       const slots = equipment.exists && equipment.data()?.slots && typeof equipment.data().slots === 'object' ? { ...equipment.data().slots } : {};
-      if (slots[data.category] === data.itemId) delete slots[data.category];
+      const wasEquipped = slots[data.category] === data.itemId;
+      if (wasEquipped) delete slots[data.category];
       const timestamp = fieldValue.serverTimestamp();
       transaction.update(candidate.ref, { equipped: false, state: 'expired', updatedAt: timestamp });
-      if (equipment.exists) transaction.set(equipmentRef, { ...equipment.data(), slots, updatedAt: timestamp });
+      if (equipment.exists) {
+        let nextEquipment = { ...equipment.data(), slots, updatedAt: timestamp };
+        if (wasEquipped && getEquipmentCosmeticConfig(data.category)) {
+          nextEquipment = removeEquipmentCosmeticProjection(nextEquipment, data.category);
+        }
+        transaction.set(equipmentRef, nextEquipment);
+      }
+      if (wasEquipped && data.category === 'avatar-frames') {
+        transaction.update(db.doc(`publicProfiles/${data.uid}`), {
+          equippedAvatarFrame: fieldValue.delete(),
+          'equippedCosmetics.avatarFrame': fieldValue.delete(),
+          updatedAt: timestamp,
+        });
+      } else if (wasEquipped && getEquipmentCosmeticConfig(data.category)) {
+        transaction.update(db.doc(`publicProfiles/${data.uid}`), {
+          [`equippedCosmetics.${getEquipmentCosmeticConfig(data.category).projectionKey}`]: fieldValue.delete(),
+          updatedAt: timestamp,
+        });
+      }
       return true;
     });
     if (changed) expired += 1;
   }
   return { expired, scanned: snapshot.docs.length };
+}
+
+function buildEquipmentDocument(existing, slots, uid, updatedAt, item) {
+  const document = existing && typeof existing === 'object' && !Array.isArray(existing) ? { ...existing } : {};
+  const projected = getEquipmentCosmeticConfig(item.category)
+    ? setEquipmentCosmeticProjection(document, item)
+    : document;
+  return {
+    ...projected,
+    slots,
+    uid,
+    updatedAt,
+  };
+}
+
+function buildAvatarFrameProfileUpdate(item, fieldValue, updatedAt) {
+  const projection = buildAvatarFrameProjection(item);
+  const canonical = buildCanonicalEquipmentFrame(item);
+  return {
+    equippedAvatarFrame: projection ? { assetUrl: projection.assetUrl, itemId: projection.itemId } : fieldValue.delete(),
+    'equippedCosmetics.avatarFrame': canonical || fieldValue.delete(),
+    updatedAt,
+  };
+}
+
+async function isApprovedCanonicalCosmetic({ db, item, transaction }) {
+  if (!getEquipmentCosmeticConfig(item.category)) return true;
+  if (!item.cosmeticAsset) return false;
+  const { assetId, assetVersionId: versionId } = item.cosmeticAsset;
+  const [summary, version, approval] = await Promise.all([
+    transaction.get(db.doc(`cosmeticAssets/${assetId}`)),
+    transaction.get(db.doc(`cosmeticAssets/${assetId}/versions/${versionId}`)),
+    transaction.get(db.doc(`cosmeticAssetApprovals/${assetId}__${versionId}`)),
+  ]);
+  return inspectApprovedEquipmentCosmeticReference({
+    approval: approval.exists ? approval.data() : undefined,
+    assetId,
+    category: item.category,
+    summary: summary.exists ? summary.data() : undefined,
+    version: version.exists ? version.data() : undefined,
+    versionId,
+  }).ok;
 }
 
 async function validateActiveProfile(db, profileSnapshot, uid) {

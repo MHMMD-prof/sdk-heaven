@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('expo-constants', () => ({
+  default: { expoConfig: { version: '1.0.0' } },
+}));
+
 import { VoiceRoom } from '../../types/voice';
 import { requestLiveKitConnectOptions } from '../requestLiveKitConnectOptions';
 
@@ -50,7 +54,7 @@ describe('requestLiveKitConnectOptions', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://voice.example.test/token',
       expect.objectContaining({
-        body: JSON.stringify({ roomId: 'room-1' }),
+        body: JSON.stringify({ clientVersion: '1.0.0', roomId: 'room-1' }),
         headers: {
           Authorization: 'Bearer id-token-1',
           'Content-Type': 'application/json',
@@ -58,6 +62,21 @@ describe('requestLiveKitConnectOptions', () => {
         method: 'POST',
       }),
     );
+  });
+
+  it('passes only the derived attendance endpoint as local connection metadata', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      serverUrl: 'wss://livekit.example.test',
+      token: 'token-1',
+    }), { status: 200 }));
+    const options = await requestLiveKitConnectOptions(room, {
+      ...config,
+      roomAttendanceCommandEndpoint: 'https://voice.example.test/roomAttendanceCommand',
+    }, async () => 'id-token-1');
+    expect(options.metadata).toEqual({
+      attendanceCommandEndpoint: 'https://voice.example.test/roomAttendanceCommand',
+      source: 'livekit',
+    });
   });
 
   it('does not send client-computed publishing authority', async () => {
@@ -90,7 +109,7 @@ describe('requestLiveKitConnectOptions', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://voice.example.test/token',
       expect.objectContaining({
-        body: JSON.stringify({ roomId: 'room-1' }),
+        body: JSON.stringify({ clientVersion: '1.0.0', roomId: 'room-1' }),
       }),
     );
   });

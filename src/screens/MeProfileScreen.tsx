@@ -8,6 +8,7 @@ import { MeProfilePage } from '../components/MeProfilePage';
 import { usePublicProfile } from '../social/usePublicProfile';
 import { useSocialFeatureFlags } from '../social/useSocialFeatureFlags';
 import { requestRepresentativeStatus } from '../social/requestSocialCommand';
+import { PayrollProgress, requestPayrollProgress } from '../payroll/requestPayrollProgress';
 import type { StoreCurrencyAmounts } from '../social/types';
 import type { RootStackParamList } from '../types/navigation';
 
@@ -25,6 +26,7 @@ export function MeProfileScreen({ bottomNavigation, navigation }: MeProfileScree
   const [isRepresentative, setIsRepresentative] = useState(false);
   const [balances, setBalances] = useState<StoreCurrencyAmounts>();
   const [economyRevision, setEconomyRevision] = useState(0);
+  const [payrollProgress, setPayrollProgress] = useState<PayrollProgress | null>(null);
   const { errorMessage, profile, retry, status } = usePublicProfile(user?.uid, {
     bootstrapIfMissing: true,
   });
@@ -42,14 +44,31 @@ export function MeProfileScreen({ bottomNavigation, navigation }: MeProfileScree
       setIsRepresentative(response.ok && response.result.feature.available && response.result.privilege.active);
       setBalances(response.ok ? response.result.wallet.balances : undefined);
     });
-
     return () => { active = false; };
   }, [economyRevision, flags.representativeTransfers, flags.wallet, user?.uid]));
+
+  useFocusEffect(useCallback(() => {
+    if (!user?.uid) {
+      setPayrollProgress(null);
+      return undefined;
+    }
+    let active = true;
+    void requestPayrollProgress()
+      .then((progress) => { if (active) setPayrollProgress(progress); })
+      .catch(() => { if (active) setPayrollProgress(null); });
+    return () => { active = false; };
+  }, [economyRevision, user?.uid]));
 
   const retryAll = useCallback(() => {
     retry();
     setEconomyRevision((value) => value + 1);
   }, [retry]);
+
+  const canOpenRepresentativeTransfer = (
+    flags.wallet
+    && flags.representativeTransfers
+    && (isRepresentative || profile?.representativeBadgeActive === true)
+  );
 
   return (
     <MeProfilePage
@@ -65,11 +84,14 @@ export function MeProfileScreen({ bottomNavigation, navigation }: MeProfileScree
       onOpenWallet={flags.wallet ? () => navigation.navigate('WalletStore') : undefined}
       onOpenStore={() => navigation.navigate('Store')}
       onOpenMyItems={() => navigation.navigate('MyItems')}
-      onOpenRepresentativeTransfer={isRepresentative ? () => navigation.navigate('RepresentativeTransfer') : undefined}
+      onOpenRepresentativeTransfer={canOpenRepresentativeTransfer
+        ? () => navigation.navigate('RepresentativeTransfer')
+        : undefined}
       onOpenDiscovery={flags.usersDiscovery ? () => navigation.navigate('UsersDiscovery') : undefined}
       onOpenSettings={() => navigation.navigate('AccountSettings')}
       onRetry={retryAll}
       profile={profile}
+      payrollProgress={payrollProgress}
       status={status}
     />
   );

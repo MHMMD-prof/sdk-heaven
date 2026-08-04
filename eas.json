@@ -9,6 +9,13 @@
       }
     },
     "production": {
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_VOICE_ALLOW_MOCK_PROVIDER": "false",
+        "EXPO_PUBLIC_VOICE_ALLOW_MOCK_ROOMS": "false",
+        "EXPO_PUBLIC_VOICE_DEBUG": "false"
+      },
       "android": {
         "buildType": "app-bundle"
       }

@@ -3,6 +3,7 @@ const {
   isValidPublicId,
   normalizeSearchName,
 } = require('./socialProfileCore');
+const { readPublicAvatarFrameProjection } = require('./avatarFrameProjectionCore');
 
 const DEFAULT_DISCOVERY_LIMIT = 12;
 const MAX_DISCOVERY_LIMIT = 20;
@@ -80,6 +81,7 @@ function mapDiscoveryProfile(profile) {
     coupleLevel: readCount(profile.coupleLevel),
     createdAt: profile.createdAt,
     displayName: profile.displayName,
+    ...(readPublicAvatarFrameProjection(profile) ? { equippedAvatarFrame: readPublicAvatarFrameProjection(profile) } : {}),
     friendCount: readCount(profile.friendCount),
     ...(profile.gender === 'male' || profile.gender === 'female' ? { gender: profile.gender } : {}),
     giftScore: readCount(profile.giftScore),

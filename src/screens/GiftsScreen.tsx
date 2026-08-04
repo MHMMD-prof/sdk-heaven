@@ -12,6 +12,8 @@ import type { GiftCatalogItem, GiftCenterResult, GiftEventSummary, GiftIconKey }
 import { useRepresentativeBadgeProjection } from '../social/useRepresentativeBadgeProjection';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
+import { AvatarPresentation } from '../components/AvatarPresentation';
+import { useCosmeticsFeatureFlags } from '../cosmetics/featureFlags';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Gifts'>;
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -176,12 +178,19 @@ function GiftHistory({
   incoming?: boolean;
   title: string;
 }) {
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   return (
     <View style={styles.historySection}>
       <Text style={styles.sectionTitle}>{title}</Text>
       {events.length === 0 ? <Text style={styles.emptyHistory}>لا توجد هدايا في هذا السجل بعد.</Text> : null}
       {events.map((event) => (
         <View key={event.eventId} style={styles.historyRow}>
+          <AvatarPresentation
+            flags={cosmeticsFlags}
+            frame={incoming ? event.senderAvatarFrame : event.recipientAvatarFrame}
+            label={incoming ? event.senderDisplayName : event.recipientDisplayName}
+            size={38}
+          />
           <View style={styles.historyIcon}><SymbolView name={giftSymbol(event.iconKey)} size={23} tintColor={colors.goldSoft} /></View>
           <View style={styles.historyCopy}>
             <Text style={styles.historyName}>{event.nameAr}</Text>

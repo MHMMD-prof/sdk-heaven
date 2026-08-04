@@ -161,7 +161,9 @@ describe('representativePortalService', () => {
     });
     db.documents.set('representativeTransferReversals/transfer_1', {
       createdAt: timestamp(950_000),
+      publicReference: 'RPT-0123456789ABCDEF',
       status: 'completed',
+      transferId: 'transfer_1',
     });
 
     await expect(lookupRepresentativeReceipt({

@@ -10,6 +10,10 @@ describe('admin request policy', () => {
     expect(shouldRetryAdminRequest('report-action', 0, 503)).toBe(false);
     expect(shouldRetryAdminRequest('wallet-adjust', 0, 0)).toBe(false);
     expect(isReadOnlyAdminAction('audit-export')).toBe(true);
+    expect(shouldRetryAdminRequest('daily-login-campaign', 0, 503)).toBe(true);
+    expect(shouldRetryAdminRequest('daily-login-campaign-mutate', 0, 503)).toBe(false);
+    expect(shouldRetryAdminRequest('cosmetic-assets', 0, 503)).toBe(true);
+    expect(shouldRetryAdminRequest('cosmetic-assets-mutate', 0, 503)).toBe(false);
   });
 
   it('provides consistent Arabic operational errors', () => {

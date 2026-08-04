@@ -1,0 +1,213 @@
+[
+  {
+    "name": "defaults the inbox page",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "get-direct-chat-inbox",
+      "requestId": "inbox_request_0001",
+      "version": 1
+    },
+    "expected": {
+      "ok": true,
+      "value": {
+        "action": "get-direct-chat-inbox",
+        "payload": { "limit": 30 },
+        "requestId": "inbox_request_0001",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "normalizes a bounded thread page",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "get-direct-chat-thread",
+      "payload": {
+        "cursor": "cursor_123456789",
+        "limit": 20,
+        "targetUid": "uid-2"
+      },
+      "requestId": "thread_request_001",
+      "version": 1
+    },
+    "expected": {
+      "ok": true,
+      "value": {
+        "action": "get-direct-chat-thread",
+        "payload": {
+          "cursor": "cursor_123456789",
+          "limit": 20,
+          "targetUid": "uid-2"
+        },
+        "requestId": "thread_request_001",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "normalizes text and removes direction controls",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "send-direct-message",
+      "payload": {
+        "kind": "text",
+        "targetUid": "uid-2",
+        "text": "  Ｈi\u202e   there\r\n\r\n\r\nfriend  "
+      },
+      "requestId": "message_request_01",
+      "version": 1
+    },
+    "expected": {
+      "ok": true,
+      "value": {
+        "action": "send-direct-message",
+        "payload": {
+          "kind": "text",
+          "targetUid": "uid-2",
+          "text": "Hi there\n\nfriend"
+        },
+        "requestId": "message_request_01",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "accepts an owned-sticker-shaped send",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "send-direct-message",
+      "payload": {
+        "kind": "sticker",
+        "stickerItemId": "ruby-heart",
+        "targetUid": "uid-2"
+      },
+      "requestId": "sticker_request_01",
+      "version": 1
+    },
+    "expected": {
+      "ok": true,
+      "value": {
+        "action": "send-direct-message",
+        "payload": {
+          "kind": "sticker",
+          "stickerItemId": "ruby-heart",
+          "targetUid": "uid-2"
+        },
+        "requestId": "sticker_request_01",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "accepts a bounded image authorization request",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "create-direct-chat-upload",
+      "payload": {
+        "contentType": "IMAGE/WEBP",
+        "kind": "image",
+        "sizeBytes": 4096,
+        "targetUid": "uid-2"
+      },
+      "requestId": "upload_request_001",
+      "version": 1
+    },
+    "expected": {
+      "ok": true,
+      "value": {
+        "action": "create-direct-chat-upload",
+        "payload": {
+          "contentType": "image/webp",
+          "kind": "image",
+          "sizeBytes": 4096,
+          "targetUid": "uid-2"
+        },
+        "requestId": "upload_request_001",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "deduplicates selected report message ids",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "report-direct-chat",
+      "payload": {
+        "category": "spam",
+        "details": " repeated   links ",
+        "messageIds": ["dmm_123456789012", "dmm_123456789012", "dmm_abcdefghijkl"],
+        "targetUid": "uid-2"
+      },
+      "requestId": "report_request_001",
+      "version": 1
+    },
+    "expected": {
+      "ok": true,
+      "value": {
+        "action": "report-direct-chat",
+        "payload": {
+          "category": "spam",
+          "details": "repeated links",
+          "messageIds": ["dmm_123456789012", "dmm_abcdefghijkl"],
+          "targetUid": "uid-2"
+        },
+        "requestId": "report_request_001",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "rejects targeting the requesting account",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "get-direct-chat-status",
+      "payload": { "targetUid": "uid-1" },
+      "requestId": "status_request_001",
+      "version": 1
+    },
+    "expected": { "ok": false, "code": "INVALID_REQUEST" }
+  },
+  {
+    "name": "rejects unknown envelope keys",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "get-direct-chat-inbox",
+      "admin": true,
+      "requestId": "inbox_request_0002",
+      "version": 1
+    },
+    "expected": { "ok": false, "code": "INVALID_REQUEST" }
+  },
+  {
+    "name": "rejects text attached to an image message",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "send-direct-message",
+      "payload": {
+        "attachmentId": "upload_123456789",
+        "kind": "image",
+        "targetUid": "uid-2",
+        "text": "forged"
+      },
+      "requestId": "message_request_02",
+      "version": 1
+    },
+    "expected": { "ok": false, "code": "INVALID_REQUEST" }
+  },
+  {
+    "name": "rejects a disguised image upload",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "create-direct-chat-upload",
+      "payload": {
+        "contentType": "application/pdf",
+        "kind": "image",
+        "sizeBytes": 4096,
+        "targetUid": "uid-2"
+      },
+      "requestId": "upload_request_002",
+      "version": 1
+    },
+    "expected": { "ok": false, "code": "UPLOAD_INVALID" }
+  }
+]

@@ -1,14 +1,14 @@
 import { spawn } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 
 const host = '127.0.0.1';
 const [firestorePort, storagePort] = await findOpenPorts(2);
-const tempDir = path.join(process.cwd(), '.firebase-rules-test');
-const configPath = path.join(tempDir, 'firebase.json');
+const configPath = path.join(process.cwd(), '.firebase-rules-test.json');
+const cliConfigPath = path.join(process.cwd(), '.tmp-firebase-rules-config');
+const cliCachePath = path.join(process.cwd(), '.tmp-firebase-rules-cache');
 
-await mkdir(tempDir, { recursive: true });
 await writeFile(
   configPath,
   JSON.stringify(
@@ -35,9 +35,12 @@ await writeFile(
   ),
 );
 
-const exitCode = await runCommand(configPath);
+const exitCode = await runCommand(configPath, cliConfigPath, cliCachePath);
 
-await rm(tempDir, { force: true, recursive: true });
+await rm(configPath, { force: true });
+await rm(cliConfigPath, { force: true, recursive: true });
+await rm(cliCachePath, { force: true, recursive: true });
+console.log(`Firebase rules test runner exited with code ${exitCode}.`);
 process.exit(exitCode);
 
 async function findOpenPorts(count) {
@@ -65,10 +68,18 @@ async function findOpenPorts(count) {
   return ports;
 }
 
-function runCommand(configPath) {
+function runCommand(configPath, cliConfigPath, cliCachePath) {
   return new Promise((resolve) => {
+    const firebaseCliPath = path.join(
+      process.cwd(),
+      'functions',
+      'node_modules',
+      'firebase-tools',
+      'lib',
+      'bin',
+      'firebase.js',
+    );
     const args = [
-      'firebase-tools@13.35.1',
       'emulators:exec',
       '--only',
       'firestore,storage',
@@ -78,15 +89,8 @@ function runCommand(configPath) {
       configPath,
       'vitest run --no-file-parallelism firestore.rules.emulator.test.mjs storage.rules.emulator.test.mjs',
     ];
-    const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : 'npx';
-    const spawnArgs = process.platform === 'win32'
-      ? [
-          '/d',
-          '/s',
-          '/c',
-          `npx firebase-tools@13.35.1 emulators:exec --only firestore,storage --project demo-auth-rules-wave8 --config "${configPath}" "vitest run --no-file-parallelism firestore.rules.emulator.test.mjs storage.rules.emulator.test.mjs"`,
-        ]
-      : args;
+    const command = process.execPath;
+    const spawnArgs = [firebaseCliPath, ...args];
     console.log(`Running Firestore rules tests on ${host}:${firestorePort}`);
     console.log(`Running Storage rules tests on ${host}:${storagePort}`);
     console.log([command, ...spawnArgs].join(' '));
@@ -95,11 +99,17 @@ function runCommand(configPath) {
         ...process.env,
         FIRESTORE_RULES_TEST_PORT: String(firestorePort),
         STORAGE_RULES_TEST_PORT: String(storagePort),
+        XDG_CACHE_HOME: cliCachePath,
+        XDG_CONFIG_HOME: cliConfigPath,
       },
       stdio: 'inherit',
       windowsHide: true,
     });
 
+    child.on('error', (error) => {
+      console.error('Could not start the Firebase rules test runner.', error);
+      resolve(1);
+    });
     child.on('close', (code) => resolve(code ?? 1));
   });
 }

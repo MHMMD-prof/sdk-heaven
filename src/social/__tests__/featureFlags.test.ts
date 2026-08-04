@@ -18,4 +18,21 @@ describe('social feature flags', () => {
     expect(mapSocialFeatureFlags({ wallet: true })).toMatchObject({ representativeTransfers: false, wallet: true });
     expect(mapSocialFeatureFlags({ representativeTransfers: true, wallet: true })).toMatchObject({ representativeTransfers: true, wallet: true });
   });
+
+  it('keeps every direct-chat layer independently fail-closed', () => {
+    expect(mapSocialFeatureFlags({ directMessages: true })).toMatchObject({
+      directMessageMedia: false,
+      directMessageRequests: false,
+      directMessages: true,
+    });
+    expect(mapSocialFeatureFlags({
+      directMessageMedia: true,
+      directMessageRequests: true,
+      directMessages: true,
+    })).toMatchObject({
+      directMessageMedia: true,
+      directMessageRequests: true,
+      directMessages: true,
+    });
+  });
 });

@@ -2,6 +2,7 @@
   "expo": {
     "name": "sdk-heaven",
     "slug": "sdk-heaven",
+    "scheme": "yallgame",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,7 +21,8 @@
         {
           "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false,
-          "recordAudioAndroid": false
+          "recordAudioAndroid": true,
+          "microphonePermission": "Allow YallGame to record voice messages and speak in voice rooms."
         }
       ],
       [
@@ -34,9 +36,12 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "نحتاج إلى الوصول إلى صورك لاختيار صورة آمنة للغرفة."
+          "photosPermission": "Allow YallGame to select images you choose to share.",
+          "cameraPermission": "Allow YallGame to take an image you choose to share."
         }
       ],
+      "expo-image",
+      "expo-video",
       "expo-asset",
       "expo-font"
     ],

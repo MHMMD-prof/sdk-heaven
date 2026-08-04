@@ -67,7 +67,7 @@ function mapNotificationPreferences(value) {
 function notificationCategoryForKind(kind) {
   if (['couple-request', 'couple-accepted'].includes(kind)) return 'coupleRequests';
   if (['friend-request', 'friend-accepted'].includes(kind)) return 'friendRequests';
-  if (['gift-received', 'store-gift-received', 'store-gift-sent'].includes(kind)) return 'gifts';
+  if (['gift-received', 'store-gift-received', 'store-gift-sent', 'rocket-reward-paid', 'room-target-selected'].includes(kind)) return 'gifts';
   if ([
     'representative-transfer-received',
     'representative-transfer-sent',
@@ -94,6 +94,16 @@ function buildArabicNotification(kind, actorDisplayName, actorUid) {
   definitions['representative-transfer-sent'] = { title: 'تم إرسال الرصيد', body: `اكتملت عملية الشحن إلى ${name}`, route: 'RepresentativeTransfer' };
   definitions['representative-reversal-recipient'] = { title: 'تم عكس عملية الشحن', body: `أعادت الإدارة الرصيد المرسل من ${name}`, route: 'WalletStore' };
   definitions['representative-reversal-representative'] = { title: 'تمت إعادة الرصيد', body: `أعادت الإدارة رصيد العملية مع ${name} إلى محفظتك`, route: 'RepresentativeTransfer' };
+  definitions['rocket-reward-paid'] = {
+    title: 'تم إيداع مكافأة الصاروخ',
+    body: 'وصلت مكافأة ترتيبك الأسبوعي في الغرفة إلى محفظتك',
+    route: 'Rooms',
+  };
+  definitions['room-target-selected'] = {
+    title: 'تم اختيارك لهدف الغرفة',
+    body: 'أضافك مالك الغرفة إلى قائمة هدف الأسبوع القادم. افتح الغرفة لمراجعة الشروط والمواعيد.',
+    route: 'Rooms',
+  };
   const definition = definitions[kind];
   if (!definition || typeof actorUid !== 'string' || !actorUid) return undefined;
   return { ...definition, actorUid, kind };

@@ -12,6 +12,8 @@ const {
   timestampToMillis,
 } = require('./roomSeatCore');
 const { isCompleteProfile, isValidRoomCommandRequestId, roomCommandError } = require('./roomCommandCore');
+const { VOICE_ROOM_COMMAND_RECORD_RETENTION_MS } = require('./voiceRoomRateLimitCore');
+const { FieldPath } = require('firebase-admin/firestore');
 
 async function executeRoomSeatCommand({ body, clock, db, decodedToken, fieldValue }) {
   const normalized = normalizeRoomSeatCommandBody(body);
@@ -24,6 +26,9 @@ async function executeRoomSeatCommand({ body, clock, db, decodedToken, fieldValu
     return roomCommandError('INVALID_REQUEST', 400, 'A valid seat command, room ID, and request ID are required.');
   }
   const nowMs = clock.nowMillis();
+  const requestPurgeAfter = clock.timestampFromMillis(
+    nowMs + VOICE_ROOM_COMMAND_RECORD_RETENTION_MS,
+  );
   const fingerprint = buildRoomSeatCommandFingerprint(decodedToken.uid, normalized);
 
   return db.runTransaction(async (transaction) => {
@@ -101,6 +106,7 @@ async function executeRoomSeatCommand({ body, clock, db, decodedToken, fieldValu
         fingerprint,
         normalized,
         requestRef,
+        requestPurgeAfter,
         resolution,
         roomRef,
         timestamp,
@@ -161,6 +167,7 @@ async function executeRoomSeatCommand({ body, clock, db, decodedToken, fieldValu
         fingerprint,
         normalized,
         requestRef,
+        requestPurgeAfter,
         resolution: mutation,
         roomRef,
         timestamp,
@@ -180,6 +187,7 @@ async function executeRoomSeatCommand({ body, clock, db, decodedToken, fieldValu
           fingerprint,
           normalized,
           requestRef,
+          requestPurgeAfter,
           resolution: roomCommandError('SEAT_STATE_INVALID', 409, 'The room seat map is incomplete.'),
           roomRef,
           timestamp,
@@ -264,6 +272,7 @@ async function executeRoomSeatCommand({ body, clock, db, decodedToken, fieldValu
       fingerprint,
       liveKit,
       liveKitSyncAttempts: 0,
+      purgeAfter: requestPurgeAfter,
       response,
     });
     return { ...response, replayed: false, liveKit };
@@ -554,6 +563,9 @@ async function recoverExpiredRoomSeats({ clock, db, fieldValue, limit = 100 }) {
         fingerprint: recoveryId,
         liveKit,
         liveKitSyncAttempts: 0,
+        purgeAfter: clock.timestampFromMillis(
+          nowMs + VOICE_ROOM_COMMAND_RECORD_RETENTION_MS,
+        ),
         response: { ok: true, result },
         updatedAt: timestamp,
       });
@@ -617,7 +629,9 @@ async function expireRoomSeatOffers({ clock, db, fieldValue, limit = 200 }) {
 async function recoverStaleRoomPresence({ clock, db, fieldValue, limit = 200 }) {
   const nowMs = clock.nowMillis();
   const snapshot = await db.collectionGroup('presence')
+    .where('status', 'in', ['online', 'reconnecting'])
     .where('leaseExpiresAt', '<=', clock.timestampFromMillis(nowMs))
+    .orderBy('leaseExpiresAt', 'asc')
     .limit(limit)
     .get();
   let reserved = 0;
@@ -686,6 +700,9 @@ async function recoverStaleRoomPresence({ clock, db, fieldValue, limit = 200 }) 
         fingerprint: recoveryId,
         liveKit,
         liveKitSyncAttempts: 0,
+        purgeAfter: clock.timestampFromMillis(
+          nowMs + VOICE_ROOM_COMMAND_RECORD_RETENTION_MS,
+        ),
         response: { ok: true, result },
         updatedAt: timestamp,
       });
@@ -698,7 +715,21 @@ async function recoverStaleRoomPresence({ clock, db, fieldValue, limit = 200 }) 
 }
 
 async function reconcileRoomPresenceCounts({ clock, db, fieldValue, limit = 50 }) {
-  const rooms = await db.collection('rooms').where('status', '==', 'active').limit(limit).get();
+  const stateRef = db.doc('appOperationalState/roomPresenceReconciliation');
+  const stateSnapshot = await stateRef.get();
+  const cursor = stateSnapshot.exists && typeof stateSnapshot.data()?.lastRoomId === 'string'
+    ? stateSnapshot.data().lastRoomId
+    : '';
+  const baseQuery = () => db.collection('rooms')
+    .where('status', '==', 'active')
+    .orderBy(FieldPath.documentId())
+    .limit(limit);
+  let rooms = await (cursor ? baseQuery().startAfter(cursor) : baseQuery()).get();
+  let wrapped = false;
+  if (rooms.empty && cursor) {
+    rooms = await baseQuery().get();
+    wrapped = true;
+  }
   const nowMs = clock.nowMillis();
   let repaired = 0;
   for (const roomDocument of rooms.docs) {
@@ -718,10 +749,26 @@ async function reconcileRoomPresenceCounts({ clock, db, fieldValue, limit = 50 }
     }, { merge: true });
     repaired += 1;
   }
-  return { repaired, scanned: rooms.size };
+  const lastRoomId = rooms.docs.at(-1)?.id || '';
+  await stateRef.set({
+    lastRoomId,
+    lastRunAt: fieldValue.serverTimestamp(),
+    wrapped,
+  }, { merge: true });
+  return { lastRoomId, repaired, scanned: rooms.size, wrapped };
 }
 
-function recordDeniedSeatCommand({ decodedToken, fingerprint, normalized, requestRef, resolution, roomRef, timestamp, transaction }) {
+function recordDeniedSeatCommand({
+  decodedToken,
+  fingerprint,
+  normalized,
+  requestRef,
+  requestPurgeAfter,
+  resolution,
+  roomRef,
+  timestamp,
+  transaction,
+}) {
   const response = {
     ok: false,
     code: resolution.code,
@@ -736,6 +783,7 @@ function recordDeniedSeatCommand({ decodedToken, fingerprint, normalized, reques
     fingerprint,
     liveKit: { type: 'none' },
     liveKitSyncStatus: 'not-required',
+    purgeAfter: requestPurgeAfter,
     response,
     roomId: normalized.roomId,
     seatId: normalized.seatId,

@@ -61,5 +61,14 @@ describe('roomV2Contract', () => {
     });
     expect(mapRoomMessageDocument({ ...message, schemaVersion: 3 }, 'message-1')).toBeNull();
     expect(mapRoomMessageDocument({ ...message, text: '' }, 'message-1')).toBeNull();
+    expect(mapRoomMessageDocument({
+      ...message,
+      status: 'deleted',
+      text: '',
+    }, 'message-1')).toMatchObject({
+      id: 'message-1',
+      status: 'deleted',
+      text: '',
+    });
   });
 });

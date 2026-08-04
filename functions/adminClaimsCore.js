@@ -3,17 +3,21 @@ const ADMIN_ROLE_CLAIM = 'adminRole';
 const ADMIN_ROLES = ['owner', 'super-moderator', 'moderator', 'support', 'catalog-manager', 'auditor'];
 
 const ADMIN_ROLE_PERMISSIONS = Object.freeze({
-  owner: ['overview', 'users:view', 'users:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'store:view', 'store:manage', 'audit:view', 'audit:export', 'admins:view', 'admins:manage', 'settings:manage', 'flags:manage'],
+  owner: ['overview', 'users:view', 'users:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'store:view', 'store:manage', 'audit:view', 'audit:export', 'admins:view', 'admins:manage', 'settings:manage', 'flags:manage', 'incentives:view', 'incentives:manage', 'payroll:view', 'payroll:manage'],
   'super-moderator': ['overview', 'users:view', 'users:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'audit:view', 'admins:view'],
   moderator: ['overview', 'users:view', 'users:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'audit:view', 'admins:view', 'settings:manage'],
   support: ['overview', 'users:view', 'users:note', 'rooms:view', 'reports:view', 'reports:manage', 'admins:view', 'settings:manage'],
   'catalog-manager': ['overview', 'store:view', 'store:manage', 'audit:view', 'admins:view', 'settings:manage'],
-  auditor: ['overview', 'users:view', 'rooms:view', 'reports:view', 'store:view', 'audit:view', 'audit:export', 'admins:view', 'settings:manage'],
+  auditor: ['overview', 'users:view', 'rooms:view', 'reports:view', 'store:view', 'audit:view', 'audit:export', 'admins:view', 'settings:manage', 'incentives:view', 'payroll:view'],
 });
 
 const ADMIN_ACTION_PERMISSIONS = Object.freeze({
   session: null,
   'client-error': null,
+  'attendance-shadow': 'payroll:view',
+  'attendance-outage-mutate': 'payroll:manage',
+  'payroll-overview': 'payroll:view',
+  'payroll-mutate': 'payroll:manage',
   overview: 'overview',
   users: 'users:view',
   'user-summary': 'users:view',
@@ -37,13 +41,32 @@ const ADMIN_ACTION_PERMISSIONS = Object.freeze({
   'economy-export': 'store:view',
   'store-item-detail': 'store:view',
   'store-summary': 'store:view',
+  'cosmetic-assets': 'store:view',
+  'cosmetic-assets-mutate': 'store:manage',
   'store-catalog-upsert': 'store:manage',
+  'room-theme': 'store:view',
+  'room-theme-mutate': 'store:manage',
+  'rocket-campaign': 'incentives:view',
+  'rocket-campaign-mutate': 'incentives:manage',
+  'daily-login-campaign': 'incentives:view',
+  'daily-login-campaign-mutate': 'incentives:manage',
+  'room-target-campaign': 'incentives:view',
+  'room-target-campaign-mutate': 'incentives:manage',
+  'room-target-member-hold': 'incentives:manage',
+  'weekly-incentive-integrity': 'incentives:view',
+  'weekly-incentive-integrity-mutate': 'incentives:manage',
+  'weekly-incentive-reconcile': 'incentives:manage',
   'gift-catalog-upsert': 'store:manage',
   'special-id-upsert': 'store:manage',
   'wallet-credit': 'store:manage',
   'wallet-adjust': 'store:manage',
   'representative-update': 'store:manage',
   'representative-reversal': 'store:manage',
+  'representative-operations': 'store:view',
+  'representative-override-update': 'store:manage',
+  'representative-pin-reset': 'store:manage',
+  'representative-policy-update': 'store:manage',
+  'room-gift-policy-update': 'flags:manage',
   'audit-events': 'audit:view',
   'audit-summary': 'audit:view',
   'audit-detail': 'audit:view',
@@ -53,6 +76,7 @@ const ADMIN_ACTION_PERMISSIONS = Object.freeze({
   'admin-settings-update': 'settings:manage',
   'administrator-action': null,
   'feature-flag-update': 'flags:manage',
+  'voice-room-launch-status': 'settings:manage',
 });
 
 function normalizeAdminLookup(input = {}) {
@@ -139,7 +163,6 @@ function hasAdminClaim(decodedToken = {}) {
 function resolveAdminRole(decodedToken = {}) {
   if (decodedToken[ADMIN_CLAIM] !== true) return '';
   const role = decodedToken[ADMIN_ROLE_CLAIM];
-  if (role === undefined || role === null || role === '') return 'owner';
   return ADMIN_ROLES.includes(role) ? role : '';
 }
 

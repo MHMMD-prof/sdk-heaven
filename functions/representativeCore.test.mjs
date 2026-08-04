@@ -20,9 +20,11 @@ describe('representativeCore', () => {
   });
 
   it('allows either currency permission or both, but not an active empty privilege', () => {
-    expect(normalizeAdminRepresentativeInput({ active: true, coins: true, diamonds: false, requestId: 'representative_123', targetUid: 'u1' })).toMatchObject({ ok: true });
-    expect(normalizeAdminRepresentativeInput({ active: true, coins: false, diamonds: false, requestId: 'representative_123', targetUid: 'u1' })).toMatchObject({ ok: false });
-    expect(normalizeAdminRepresentativeInput({ active: false, coins: false, diamonds: false, requestId: 'representative_123', targetUid: 'u1' })).toMatchObject({ ok: true });
+    const governance = { expectedUpdatedAt: 'missing', reason: 'Representative access review' };
+    expect(normalizeAdminRepresentativeInput({ active: true, coins: true, diamonds: false, requestId: 'representative_123', targetUid: 'u1', ...governance })).toMatchObject({ ok: true });
+    expect(normalizeAdminRepresentativeInput({ active: true, coins: false, diamonds: false, requestId: 'representative_123', targetUid: 'u1', ...governance })).toMatchObject({ ok: false });
+    expect(normalizeAdminRepresentativeInput({ active: false, coins: false, diamonds: false, requestId: 'representative_123', targetUid: 'u1', ...governance })).toMatchObject({ ok: true });
+    expect(normalizeAdminRepresentativeInput({ active: true, coins: true, diamonds: false, requestId: 'representative_123', targetUid: 'u1' })).toMatchObject({ ok: false });
   });
 
   it('normalizes full-reversal requests against the reviewed transfer value', () => {

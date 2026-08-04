@@ -1,4 +1,9 @@
 const crypto = require('node:crypto');
+const { getEquipmentCosmeticConfig, inspectApprovedEquipmentCosmeticReference } = require('./equipmentCosmeticsCore');
+const {
+  createEntryPhysicalApprovalReceiptId,
+  inspectApprovedEntryPresentation,
+} = require('./roomEntryPresentationCore');
 
 function stableFingerprint(item) {
   return crypto.createHash('sha256').update(JSON.stringify(sortValue(item))).digest('hex');
@@ -10,15 +15,82 @@ function sortValue(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortValue(value[key])]));
 }
 
+function approvedStickerReference(reference, summarySnapshot, versionSnapshot, approvalSnapshot) {
+  if (!summarySnapshot?.exists || !versionSnapshot?.exists || !approvalSnapshot?.exists) return false;
+  const summary = summarySnapshot.data() || {};
+  const version = versionSnapshot.data() || {};
+  const approval = approvalSnapshot.data() || {};
+  return summary.publishedVersionId === reference.assetVersionId
+    && summary.approvedVersionId === reference.assetVersionId
+    && summary.approvalId === `${reference.assetId}__${reference.assetVersionId}`
+    && summary.moderationStatus === 'approved'
+    && summary.publicationStatus === 'published'
+    && summary.renderingEnabled === true
+    && version.assetId === reference.assetId
+    && version.assetVersionId === reference.assetVersionId
+    && version.category === 'room-reaction'
+    && ['png', 'lottie-json', 'legacy-webp'].includes(version.format)
+    && approval.decision === 'approved'
+    && approval.assetId === reference.assetId
+    && approval.assetVersionId === reference.assetVersionId
+    && approval.checksum === version.sha256;
+}
+
 async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, input }) {
-  const { expectedUpdatedAt, featured, item, reason, requestId } = input;
+  const { entryPhysicalApproval, expectedUpdatedAt, featured, reason, requestId } = input;
+  let { item } = input;
+  if (getEquipmentCosmeticConfig(item.category) && !item.cosmeticAsset) {
+    const matchingAsset = await db.doc(`cosmeticAssets/${item.itemId}`).get();
+    const summary = matchingAsset.exists ? matchingAsset.data() : undefined;
+    const versionId = typeof summary?.publishedVersionId === 'string' ? summary.publishedVersionId : '';
+    if (
+      summary?.moderationStatus === 'approved'
+      && summary?.publicationStatus === 'published'
+      && summary?.renderingEnabled === true
+      && /^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(versionId)
+    ) item = { ...item, cosmeticAsset: { assetId: item.itemId, assetVersionId: versionId } };
+  }
   const catalogRef = db.collection('storeCatalog').doc(item.itemId);
   const auditRef = db.collection('adminAuditEvents').doc(`store_${requestId}`);
   const storefrontRef = db.collection('appConfig').doc('storefront');
-  const fingerprint = stableFingerprint({ featured, item, reason });
+  const fingerprint = stableFingerprint({ entryPhysicalApproval, featured, item: input.item, reason });
 
   return db.runTransaction(async (transaction) => {
     const refs = [catalogRef, auditRef, storefrontRef];
+    if (item.cosmeticAsset) {
+      const { assetId, assetVersionId } = item.cosmeticAsset;
+      refs.push(
+        db.doc(`cosmeticAssets/${assetId}`),
+        db.doc(`cosmeticAssets/${assetId}/versions/${assetVersionId}`),
+        db.doc(`cosmeticAssetApprovals/${assetId}__${assetVersionId}`),
+      );
+    }
+    if (item.stickerAsset) {
+      const { assetId, assetVersionId } = item.stickerAsset;
+      refs.push(
+        db.doc(`cosmeticAssets/${assetId}`),
+        db.doc(`cosmeticAssets/${assetId}/versions/${assetVersionId}`),
+        db.doc(`cosmeticAssetApprovals/${assetId}__${assetVersionId}`),
+      );
+    }
+    let entryReceiptRef;
+    if (item.entryPresentation?.animationEnabled) {
+      const presentation = item.entryPresentation;
+      const references = [
+        presentation.visualAsset,
+        presentation.fallbackAsset,
+        ...(presentation.audioAsset ? [presentation.audioAsset] : []),
+      ];
+      for (const reference of references) {
+        refs.push(
+          db.doc(`cosmeticAssets/${reference.assetId}`),
+          db.doc(`cosmeticAssets/${reference.assetId}/versions/${reference.assetVersionId}`),
+          db.doc(`cosmeticAssetApprovals/${reference.assetId}__${reference.assetVersionId}`),
+        );
+      }
+      entryReceiptRef = db.doc(`entryPresentationApprovalReceipts/${presentation.physicalApprovalReceiptId}`);
+      refs.push(entryReceiptRef);
+    }
     if (item.category === 'custom-ids') {
       refs.push(
         db.collection('publicIds').doc(item.customId),
@@ -28,7 +100,7 @@ async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, in
       );
     }
     const snapshots = await transaction.getAll(...refs);
-    const [catalogSnapshot, auditSnapshot, storefrontSnapshot, ...collisionSnapshots] = snapshots;
+    const [catalogSnapshot, auditSnapshot, storefrontSnapshot, ...additionalSnapshots] = snapshots;
     if (auditSnapshot.exists) {
       const audit = auditSnapshot.data() || {};
       if (audit.actorUid !== decodedToken.uid || audit.itemId !== item.itemId || audit.requestFingerprint !== fingerprint) {
@@ -37,6 +109,85 @@ async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, in
         throw error;
       }
       return { eventId: auditRef.id, itemId: item.itemId, replayed: true };
+    }
+    let collisionSnapshots = additionalSnapshots;
+    if (item.cosmeticAsset) {
+      const [summary, version, approval, ...remaining] = additionalSnapshots;
+      const { assetId, assetVersionId: versionId } = item.cosmeticAsset;
+      if (!inspectApprovedEquipmentCosmeticReference({
+        approval: approval.exists ? approval.data() : undefined,
+        assetId,
+        category: item.category,
+        summary: summary.exists ? summary.data() : undefined,
+        version: version.exists ? version.data() : undefined,
+        versionId,
+      }).ok) {
+        const error = new Error('The exact cosmetic version must match this category and be approved and published before assignment.');
+        error.status = 409;
+        throw error;
+      }
+      collisionSnapshots = remaining;
+    }
+    if (item.stickerAsset) {
+      const [summary, version, approval, ...remaining] = collisionSnapshots;
+      if (!approvedStickerReference(item.stickerAsset, summary, version, approval)) {
+        const error = new Error('The sticker must reference an approved and published room-reaction asset version.');
+        error.status = 409;
+        throw error;
+      }
+      collisionSnapshots = remaining;
+    }
+    if (item.entryPresentation?.animationEnabled) {
+      const presentation = item.entryPresentation;
+      const referenceKeys = [
+        ['visual', presentation.visualAsset],
+        ['fallback', presentation.fallbackAsset],
+        ...(presentation.audioAsset ? [['audio', presentation.audioAsset]] : []),
+      ];
+      const records = {};
+      let offset = 0;
+      for (const [key] of referenceKeys) {
+        const [summary, version, approval] = collisionSnapshots.slice(offset, offset + 3);
+        records[key] = {
+          approval: approval.exists ? approval.data() : undefined,
+          summary: summary.exists ? summary.data() : undefined,
+          version: version.exists ? version.data() : undefined,
+        };
+        offset += 3;
+      }
+      const receiptSnapshot = collisionSnapshots[offset];
+      collisionSnapshots = collisionSnapshots.slice(offset + 1);
+      const expectedReceiptId = createEntryPhysicalApprovalReceiptId(
+        item.itemId,
+        presentation.visualAsset.assetVersionId,
+      );
+      if (presentation.physicalApprovalReceiptId !== expectedReceiptId) {
+        const error = new Error('Entry-effect approval receipt ID does not match the exact car and visual version.');
+        error.status = 409;
+        throw error;
+      }
+      const receipt = receiptSnapshot.exists
+        ? receiptSnapshot.data()
+        : buildEntryPhysicalApprovalReceipt({
+          approval: entryPhysicalApproval,
+          actor: decodedToken,
+          fieldValue,
+          itemId: item.itemId,
+          presentation,
+          records,
+          receiptId: expectedReceiptId,
+        });
+      const inspection = inspectApprovedEntryPresentation({
+        presentation,
+        records: { ...records, physicalReceipt: receipt },
+      });
+      if (!inspection.ok) {
+        const error = new Error('The exact entry-effect assets and physical-device approval must be approved before assignment.');
+        error.status = 409;
+        throw error;
+      }
+      item = { ...item, entryPresentation: inspection.presentation };
+      if (!receiptSnapshot.exists) transaction.create(entryReceiptRef, receipt);
     }
     const existing = catalogSnapshot.exists ? catalogSnapshot.data() : null;
     const existingUpdatedAt = readTimestampIso(existing?.updatedAt);
@@ -103,6 +254,41 @@ async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, in
     });
     return { eventId: auditRef.id, itemId: item.itemId, replayed: false };
   });
+}
+
+function buildEntryPhysicalApprovalReceipt({
+  approval,
+  actor,
+  fieldValue,
+  itemId,
+  presentation,
+  records,
+  receiptId,
+}) {
+  if (!approval) return undefined;
+  const receipt = {
+    ...approval,
+    audioAssetId: presentation.audioAsset?.assetId || '',
+    audioAssetVersionId: presentation.audioAsset?.assetVersionId || '',
+    audioChecksum: records.audio?.version?.sha256 || '',
+    createdAt: fieldValue.serverTimestamp(),
+    durationMs: presentation.durationMs,
+    fallbackAssetId: presentation.fallbackAsset.assetId,
+    fallbackAssetVersionId: presentation.fallbackAsset.assetVersionId,
+    fallbackChecksum: records.fallback?.version?.sha256 || '',
+    id: receiptId,
+    itemId,
+    minimumClientVersion: presentation.minimumClientVersion,
+    performanceTier: presentation.performanceTier,
+    reviewerEmail: actor.email || '',
+    reviewerUid: actor.uid,
+    soundPolicy: presentation.soundPolicy,
+    status: 'passed',
+    visualAssetId: presentation.visualAsset.assetId,
+    visualAssetVersionId: presentation.visualAsset.assetVersionId,
+    visualChecksum: records.visual?.version?.sha256 || '',
+  };
+  return receipt;
 }
 
 function readTimestampIso(value) {

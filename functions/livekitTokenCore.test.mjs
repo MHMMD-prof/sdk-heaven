@@ -8,6 +8,7 @@ const {
   isCompleteMembership,
   isCompleteProfile,
   isValidRoomId,
+  resolveGameTransportTokenRequest,
   resolveTokenRequest,
 } = require('./livekitTokenCore');
 
@@ -190,8 +191,65 @@ describe('livekitTokenCore', () => {
     });
     expect(resolveTokenRequest({ ...input, ban: { status: 'active' } })).toMatchObject({ ok: false, status: 403 });
     expect(resolveTokenRequest({
+      ...input,
+      room: { ...room, staffLockdown: { byUid: 'staff-1' } },
+    })).toMatchObject({ ok: false, status: 423 });
+    expect(resolveTokenRequest({
       body: { roomId: 'room-1' }, decodedToken, membership: hostMembership, profile,
       room: { ...room, seatEngineVersion: 1 },
     })).toMatchObject({ ok: true, value: { canPublish: false, seatId: '' } });
+  });
+
+  it('isolates a joined multiplayer game in a data-only LiveKit room', () => {
+    const gameSessionId = 'rgs_session_000000000001';
+    const gameRoom = { ...room, activeGameSessionId: gameSessionId };
+    const gameSession = {
+      expiresAt: { toMillis: () => Date.now() + 60_000 },
+      playerUids: ['uid-1', 'uid-2'],
+      roomId: 'room-1',
+      sessionId: gameSessionId,
+      sessionMode: 'multiplayer',
+      status: 'active',
+    };
+    const result = resolveGameTransportTokenRequest({
+      body: { gameSessionId, roomId: 'room-1' },
+      decodedToken,
+      featureFlags: { voice_room_games: true },
+      gameSession,
+      membership: hostMembership,
+      profile,
+      room: gameRoom,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        canPublish: false,
+        gameSessionId,
+        participantId: 'uid-1',
+        sourceRoomId: 'room-1',
+        transport: 'room-game',
+      },
+    });
+    expect(result.value.roomId).toMatch(/^vrg_[a-f0-9]{32}$/);
+    expect(result.value.roomId).not.toBe('room-1');
+
+    expect(resolveGameTransportTokenRequest({
+      body: { gameSessionId, roomId: 'room-1' },
+      decodedToken,
+      featureFlags: { voice_room_games: true },
+      gameSession: { ...gameSession, playerUids: ['uid-2'] },
+      membership: hostMembership,
+      profile,
+      room: gameRoom,
+    })).toMatchObject({ ok: false, status: 403 });
+    expect(resolveGameTransportTokenRequest({
+      body: { gameSessionId, roomId: 'room-1' },
+      decodedToken,
+      featureFlags: { voice_room_games: false },
+      gameSession,
+      membership: hostMembership,
+      profile,
+      room: gameRoom,
+    })).toMatchObject({ ok: false, status: 503 });
   });
 });

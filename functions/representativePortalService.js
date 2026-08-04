@@ -219,10 +219,15 @@ async function lookupRepresentativeReceipt({
     db.doc(`representativeTransferReversals/${referenceData.transferId}`).get(),
   ]);
   const transferData = transfer.data();
+  const reversalData = reversal.data();
+  const reversed = reversal.exists
+    && reversalData?.status === 'completed'
+    && reversalData?.publicReference === publicReference
+    && reversalData?.transferId === referenceData.transferId;
   const receipt = mapRepresentativeHistoryReceipt({
     ...transferData,
     publicReference,
-    status: reversal.exists ? 'reversed' : 'completed',
+    status: reversed ? 'reversed' : 'completed',
   });
   if (!transfer.exists || !receipt || transferData?.representativeUid !== session.uid) {
     return { errorCode: 'RECEIPT_NOT_FOUND' };
@@ -230,8 +235,8 @@ async function lookupRepresentativeReceipt({
   return {
     result: {
       ...receipt,
-      ...(reversal.exists && timestampMillis(reversal.data()?.createdAt) > 0
-        ? { reversedAt: new Date(timestampMillis(reversal.data().createdAt)).toISOString() }
+      ...(reversed && timestampMillis(reversalData?.createdAt) > 0
+        ? { reversedAt: new Date(timestampMillis(reversalData.createdAt)).toISOString() }
         : {}),
     },
   };

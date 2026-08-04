@@ -47,6 +47,18 @@ describe('public profile mapping', () => {
     }, 'u1')?.representativeBadgeActive).toBe(false);
   });
 
+  it('maps only bounded server-owned equipment cosmetic projections', () => {
+    expect(mapPublicUserProfile({
+      ...validProfile,
+      equippedCosmetics: {
+        chatBubble: { assetId: 'safe-bubble', assetVersionId: 'v1-123456789abc', itemId: 'safe-bubble-item' },
+        cosmeticBadge: { assetId: 'bad', assetVersionId: 'latest', itemId: 'bad-item' },
+      },
+    }, 'u1')?.equippedCosmetics).toEqual({
+      chatBubble: { assetId: 'safe-bubble', assetVersionId: 'v1-123456789abc', itemId: 'safe-bubble-item' },
+    });
+  });
+
   it('ignores malformed optional special IDs without invalidating the functional account ID', () => {
     expect(mapPublicUserProfile({ ...validProfile, specialId: '@ali' }, 'u1')).toMatchObject({
       publicId: '1234567',

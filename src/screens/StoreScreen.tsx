@@ -37,6 +37,9 @@ import {
 import { resolveStoreArtwork } from '../store/storeArtwork';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
+import { useVoiceRooms } from '../voice/useVoiceRooms';
+import { activeVoiceProviderConfig } from '../voice/activeVoiceProviderConfig';
+import { requestRoomThemeCommand } from '../voice/requestRoomThemeCommand';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Store'>;
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -48,7 +51,12 @@ const categories: Array<{
   subtitle: string;
 }> = [
   { key: 'avatar-frames', icon: { ios: 'person.crop.circle', android: 'account_circle', web: 'account_circle' }, label: 'إطارات الصورة', subtitle: 'حضور يميّز ملفك' },
-  { key: 'chat-themes', icon: { ios: 'paintpalette.fill', android: 'palette', web: 'palette' }, label: 'ثيمات الدردشة', subtitle: 'أجواء جديدة لمحادثاتك' },
+  { key: 'profile-skins', icon: { ios: 'person.text.rectangle.fill', android: 'badge', web: 'badge' }, label: 'خلفيات الملف', subtitle: 'خلفية داخل ملفك فقط' },
+  { key: 'chat-bubbles', icon: { ios: 'bubble.left.and.bubble.right.fill', android: 'chat_bubble', web: 'chat_bubble' }, label: 'فقاعات الدردشة', subtitle: 'مع بقاء النص واضحاً' },
+  { key: 'nameplates', icon: { ios: 'rectangle.and.pencil.and.ellipsis', android: 'label', web: 'label' }, label: 'لوحات الاسم', subtitle: 'اسم مقروء ومميز' },
+  { key: 'cosmetic-badges', icon: { ios: 'seal.fill', android: 'verified', web: 'verified' }, label: 'الشارات التجميلية', subtitle: 'منفصلة عن شارات الثقة' },
+  { key: 'seat-effects', icon: { ios: 'mic.circle.fill', android: 'mic', web: 'mic' }, label: 'تأثيرات المقعد', subtitle: 'تحت حالات الميكروفون' },
+  { key: 'chat-themes', icon: { ios: 'paintpalette.fill', android: 'palette', web: 'palette' }, label: 'سمات الغرف', subtitle: 'مظهر ومقاعد جديدة لغرفك' },
   { key: 'cars', icon: { ios: 'car.fill', android: 'directions_car', web: 'directions_car' }, label: 'السيارات', subtitle: 'مقتنيات تظهر بجانبك' },
   { key: 'game-items', icon: { ios: 'gamecontroller.fill', android: 'sports_esports', web: 'sports_esports' }, label: 'عناصر اللعبة', subtitle: 'غيّر مظهر وتجربة اللعب' },
   { key: 'custom-ids', icon: { ios: 'number.circle.fill', android: 'tag', web: 'tag' }, label: 'المعرّفات المميزة', subtitle: 'معرّفات رقمية فريدة' },
@@ -66,6 +74,7 @@ const mockWallet = {
 };
 
 export function StoreScreen({ navigation }: Props) {
+  const { rooms } = useVoiceRooms();
   const { width } = useWindowDimensions();
   const compact = width < 390;
   const [selectedCategory, setSelectedCategory] = useState<StoreCategory>();
@@ -127,6 +136,48 @@ export function StoreScreen({ navigation }: Props) {
     [catalogItems, selectedCategory],
   );
   async function purchase(item: CustomerStoreCatalogItem, currency: StoreCurrency) {
+    if (item.category === 'chat-themes') {
+      const ownedRooms = rooms.filter((room) => room.status === 'active' && (room.ownerUid || room.hostId) === room.localMember?.id);
+      if (!ownedRooms.length) {
+        Alert.alert('يلزم اختيار غرفة', 'أنشئ غرفة نشطة أو افتح غرفتك أولاً، ثم اشترِ السمة لها.');
+        return;
+      }
+      const purchaseForRoom = async (roomId: string) => {
+        setBusy(`${item.itemId}:${currency}`);
+        try {
+          await requestRoomThemeCommand({
+            action: 'purchase-room-theme',
+            applyTheme: true,
+            currency,
+            roomId,
+            themeId: item.itemId,
+          }, activeVoiceProviderConfig.liveKit);
+          setSelected(undefined);
+          Alert.alert('تم شراء سمة الغرفة', `تمت إضافة ${item.name.ar} إلى الغرفة وتطبيقها.`);
+          await load();
+        } catch (error) {
+          Alert.alert('تعذر إتمام الشراء', error instanceof Error ? error.message : 'تعذر شراء سمة الغرفة.');
+        } finally {
+          setBusy('');
+        }
+      };
+      if (ownedRooms.length === 1) {
+        await purchaseForRoom(ownedRooms[0].id);
+        return;
+      }
+      Alert.alert(
+        'اختر الغرفة',
+        'ستصبح السمة ملكاً للغرفة المختارة.',
+        [
+          ...ownedRooms.slice(0, 2).map((room) => ({
+            text: room.title,
+            onPress: () => void purchaseForRoom(room.id),
+          })),
+          { style: 'cancel', text: 'إلغاء' },
+        ],
+      );
+      return;
+    }
     if (isMockStoreItemId(item.itemId)) {
       setSelected(undefined);
       Alert.alert('عنصر تجريبي', 'تمت معاينة الشراء محلياً فقط، ولم يُخصم أي رصيد من حسابك.');
@@ -142,6 +193,10 @@ export function StoreScreen({ navigation }: Props) {
   }
 
   async function gift(item: CustomerStoreCatalogItem, currency: StoreCurrency, recipientPublicId: string) {
+    if (item.category === 'chat-themes') {
+      Alert.alert('الإهداء غير متاح', 'إهداء سمات الغرف غير مدعوم في الإصدار الأول.');
+      return;
+    }
     if (isMockStoreItemId(item.itemId)) {
       setSelected(undefined);
       Alert.alert('هدية تجريبية', `تمت محاكاة إرسال ${item.name.ar} إلى الحساب ${recipientPublicId} من دون خصم الرصيد.`);

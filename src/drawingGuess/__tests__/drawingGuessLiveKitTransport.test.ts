@@ -72,6 +72,55 @@ describe('requestDrawingGuessLiveKitConnectOptions', () => {
     );
   });
 
+  it('binds a voice-room launch to its isolated game session and Firebase identity', async () => {
+    const sessionOptions = {
+      ...connectOptions,
+      sessionId: 'rgs_session_000000000001',
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          gameSessionId: sessionOptions.sessionId,
+          participantId: sessionOptions.playerId,
+          serverUrl: 'wss://livekit.example.test',
+          token: 'token-1',
+          transportRoomId: 'vrg_1234',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(requestDrawingGuessLiveKitConnectOptions(
+      sessionOptions,
+      'https://token.example.test',
+      async () => 'id-token-1',
+    )).resolves.toMatchObject(sessionOptions);
+    const request = vi.mocked(globalThis.fetch).mock.calls[0][1];
+    expect(JSON.parse(String(request?.body))).toEqual({
+      roomId: 'DG-ROOM',
+      canPublishAudio: false,
+      gameSessionId: sessionOptions.sessionId,
+    });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          gameSessionId: sessionOptions.sessionId,
+          participantId: 'other-user',
+          serverUrl: 'wss://livekit.example.test',
+          token: 'token-2',
+          transportRoomId: 'vrg_1234',
+        }),
+        { status: 200 },
+      ),
+    );
+    await expect(requestDrawingGuessLiveKitConnectOptions(
+      sessionOptions,
+      'https://token.example.test',
+      async () => 'id-token-1',
+    )).rejects.toThrow('game transport identity did not match');
+  });
+
   it('reports token timeout, network, bad status, and malformed response errors', async () => {
     vi.useFakeTimers();
     vi.spyOn(globalThis, 'fetch').mockImplementation(

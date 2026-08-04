@@ -31,6 +31,8 @@ import type {
   RepresentativeStatusResult,
   RepresentativePortalTicketResult,
   RepresentativeTransferResult,
+  BlockMutationAction,
+  BlockMutationResult,
 } from './types';
 
 const functions = getFunctions(firebaseApp, 'us-central1');
@@ -85,6 +87,18 @@ export async function requestFriendMutation(
     action,
     payload: { targetUid },
     requestId: createSocialRequestId('friend'),
+    version: 1,
+  });
+}
+
+export async function requestBlockMutation(
+  action: BlockMutationAction,
+  targetUid: string,
+): Promise<SocialCommandResult<BlockMutationResult>> {
+  return callSocialCommand<SocialCommandRequest<BlockMutationAction, { targetUid: string }>, BlockMutationResult>({
+    action,
+    payload: { targetUid },
+    requestId: createSocialRequestId('block'),
     version: 1,
   });
 }

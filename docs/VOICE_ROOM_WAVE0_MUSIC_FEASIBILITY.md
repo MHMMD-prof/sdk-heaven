@@ -108,4 +108,9 @@ Do not modify the main voice client until the spike proves that microphone and m
 
 ## Wave 0 exit result
 
-The feasibility question is resolved for launch planning: shared music is **not technically proven in the current stack and therefore cannot block or enter the initial core release**. It remains scheduled as Wave 11 behind a dedicated flag and native proof gate.
+The feasibility question is resolved for launch planning: shared **device-file**
+LiveKit publication is **not proven** in the current Expo/LiveKit stack.
+
+Wave 11 ships a **catalog-sync control plane** (allowlisted HTTPS tracks + DJ
+lease) so shared music can operate without uploading user files. Arbitrary
+device-library → WebRTC track remains a native follow-up behind the same flag.

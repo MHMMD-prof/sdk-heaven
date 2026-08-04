@@ -2,8 +2,75 @@ const { canAdminPerformAction, getAdminPermissions, hasAdminClaim, resolveAdminR
 const { inspectPublicProfile, normalizeSearchName } = require('./socialProfileCore');
 const { mapStoreCatalogItem } = require('./storeCore');
 const { mapGiftCatalogItem } = require('./socialGiftsCore');
+const { normalizeRoomGiftPolicyUpdate } = require('./roomGiftPolicyCore');
 
-const ADMIN_DASHBOARD_ACTIONS = ['admin-settings', 'admin-settings-update', 'administrator-action', 'administrators', 'audit-detail', 'audit-events', 'audit-export', 'audit-summary', 'client-error', 'couple-dissolve', 'economy-export', 'economy-history', 'feature-flag-update', 'gift-catalog', 'gift-catalog-upsert', 'overview', 'report-action', 'report-detail', 'report-summary', 'representative-reversal', 'representative-update', 'reports', 'room-action', 'room-detail', 'room-summary', 'rooms', 'session', 'special-id-catalog', 'special-id-upsert', 'store-catalog', 'store-catalog-upsert', 'store-item-detail', 'store-summary', 'user-action', 'user-detail', 'user-history', 'user-note', 'user-summary', 'users', 'wallet-adjust', 'wallet-credit'];
+const ADMIN_DASHBOARD_ACTIONS = [
+  'admin-settings',
+  'admin-settings-update',
+  'administrator-action',
+  'administrators',
+  'attendance-outage-mutate',
+  'attendance-shadow',
+  'audit-detail',
+  'audit-events',
+  'audit-export',
+  'audit-summary',
+  'client-error',
+  'cosmetic-assets',
+  'cosmetic-assets-mutate',
+  'couple-dissolve',
+  'daily-login-campaign',
+  'daily-login-campaign-mutate',
+  'economy-export',
+  'economy-history',
+  'feature-flag-update',
+  'gift-catalog',
+  'gift-catalog-upsert',
+  'overview',
+  'payroll-mutate',
+  'payroll-overview',
+  'report-action',
+  'report-detail',
+  'report-summary',
+  'representative-operations',
+  'representative-override-update',
+  'representative-pin-reset',
+  'representative-policy-update',
+  'representative-reversal',
+  'representative-update',
+  'reports',
+  'rocket-campaign',
+  'rocket-campaign-mutate',
+  'room-target-campaign',
+  'room-target-campaign-mutate',
+  'room-target-member-hold',
+  'weekly-incentive-integrity',
+  'weekly-incentive-integrity-mutate',
+  'weekly-incentive-reconcile',
+  'room-action',
+  'room-detail',
+  'room-gift-policy-update',
+  'room-summary',
+  'room-theme',
+  'room-theme-mutate',
+  'rooms',
+  'session',
+  'special-id-catalog',
+  'special-id-upsert',
+  'store-catalog',
+  'store-catalog-upsert',
+  'store-item-detail',
+  'store-summary',
+  'user-action',
+  'user-detail',
+  'user-history',
+  'user-note',
+  'user-summary',
+  'users',
+  'voice-room-launch-status',
+  'wallet-adjust',
+  'wallet-credit',
+];
 const ADMIN_ROLES = ['owner', 'super-moderator', 'moderator', 'support', 'catalog-manager', 'auditor'];
 const APPROVED_ADMIN_FEATURE_FLAGS = ['usersDiscovery', 'friends', 'wallet', 'gifts', 'couples', 'pushNotifications', 'representativeTransfers'];
 const MAX_STORE_CATALOG_RESULTS = 50;
@@ -15,7 +82,7 @@ const ADMIN_AUDIT_ENTITY_TYPES = ['catalog', 'economy', 'report', 'room', 'syste
 const ADMIN_REPORT_ACTIONS = ['assign', 'escalate', 'note', 'reopen', 'resolve', 'triage'];
 const ADMIN_REPORT_SEVERITIES = ['low', 'medium', 'high', 'critical'];
 const ADMIN_REPORT_STATUSES = ['open', 'triage', 'resolved'];
-const ADMIN_ROOM_ACTIONS = ['close-room', 'mute-member', 'remove-member', 'reopen-room', 'transfer-host', 'unmute-member'];
+const ADMIN_ROOM_ACTIONS = ['clear-staff-lockdown', 'close-room', 'kick-everyone', 'mute-member', 'remove-member', 'reopen-room', 'reverse-ownership-transfer', 'staff-lockdown', 'transfer-host', 'unmute-member'];
 const ADMIN_ROOM_STATUSES = ['active', 'closed'];
 const MAX_REPORT_RESULTS = 25;
 const MAX_REPORT_FILTER_SCAN_RESULTS = 100;
@@ -26,6 +93,7 @@ const MAX_USER_SEARCH_SCAN_RESULTS = 100;
 const ADMIN_USER_ACTIONS = ['avatar-approve', 'avatar-reject', 'ban', 'force-sign-out', 'mute', 'note', 'suspend', 'unban', 'unmute', 'unsuspend', 'warn'];
 const ADMIN_USER_MODERATION_STATUSES = ['active', 'suspended', 'removed'];
 const ADMIN_USER_PROFILE_STATUSES = ['ready', 'missing', 'invalid'];
+const RECENT_ADMIN_AUTH_MAX_AGE_MS = 10 * 60 * 1000;
 
 function normalizeAdminDashboardBody(body = {}) {
   return {
@@ -61,13 +129,127 @@ function normalizeAdministratorAction(body = {}) {
   const requestId = typeof body.requestId === 'string' ? body.requestId.trim() : '';
   const role = typeof body.role === 'string' ? body.role.trim() : '';
   const targetUid = typeof body.targetUid === 'string' ? body.targetUid.trim().slice(0, 128) : '';
-  if (!['grant-role', 'change-role', 'remove-admin', 'revoke-sessions'].includes(action)) return { ok: false, status: 400, error: 'A valid administrator action is required.' };
+  const regionCodes = normalizeRegionCodes(body.regionCodes);
+  if (!['grant-role', 'change-role', 'remove-admin', 'revoke-sessions', 'set-region-scope'].includes(action)) {
+    return { ok: false, status: 400, error: 'A valid administrator action is required.' };
+  }
   if (action === 'grant-role' && !/^\S+@\S+\.\S+$/.test(email)) return { ok: false, status: 400, error: 'A valid existing account email is required.' };
   if (action !== 'grant-role' && !targetUid) return { ok: false, status: 400, error: 'targetUid is required.' };
   if (['grant-role', 'change-role'].includes(action) && !ADMIN_ROLES.includes(role)) return { ok: false, status: 400, error: 'A valid administrator role is required.' };
+  if (action === 'set-region-scope' && regionCodes === null) {
+    return { ok: false, status: 400, error: 'regionCodes must be an array of supported country codes.' };
+  }
   if (reason.length < 3) return { ok: false, status: 400, error: 'A reason with at least 3 characters is required.' };
   if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) return { ok: false, status: 400, error: 'A valid requestId is required.' };
-  return { ok: true, value: { action, email, reason, requestId, role, targetUid } };
+  return { ok: true, value: { action, email, reason, regionCodes: regionCodes || [], requestId, role, targetUid } };
+}
+
+function normalizeRegionCodes(value) {
+  if (!Array.isArray(value)) return null;
+  const { ROOM_COUNTRY_CODES } = require('./roomCommandCore');
+  const codes = [...new Set(value
+    .map((item) => typeof item === 'string' ? item.trim().toUpperCase() : '')
+    .filter((code) => ROOM_COUNTRY_CODES.includes(code)))];
+  if (codes.length !== value.filter((item) => typeof item === 'string' && item.trim()).length) return null;
+  return codes;
+}
+
+function resolveOperatorRegionScope(decodedToken, operatorProfile) {
+  const role = resolveAdminRole(decodedToken);
+  if (role === 'owner') {
+    return { ok: true, role, regionCodes: null };
+  }
+  if (role !== 'super-moderator') {
+    return { ok: true, role, regionCodes: null };
+  }
+  if (
+    !operatorProfile
+    || operatorProfile.uid !== decodedToken.uid
+    || operatorProfile.role !== 'super-moderator'
+    || operatorProfile.status !== 'active'
+    || !Array.isArray(operatorProfile.regionCodes)
+    || operatorProfile.regionCodes.length === 0
+  ) {
+    return { ok: false, status: 403, error: 'Super Moderator region scope is missing or inactive.' };
+  }
+  const regionCodes = [...new Set(operatorProfile.regionCodes
+    .map((value) => typeof value === 'string' ? value.trim().toUpperCase() : '')
+    .filter(Boolean))];
+  if (regionCodes.length === 0) {
+    return { ok: false, status: 403, error: 'Super Moderator region scope is missing or inactive.' };
+  }
+  return { ok: true, role, regionCodes };
+}
+
+function assertFreshAdminAuth(decodedToken, nowMs = Date.now()) {
+  const authTimeMs = Number(decodedToken?.auth_time) * 1000;
+  if (
+    !Number.isFinite(authTimeMs)
+    || authTimeMs > nowMs + 30_000
+    || nowMs - authTimeMs > RECENT_ADMIN_AUTH_MAX_AGE_MS
+  ) {
+    return {
+      ok: false,
+      status: 401,
+      code: 'FRESH_AUTH_REQUIRED',
+      error: 'Fresh authentication is required for this action.',
+    };
+  }
+  return { ok: true };
+}
+
+function assertAdminTargetHierarchy(actorRole, targetOperatorProfile, targetUid) {
+  if (
+    !targetOperatorProfile
+    || targetOperatorProfile.status === 'revoked'
+  ) {
+    return { ok: true };
+  }
+  if (
+    actorRole === 'super-moderator'
+    && ['owner', 'super-moderator'].includes(targetOperatorProfile.role)
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      code: 'TARGET_PROTECTED',
+      error: 'Super Moderators cannot act on the Platform Owner or another Super Moderator.',
+    };
+  }
+  if (actorRole === 'owner' && targetOperatorProfile.role === 'owner') {
+    return {
+      ok: false,
+      status: 403,
+      code: 'TARGET_PROTECTED',
+      error: 'Platform Owners cannot moderate another Platform Owner through regional tools.',
+    };
+  }
+  return { ok: true };
+}
+
+function assertRoomInOperatorScope(scope, room) {
+  if (!scope.ok) return scope;
+  if (!scope.regionCodes) return { ok: true };
+  const countryCode = typeof room?.countryCode === 'string' ? room.countryCode.trim().toUpperCase() : '';
+  if (!scope.regionCodes.includes(countryCode)) {
+    return { ok: false, status: 403, error: 'This room is outside the operator region scope.', code: 'REGION_SCOPE_DENIED' };
+  }
+  return { ok: true };
+}
+
+function assertUserInOperatorScope(scope, userRow) {
+  if (!scope.ok) return scope;
+  if (!scope.regionCodes) return { ok: true };
+  const countryCode = typeof userRow?.countryCode === 'string' ? userRow.countryCode.trim().toUpperCase() : '';
+  if (!countryCode || !scope.regionCodes.includes(countryCode)) {
+    return { ok: false, status: 403, error: 'This user is outside the operator region scope.', code: 'REGION_SCOPE_DENIED' };
+  }
+  return { ok: true };
+}
+
+function filterRowsByOperatorScope(rows, scope, countryKey = 'countryCode') {
+  if (!scope.ok || !scope.regionCodes) return rows;
+  return rows.filter((row) => scope.regionCodes.includes(String(row?.[countryKey] || '').toUpperCase()));
 }
 
 function normalizeAdminFeatureFlagUpdate(body = {}) {
@@ -75,11 +257,13 @@ function normalizeAdminFeatureFlagUpdate(body = {}) {
   const flag = typeof body.flag === 'string' ? body.flag.trim() : '';
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 300) : '';
   const requestId = typeof body.requestId === 'string' ? body.requestId.trim() : '';
+  const expectedUpdatedAt = typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt.trim() : '';
   if (!APPROVED_ADMIN_FEATURE_FLAGS.includes(flag)) return { ok: false, status: 400, error: 'This feature flag is not approved for dashboard management.' };
   if (typeof enabled !== 'boolean') return { ok: false, status: 400, error: 'enabled must be a boolean.' };
   if (reason.length < 3) return { ok: false, status: 400, error: 'A reason with at least 3 characters is required.' };
+  if (expectedUpdatedAt !== 'missing' && !Number.isFinite(Date.parse(expectedUpdatedAt))) return { ok: false, status: 400, error: 'A current feature flag revision is required.' };
   if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) return { ok: false, status: 400, error: 'A valid requestId is required.' };
-  return { ok: true, value: { enabled, flag, reason, requestId } };
+  return { ok: true, value: { enabled, expectedUpdatedAt: expectedUpdatedAt === 'missing' ? 'missing' : new Date(expectedUpdatedAt).toISOString(), flag, reason, requestId } };
 }
 
 function normalizeAdminClientError(body = {}) {
@@ -199,7 +383,7 @@ function normalizeAdminStoreCatalogQuery(body = {}) {
     ? Math.min(rawLimit, MAX_STORE_CATALOG_RESULTS)
     : MAX_STORE_CATALOG_RESULTS;
   const availability = typeof body.availability === 'string' && ['available', 'disabled', 'unavailable'].includes(body.availability.trim()) ? body.availability.trim() : '';
-  const category = typeof body.category === 'string' && ['game-items', 'chat-themes', 'avatar-frames', 'cars', 'custom-ids'].includes(body.category.trim()) ? body.category.trim() : '';
+  const category = typeof body.category === 'string' && ['game-items', 'chat-themes', 'avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects', 'cars', 'custom-ids'].includes(body.category.trim()) ? body.category.trim() : '';
   const cursor = typeof body.cursor === 'string' ? body.cursor.trim().slice(0, 512) : '';
   const search = typeof body.search === 'string' ? body.search.trim().toLowerCase().slice(0, 100) : '';
   const status = typeof body.status === 'string' && ['available', 'disabled', 'sold'].includes(body.status.trim()) ? body.status.trim() : '';
@@ -408,8 +592,11 @@ function normalizeAdminRoomAction(body = {}) {
     return { ok: false, status: 400, error: 'roomId is required.' };
   }
 
-  if (['mute-member', 'remove-member', 'transfer-host', 'unmute-member'].includes(action) && !targetUid) {
+  if (['mute-member', 'remove-member', 'reverse-ownership-transfer', 'transfer-host', 'unmute-member'].includes(action) && !targetUid) {
     return { ok: false, status: 400, error: 'targetUid is required.' };
+  }
+  if (['staff-lockdown', 'kick-everyone', 'clear-staff-lockdown'].includes(action) && reason.length < 4) {
+    return { ok: false, status: 400, error: 'A structured reason with at least 4 characters is required.' };
   }
   if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) return { ok: false, status: 400, error: 'A valid requestId is required.' };
   if (reason.length < 2) return { ok: false, status: 400, error: 'A reason with at least 2 characters is required.' };
@@ -569,6 +756,7 @@ function mapAdminReportDocument(id, data = {}) {
   return {
     assignedTo: typeof data.assignedTo === 'string' ? data.assignedTo.trim() : '',
     contentExcerpt: typeof data.contentExcerpt === 'string' ? data.contentExcerpt.trim().slice(0, 1000) : '',
+    countryCode: typeof data.countryCode === 'string' ? data.countryCode.trim().toUpperCase().slice(0, 2) : '',
     createdAt: readTimestampIso(data.createdAt),
     evidence: mapAdminReportEvidence(data.evidence, data.evidenceUrls),
     escalatedAt: readTimestampIso(data.escalatedAt),
@@ -632,6 +820,11 @@ function mapAdminAuditEventDocument(id, data = {}) {
     actorUid: typeof data.actorUid === 'string' ? data.actorUid.trim() : '',
     assignedTo: typeof data.assignedTo === 'string' ? data.assignedTo.trim() : '',
     createdAt: readTimestampIso(data.createdAt),
+    countryCode: typeof data.countryCode === 'string'
+      ? data.countryCode.trim().toUpperCase().slice(0, 2)
+      : typeof data.regionCode === 'string'
+        ? data.regionCode.trim().toUpperCase().slice(0, 2)
+        : '',
     eventPath: typeof data.eventPath === 'string' ? data.eventPath.trim() : '',
     entityId: entity.id,
     entityType: entity.type,
@@ -856,6 +1049,7 @@ module.exports = {
   filterAdminSpecialIdRows,
   filterAdminStoreRows,
   filterAdminUserRows,
+  filterRowsByOperatorScope,
   mapAdminAuditEventDocument,
   mapAdminReportDocument,
   mapAdminRoomDocument,
@@ -868,6 +1062,7 @@ module.exports = {
   normalizeAdminAuditLookup,
   normalizeAdminClientError,
   normalizeAdminFeatureFlagUpdate,
+  normalizeRoomGiftPolicyUpdate,
   normalizeAdministratorAction,
   normalizeAdminSettingsUpdate,
   normalizeAdminCoupleDissolve,
@@ -887,5 +1082,11 @@ module.exports = {
   normalizeAdminEconomyExport,
   normalizeAdminStoreItemLookup,
   normalizeAdminDashboardBody,
+  normalizeRegionCodes,
+  assertAdminTargetHierarchy,
+  assertFreshAdminAuth,
+  assertRoomInOperatorScope,
+  assertUserInOperatorScope,
   resolveAdminDashboardRequest,
+  resolveOperatorRegionScope,
 };

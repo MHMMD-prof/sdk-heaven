@@ -130,6 +130,9 @@ export function UserProfileScreen({ navigation, route }: UserProfileScreenProps)
 
   return (
     <PublicProfilePage
+      chatAction={flags.directMessages && Boolean(user?.uid) && user?.uid !== route.params.uid ? {
+        onPress: () => navigation.navigate('DirectChat', { source: 'profile', targetUid: route.params.uid }),
+      } : undefined}
       coupleAction={showCoupleAction ? {
         disabled: coupleBusy || coupleStatusLoading || coupleUnavailable,
         label: coupleActionLabel(coupleStatus, coupleBusy || coupleStatusLoading, coupleUnavailable),

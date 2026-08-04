@@ -1,3 +1,5 @@
+import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
+
 export type VoiceRoomType = 'voice' | 'game';
 export type RoomCountryCode =
   | 'IQ'
@@ -34,8 +36,13 @@ export type VoiceRoomMember = {
   role?: VoiceRoomMemberRole;
   status?: VoiceRoomMemberStatus;
   canPublishAudio?: boolean;
+  avatarFrameAssetUrl?: string;
+  avatarFrameAssetId?: string;
+  avatarFrameAssetVersionId?: string;
+  avatarFrameItemId?: string;
   authorityRole?: 'owner' | 'moderator' | 'member';
   representativeBadgeActive?: boolean;
+  equipmentCosmetics?: EquipmentCosmetics;
   seatId?: string | null;
   privileges?: {
     canManageMusic: boolean;
@@ -61,6 +68,9 @@ export type VoiceRoom = {
   schemaVersion?: 1 | 2;
   revision?: number;
   ownershipRevision?: number;
+  pendingOwnershipTransferId?: string;
+  pendingOwnershipTransferExpiresAtMs?: number;
+  ownershipTransferCooldownUntilMs?: number;
   moderatorCount?: number;
   audioLockdown?: boolean;
   seatTargetCount?: 5 | 10 | 15 | 20;

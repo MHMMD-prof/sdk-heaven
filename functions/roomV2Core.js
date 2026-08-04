@@ -48,7 +48,7 @@ function analyzeRoomV2Document(data, roomId) {
     speakerCount: Number.isInteger(data.speakerCount) && data.speakerCount >= 0 ? data.speakerCount : 0,
     announcement: typeof data.announcement === 'string' && data.announcement.length <= 160 ? data.announcement : '',
     welcomeMessage: typeof data.welcomeMessage === 'string' && data.welcomeMessage.length <= 200 ? data.welcomeMessage : '',
-    themeId: ['midnight', 'royal', 'ocean', 'emerald'].includes(data.themeId) ? data.themeId : 'midnight',
+    themeId: normalizeRoomThemeId(data.themeId),
     chatMode: ['everyone', 'followers', 'off'].includes(data.chatMode) ? data.chatMode : 'everyone',
     slowModeSeconds: [0, 5, 10, 30, 60].includes(data.slowModeSeconds) ? data.slowModeSeconds : 0,
     historyVisibility: ['everyone', 'after-join', 'hidden'].includes(data.historyVisibility)
@@ -66,6 +66,14 @@ function analyzeRoomV2Document(data, roomId) {
   const ready = Object.entries(patch).every(([key, value]) => deepEqual(data[key], value));
 
   return { ok: true, status: ready ? 'ready' : 'migrate', ownerUid, patch };
+}
+
+function normalizeRoomThemeId(value) {
+  if (value === 'royal') return 'royal-theater';
+  if (['midnight', 'ocean', 'emerald'].includes(value)) return 'majlis-default';
+  return typeof value === 'string' && /^[a-z0-9][a-z0-9-]{2,63}$/.test(value)
+    ? value
+    : 'majlis-default';
 }
 
 function analyzeRoomMemberV2Document(data, uid, ownerUid) {

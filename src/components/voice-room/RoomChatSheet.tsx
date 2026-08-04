@@ -14,12 +14,18 @@ import {
 
 import { colors, radius, spacing, typography } from '../../theme';
 import { RoomChatMessage } from '../../voice/roomChat';
+import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
+import { AvatarPresentation } from '../AvatarPresentation';
+import { EquipmentCosmeticAsset } from '../EquipmentCosmeticAsset';
+import { useEquipmentCosmetics } from '../../social/useEquipmentCosmetics';
+import type { EquipmentCosmetics } from '../../cosmetics/equipmentCosmetics';
 import { RoomSheet } from './VoiceRoomSheets';
 
 type RoomChatSheetProps = {
   canManage: boolean;
   canSend: boolean;
   chatEnabled: boolean;
+  cosmeticsFlags: CosmeticsFeatureFlags;
   currentUid?: string;
   errorMessage: string;
   hasOlderMessages: boolean;
@@ -29,6 +35,7 @@ type RoomChatSheetProps = {
   onClose: () => void;
   onDelete: (message: RoomChatMessage) => void;
   onLoadOlder: () => void;
+  onOpenProfile: (uid: string) => void;
   onPin: (message: RoomChatMessage) => void;
   onReport: (message: RoomChatMessage) => void;
   onRetry: (message: RoomChatMessage) => void;
@@ -42,6 +49,7 @@ export function RoomChatSheet({
   canManage,
   canSend,
   chatEnabled,
+  cosmeticsFlags,
   currentUid,
   errorMessage,
   hasOlderMessages,
@@ -51,6 +59,7 @@ export function RoomChatSheet({
   onClose,
   onDelete,
   onLoadOlder,
+  onOpenProfile,
   onPin,
   onReport,
   onRetry,
@@ -61,6 +70,7 @@ export function RoomChatSheet({
 }: RoomChatSheetProps) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const equipmentByUid = useEquipmentCosmetics(messages.map((message) => message.senderUid));
   const pinnedMessage = useMemo(
     () => messages.find((message) => message.id === pinnedMessageId && message.status === 'active'),
     [messages, pinnedMessageId],
@@ -120,11 +130,14 @@ export function RoomChatSheet({
             <MessageRow
               canDelete={message.senderUid === currentUid || canManage}
               canManage={canManage}
+              cosmeticsFlags={cosmeticsFlags}
               currentUid={currentUid}
               key={message.id}
               message={message}
+              equipment={equipmentByUid[message.senderUid]}
               onBlock={() => onBlock(message)}
               onDelete={() => onDelete(message)}
+              onOpenProfile={() => onOpenProfile(message.senderUid)}
               onPin={() => onPin(message)}
               onReport={() => onReport(message)}
               onRetry={() => onRetry(message)}
@@ -187,10 +200,13 @@ export function RoomChatSheet({
 function MessageRow({
   canDelete,
   canManage,
+  cosmeticsFlags,
   currentUid,
   message,
+  equipment,
   onBlock,
   onDelete,
+  onOpenProfile,
   onPin,
   onReport,
   onRetry,
@@ -199,10 +215,13 @@ function MessageRow({
 }: {
   canDelete: boolean;
   canManage: boolean;
+  cosmeticsFlags: CosmeticsFeatureFlags;
   currentUid?: string;
   message: RoomChatMessage;
+  equipment?: EquipmentCosmetics;
   onBlock: () => void;
   onDelete: () => void;
+  onOpenProfile: () => void;
   onPin: () => void;
   onReport: () => void;
   onRetry: () => void;
@@ -214,6 +233,7 @@ function MessageRow({
   const deleted = message.status === 'deleted';
   return (
     <View style={[styles.message, isOwn && styles.ownMessage, isNotice && styles.noticeMessage]}>
+      {!isNotice ? <EquipmentCosmeticAsset category="chat-bubble" enabled={cosmeticsFlags.chatBubbles} flags={cosmeticsFlags} projection={equipment?.chatBubble} style={styles.chatBubbleCosmetic} /> : null}
       <View style={styles.messageHeader}>
         <Text style={styles.messageStatus}>
           {message.deliveryStatus === 'pending'
@@ -224,9 +244,23 @@ function MessageRow({
                 ? 'مثبتة'
                 : ''}
         </Text>
+        <View style={styles.senderNameShell}>
+          {!isNotice ? <EquipmentCosmeticAsset category="nameplate" enabled={cosmeticsFlags.nameplates} flags={cosmeticsFlags} projection={equipment?.nameplate} style={styles.senderNameplate} /> : null}
         <Text numberOfLines={1} style={styles.sender}>
           {isNotice ? 'إشعار الغرفة' : message.senderDisplayName || 'عضو'}
         </Text>
+          {!isNotice ? <EquipmentCosmeticAsset category="cosmetic-badge" enabled={cosmeticsFlags.cosmeticBadges} flags={cosmeticsFlags} projection={equipment?.cosmeticBadge} style={styles.senderCosmeticBadge} /> : null}
+        </View>
+        {!isNotice ? (
+          <Pressable accessibilityRole="button" onPress={onOpenProfile} style={styles.senderAvatarButton}>
+            <AvatarPresentation
+              flags={cosmeticsFlags}
+              frame={message.senderAvatarFrame}
+              label={message.senderAvatarLabel || message.senderDisplayName}
+              size={30}
+            />
+          </Pressable>
+        ) : null}
       </View>
       <Text style={[styles.messageText, deleted && styles.deletedText]}>
         {deleted ? 'تم حذف هذه الرسالة.' : message.text}
@@ -324,6 +358,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: 1,
+    overflow: 'hidden',
     padding: spacing.sm,
   },
   ownMessage: {
@@ -349,6 +384,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: typography.weights.black,
     textAlign: 'right',
+  },
+  chatBubbleCosmetic: { bottom: 0, left: 0, opacity: 0.46, position: 'absolute', right: 0, top: 0 },
+  senderNameShell: { alignItems: 'center', flex: 1, flexDirection: 'row-reverse', position: 'relative' },
+  senderNameplate: { bottom: 0, left: 0, opacity: 0.65, position: 'absolute', right: 0, top: 0 },
+  senderCosmeticBadge: { height: 20, width: 20 },
+  senderAvatarButton: {
+    marginLeft: spacing.xs,
   },
   messageText: {
     color: colors.text,

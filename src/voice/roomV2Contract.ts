@@ -1,3 +1,6 @@
+import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import { readProjectedAvatarFrame } from '../cosmetics/avatarFrameProjection';
+
 export const ROOM_SCHEMA_VERSION = 2 as const;
 export const MAX_SUPPORTED_ROOM_SCHEMA_VERSION = ROOM_SCHEMA_VERSION;
 export const ROOM_SEAT_COUNTS = [5, 10, 15, 20] as const;
@@ -7,7 +10,7 @@ export type SupportedRoomSchemaVersion = 1 | typeof ROOM_SCHEMA_VERSION;
 export type RoomAuthorityRole = 'owner' | 'moderator' | 'member';
 export type RoomSeatMode = 'open' | 'request' | 'invite' | 'locked';
 export type RoomAvailability = 'active' | 'suspended' | 'removed';
-export type RoomThemeId = 'midnight' | 'royal' | 'ocean' | 'emerald';
+export type RoomThemeId = import('./roomThemeContract').RoomThemeId;
 export type RoomChatMode = 'everyone' | 'followers' | 'off';
 export type RoomHistoryVisibility = 'everyone' | 'after-join' | 'hidden';
 export type RoomKeywordFilterMode = 'off' | 'standard' | 'strict';
@@ -42,6 +45,7 @@ export type RoomMessageDocument = {
   senderUid: string;
   senderDisplayName: string;
   senderAvatarLabel: string;
+  senderAvatarFrame?: AvatarFrameProjection;
   kind: RoomMessageKind;
   text: string;
   replyToMessageId?: string;
@@ -68,7 +72,7 @@ export function isRoomAvailability(value: unknown): value is RoomAvailability {
 }
 
 export function isRoomThemeId(value: unknown): value is RoomThemeId {
-  return value === 'midnight' || value === 'royal' || value === 'ocean' || value === 'emerald';
+  return typeof value === 'string' && /^[a-z0-9][a-z0-9-]{2,63}$/.test(value);
 }
 
 export function isRoomChatMode(value: unknown): value is RoomChatMode {
@@ -185,6 +189,9 @@ export function mapRoomMessageDocument(data: unknown, id?: string): RoomMessageD
     senderUid: data.senderUid,
     senderDisplayName: typeof data.senderDisplayName === 'string' ? data.senderDisplayName : '',
     senderAvatarLabel: typeof data.senderAvatarLabel === 'string' ? data.senderAvatarLabel : '',
+    ...(readProjectedAvatarFrame(data.senderAvatarFrame)
+      ? { senderAvatarFrame: readProjectedAvatarFrame(data.senderAvatarFrame) }
+      : {}),
     kind: data.kind,
     text: data.text,
     ...(isNonEmptyString(data.replyToMessageId) ? { replyToMessageId: data.replyToMessageId } : {}),

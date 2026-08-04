@@ -1,0 +1,8 @@
+.payroll-panel{display:grid;gap:16px;margin-block:18px 28px}
+.payroll-heading{align-items:start;background:radial-gradient(circle at 12% 10%,rgba(202,42,54,.14),transparent 35%),linear-gradient(135deg,rgba(32,20,22,.98),rgba(17,15,15,.98));border:1px solid rgba(205,162,86,.3);border-radius:18px;display:flex;gap:18px;justify-content:space-between;padding:20px}
+.payroll-heading h2{margin:3px 0 7px}.payroll-heading p{color:var(--text-muted);margin:0;max-width:850px}
+.payroll-plan-grid{display:grid;gap:12px;grid-template-columns:repeat(3,minmax(0,1fr))}.payroll-plan-grid .primary-button{align-self:end}
+.payroll-weekdays{display:flex;flex-wrap:wrap;gap:7px 12px;grid-column:1/-1}.payroll-weekdays>span{color:var(--text-muted);flex-basis:100%;font-size:.85rem}.payroll-weekdays label,.payroll-enabled{align-items:center;display:flex;gap:6px}
+.payroll-roster{display:grid;gap:9px}.payroll-roster-row{align-items:center;background:rgba(255,255,255,.025);border:1px solid rgba(205,162,86,.14);border-radius:12px;display:grid;gap:12px;grid-template-columns:minmax(220px,1fr) auto minmax(260px,auto);padding:12px}.payroll-roster-row>div:first-child{display:grid;gap:4px}.payroll-roster-row small{color:var(--text-muted)}.payroll-row-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:end}
+@media(max-width:900px){.payroll-plan-grid{grid-template-columns:1fr 1fr}.payroll-roster-row{grid-template-columns:1fr auto}.payroll-row-actions{grid-column:1/-1;justify-content:start}}
+@media(max-width:560px){.payroll-heading{display:grid}.payroll-plan-grid,.payroll-roster-row{grid-template-columns:1fr}}

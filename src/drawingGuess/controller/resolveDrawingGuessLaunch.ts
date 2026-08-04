@@ -1,4 +1,5 @@
 import { createDrawingGuessRoomCode } from './createDrawingGuessRoomCode';
+import { createDrawingGuessPlayerId } from './createDrawingGuessIds';
 import {
   DrawingGuessRouteMode,
   DrawingGuessRouteParams,
@@ -6,8 +7,11 @@ import {
 } from './drawingGuessControllerTypes';
 
 export type ResolvedDrawingGuessLaunch = {
+  displayName: string;
   roomCode: string;
   mode: DrawingGuessRouteMode;
+  playerId: string;
+  sessionId: string;
   source: DrawingGuessRouteSource;
   title: string;
   subtitle: string;
@@ -20,11 +24,17 @@ export const resolveDrawingGuessLaunch = (
   const mode =
     params?.mode ?? (source === 'voice-room' && params?.roomId ? 'online' : 'local-simulated');
   const roomCode = params?.roomId ?? createDrawingGuessRoomCode();
+  const playerId = params?.playerId?.trim() || createDrawingGuessPlayerId('local');
+  const displayName = params?.displayName?.trim() || 'You';
+  const sessionId = params?.sessionId?.trim() || '';
 
   if (source === 'voice-room') {
     return {
       roomCode,
+      displayName,
       mode,
+      playerId,
+      sessionId,
       source,
       title: `Voice room ${roomCode}`,
       subtitle:
@@ -36,7 +46,10 @@ export const resolveDrawingGuessLaunch = (
 
   return {
     roomCode,
+    displayName,
     mode,
+    playerId,
+    sessionId,
     source,
     title: mode === 'online' ? `Online room ${roomCode}` : 'Drawing Guess',
     subtitle:

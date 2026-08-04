@@ -199,6 +199,59 @@ describe('roomSeatService', () => {
     expect(await reconcileRoomPresenceCounts({ clock, db, fieldValue })).toMatchObject({ repaired: 1 });
     expect(db.data.get('rooms/room-1')).toMatchObject({ participantCount: 1, speakerCount: 1 });
   });
+
+  it('does not let old stale presence records starve newly expired leases', async () => {
+    const db = seededDb();
+    const clock = fakeClock();
+    await command(db, clock, 'member-1', {
+      action: 'claim-seat', requestId: 'seat_claim_presence_02', seatId: '05',
+    });
+    db.data.set('rooms/room-1/presence/aaa-stale', {
+      leaseExpiresAt: clock.now - 10_000,
+      sessionId: 'presence-stale-user',
+      status: 'stale',
+      uid: 'aaa-stale',
+    });
+    db.data.set('rooms/room-1/presence/member-1', {
+      leaseExpiresAt: clock.now - 1,
+      sessionId: 'presence-member-1',
+      status: 'online',
+      uid: 'member-1',
+    });
+
+    expect(await recoverStaleRoomPresence({
+      clock,
+      db,
+      fieldValue,
+      limit: 1,
+    })).toMatchObject({ reserved: 1, scanned: 1, stale: 1 });
+    expect(db.data.get('rooms/room-1/presence/member-1')).toMatchObject({ status: 'stale' });
+  });
+
+  it('advances the room-count reconciliation cursor across bounded pages', async () => {
+    const db = seededDb({ participantCount: 99, speakerCount: 99 });
+    const clock = fakeClock();
+    db.data.set('rooms/room-2', {
+      availability: 'active',
+      participantCount: 99,
+      speakerCount: 99,
+      status: 'active',
+    });
+
+    expect(await reconcileRoomPresenceCounts({
+      clock,
+      db,
+      fieldValue,
+      limit: 1,
+    })).toMatchObject({ lastRoomId: 'room-1', scanned: 1 });
+    expect(await reconcileRoomPresenceCounts({
+      clock,
+      db,
+      fieldValue,
+      limit: 1,
+    })).toMatchObject({ lastRoomId: 'room-2', scanned: 1 });
+    expect(db.data.get('rooms/room-2')).toMatchObject({ participantCount: 0, speakerCount: 0 });
+  });
 });
 
 function command(db, clock, uid, body) {
@@ -267,6 +320,7 @@ function createFakeDb() {
         data.set(path, options?.merge ? { ...(data.get(path) || {}), ...value } : value);
         return Promise.resolve();
       },
+      get() { return Promise.resolve(snapshot(ref(path))); },
     };
   };
   const collection = (path) => {
@@ -290,17 +344,24 @@ function createFakeDb() {
     .filter((candidate) => candidate.startsWith(`${path}/`) && candidate.split('/').length === path.split('/').length + 1)
     .map((candidate) => snapshot(ref(candidate)));
   const querySnapshot = (docs) => ({ docs, empty: docs.length === 0, size: docs.length });
-  const makeQuery = (source, filters = [], max = Infinity) => ({
-    where(field, operator, value) { return makeQuery(source, [...filters, { field, operator, value }], max); },
-    limit(value) { return makeQuery(source, filters, value); },
+  const makeQuery = (source, filters = [], max = Infinity, ordered = false, startAfterId = '') => ({
+    where(field, operator, value) {
+      return makeQuery(source, [...filters, { field, operator, value }], max, ordered, startAfterId);
+    },
+    orderBy() { return makeQuery(source, filters, max, true, startAfterId); },
+    startAfter(value) { return makeQuery(source, filters, max, ordered, String(value || '')); },
+    limit(value) { return makeQuery(source, filters, value, ordered, startAfterId); },
     get() {
-      const docs = source().filter((document) => filters.every((filter) => {
+      let docs = source().filter((document) => filters.every((filter) => {
         const actual = document.data()?.[filter.field];
         if (filter.operator === '==') return actual === filter.value;
         if (filter.operator === 'in') return Array.isArray(filter.value) && filter.value.includes(actual);
         if (filter.operator === '<=') return actual != null && actual <= filter.value;
         return false;
-      })).slice(0, max);
+      }));
+      if (ordered) docs = docs.sort((left, right) => left.id.localeCompare(right.id));
+      if (startAfterId) docs = docs.filter((document) => document.id > startAfterId);
+      docs = docs.slice(0, max);
       return Promise.resolve(querySnapshot(docs));
     },
   });

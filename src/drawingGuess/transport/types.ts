@@ -29,6 +29,7 @@ export type DrawingGuessConnectOptions = {
   playerId: string;
   displayName: string;
   matchId?: string;
+  sessionId?: string;
 };
 
 export type DrawingGuessConnection = {

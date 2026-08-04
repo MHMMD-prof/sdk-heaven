@@ -71,8 +71,9 @@ describe('adminClaimsCore', () => {
   });
 
   it('treats only boolean true as admin authority', () => {
-    expect(hasAdminClaim({ [ADMIN_CLAIM]: true })).toBe(true);
-    expect(resolveAdminRole({ [ADMIN_CLAIM]: true })).toBe('owner');
+    expect(hasAdminClaim({ [ADMIN_CLAIM]: true })).toBe(false);
+    expect(resolveAdminRole({ [ADMIN_CLAIM]: true })).toBe('');
+    expect(hasAdminClaim({ [ADMIN_CLAIM]: true, [ADMIN_ROLE_CLAIM]: 'owner' })).toBe(true);
     expect(resolveAdminRole({ [ADMIN_CLAIM]: true, [ADMIN_ROLE_CLAIM]: 'moderator' })).toBe('moderator');
     expect(hasAdminClaim({ [ADMIN_CLAIM]: true, [ADMIN_ROLE_CLAIM]: 'unknown' })).toBe(false);
     expect(hasAdminClaim({ [ADMIN_CLAIM]: 'true' })).toBe(false);
@@ -92,7 +93,19 @@ describe('adminClaimsCore', () => {
     expect(canAdminPerformAction('auditor', 'user-history')).toBe(true);
     expect(canAdminPerformAction('support', 'user-history')).toBe(true);
     expect(getAdminPermissions('auditor')).not.toContain('audit:manage');
+    expect(getAdminPermissions('auditor')).toContain('incentives:view');
+    expect(getAdminPermissions('auditor')).toContain('payroll:view');
+    expect(getAdminPermissions('auditor')).not.toContain('incentives:manage');
+    expect(getAdminPermissions('auditor')).not.toContain('payroll:manage');
+    expect(getAdminPermissions('owner')).toEqual(expect.arrayContaining([
+      'incentives:view',
+      'incentives:manage',
+      'payroll:view',
+      'payroll:manage',
+    ]));
     expect(getAdminPermissions('super-moderator')).toContain('rooms:manage');
+    expect(getAdminPermissions('super-moderator')).not.toContain('incentives:view');
+    expect(getAdminPermissions('super-moderator')).not.toContain('payroll:manage');
     expect(getAdminPermissions('super-moderator')).not.toContain('admins:manage');
     expect(createAdminClaims({}, true, 'super-moderator')).toMatchObject({
       admin: true,
@@ -106,8 +119,9 @@ describe('adminClaimsCore', () => {
   });
 
   it('keeps sensitive mutation boundaries out of read-only roles', () => {
-    const sensitiveActions = ['user-action', 'room-action', 'store-catalog-upsert', 'wallet-adjust', 'representative-reversal', 'feature-flag-update'];
+    const sensitiveActions = ['user-action', 'room-action', 'store-catalog-upsert', 'wallet-adjust', 'representative-reversal', 'feature-flag-update', 'room-gift-policy-update', 'daily-login-campaign-mutate'];
     for (const action of sensitiveActions) expect(canAdminPerformAction('auditor', action), action).toBe(false);
+    expect(canAdminPerformAction('auditor', 'daily-login-campaign')).toBe(true);
     expect(canAdminPerformAction('support', 'user-note')).toBe(true);
     expect(canAdminPerformAction('support', 'wallet-adjust')).toBe(false);
     expect(canAdminPerformAction('catalog-manager', 'report-action')).toBe(false);

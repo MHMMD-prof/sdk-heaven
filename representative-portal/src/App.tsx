@@ -9,6 +9,7 @@ import {
   PUBLIC_REFERENCE_PATTERN,
   type PortalCurrency,
   type PortalReceipt,
+  type PortalStatus,
 } from './contracts';
 import { canOpenReview, initialPortalState, portalReducer } from './machine';
 import { createReceiptImageDataUrl, createSafeReceiptText, currencyLabel, formatAmount, receiptFromTransfer } from './receipt';
@@ -26,6 +27,7 @@ export function App() {
   const [pinSetupBusy, setPinSetupBusy] = useState(false);
   const [acknowledgedPayment, setAcknowledgedPayment] = useState(false);
   const [shareNotice, setShareNotice] = useState('');
+  const [workspaceView, setWorkspaceView] = useState<'history' | 'transfer'>('transfer');
   const sessionTokenRef = useRef('');
   const sessionExpiresAtRef = useRef(0);
   const requestIdRef = useRef('');
@@ -79,6 +81,18 @@ export function App() {
   useEffect(() => {
     if (bootstrapStartedRef.current) return;
     bootstrapStartedRef.current = true;
+    const previewState = import.meta.env.DEV
+      ? new URLSearchParams(window.location.search).get('preview-state')
+      : null;
+    if (previewState === 'pin' || previewState === 'ready') {
+      sessionTokenRef.current = 'S'.repeat(43);
+      sessionExpiresAtRef.current = Date.now() + 15 * 60_000;
+      dispatch({
+        status: developmentPreviewStatus(previewState === 'pin' ? 'not-configured' : 'ready'),
+        type: 'BOOTSTRAP_SUCCEEDED',
+      });
+      return;
+    }
     const ticket = readBootstrapTicket(window.location.hash);
     clearBootstrapFragment(window.history, window.location);
     if (!api) {
@@ -271,8 +285,7 @@ export function App() {
           <Icon name="close" />
         </button>
         <div className="brand-lockup">
-          <span className="eyebrow">SDK HEAVEN</span>
-          <strong>بوابة الوكيل</strong>
+          <span className="session-status"><span className="pulse-dot" /> جلسة وكيل آمنة</span>
         </div>
         <button className="icon-button" type="button" onClick={() => void refreshStatus()} aria-label="تحديث الرصيد والحالة">
           <Icon name="refresh" />
@@ -314,43 +327,66 @@ export function App() {
       {status && !['bootstrapping', 'failed', 'unavailable', 'locked'].includes(state.step) && (
         <>
           {pinNeedsSetup && (
-            <section className="panel pin-setup-panel" aria-labelledby="pin-setup-title">
-              <div className="section-heading">
-                <span className="section-icon"><Icon name="shield" /></span>
+            <section className="pin-setup-panel" aria-labelledby="pin-setup-title">
+              <div className="setup-intro">
+                <span className="setup-shield"><Icon name="shield" /></span>
                 <div>
-                  <span className="eyebrow">خطوة أمان مطلوبة</span>
-                  <h1 id="pin-setup-title">{status.pin.state === 'reset-required' ? 'إعادة إعداد رمز التحويل' : 'إعداد رمز التحويل'}</h1>
+                  <span className="eyebrow">حماية التحويلات</span>
+                  <h1 id="pin-setup-title">{status.pin.state === 'reset-required' ? 'أنشئ رمزاً جديداً' : 'أنشئ رمز التحويل'}</h1>
+                  <p>ستستخدم هذا الرمز لتأكيد كل عملية ترسلها من محفظتك.</p>
                 </div>
               </div>
-              <p className="muted">أنشئ رمزاً من ستة أرقام. سيُطلب منك عند كل تحويل ولا يمكن للإدارة رؤيته أو استعادته.</p>
+              <div className="setup-notice">
+                <Icon name="lock" />
+                <span><strong>خاص بك وحدك</strong> لا يمكن للإدارة رؤية الرمز أو استعادته.</span>
+              </div>
               <form onSubmit={setupTransferPin} className="pin-setup-form">
                 <PinInput label="رمز التحويل الجديد" value={pinSetup} onChange={setPinSetup} autoComplete="new-password" />
                 <PinInput label="تأكيد رمز التحويل" value={pinConfirm} onChange={setPinConfirm} autoComplete="new-password" />
                 {pinSetup && pinConfirm && pinSetup !== pinConfirm && <p className="field-error" role="alert">الرمزان غير متطابقين.</p>}
                 <button className="primary-button" disabled={pinSetupBusy || !PIN_PATTERN.test(pinSetup) || pinSetup !== pinConfirm} type="submit">
-                  {pinSetupBusy ? 'جارٍ الحفظ…' : 'حفظ الرمز بأمان'}
+                  {pinSetupBusy ? 'جارٍ الحفظ…' : <><Icon name="shield" /> حفظ الرمز والمتابعة</>}
                 </button>
               </form>
+              <div className="setup-footer">
+                <span><Icon name="check" /> ستة أرقام</span>
+                <span><Icon name="check" /> مطلوب لكل تحويل</span>
+                <span><Icon name="check" /> محاولات محدودة</span>
+              </div>
             </section>
           )}
 
           {!pinNeedsSetup && (
             <>
-              <section className="hero-card">
-                <div className="hero-seal" aria-hidden="true"><Icon name="verified" /></div>
-                <div className="hero-copy">
-                  <span className="status-pill"><span className="pulse-dot" /> وكيل معتمد</span>
-                  <h1>إرسال رصيد</h1>
-                  <p>تحويل فوري من محفظتك المشتركة إلى المعرّف العادي للمستلم.</p>
+              <section className="agent-summary" aria-label="حالة حساب الوكيل">
+                <span className="agent-mark"><Icon name="verified" /></span>
+                <div>
+                  <strong>حساب وكيل معتمد</strong>
+                  <small><span className="pulse-dot" /> الجلسة آمنة وجاهزة للتحويل</small>
                 </div>
-                <div className="hero-rule" />
-                <div className="hero-trust">
-                  <span><Icon name="shield" /> محمي برمز التحويل</span>
-                  <span><Icon name="clock" /> جلسة قصيرة وآمنة</span>
-                </div>
+                <Icon name="shield" />
               </section>
 
-              {state.step === 'completed' && state.lastResult ? (
+              <nav className="workspace-tabs" aria-label="أقسام بوابة الوكيل">
+                <button
+                  aria-current={workspaceView === 'transfer' ? 'page' : undefined}
+                  className={workspaceView === 'transfer' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setWorkspaceView('transfer')}
+                >
+                  <Icon name="wallet" /> تحويل جديد
+                </button>
+                <button
+                  aria-current={workspaceView === 'history' ? 'page' : undefined}
+                  className={workspaceView === 'history' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setWorkspaceView('history')}
+                >
+                  <Icon name="receipt" /> السجل والإيصالات
+                </button>
+              </nav>
+
+              {workspaceView === 'transfer' && state.step === 'completed' && state.lastResult ? (
                 <SuccessPanel
                   receipt={receiptFromTransfer(state.lastResult)}
                   onShare={shareReceipt}
@@ -362,8 +398,8 @@ export function App() {
                     void refreshStatus();
                   }}
                 />
-              ) : (
-                <section className="panel transfer-panel" aria-labelledby="transfer-title">
+              ) : workspaceView === 'transfer' ? (
+                <section className="transfer-panel" aria-labelledby="transfer-title">
                   <div className="step-indicator" aria-label="مراحل التحويل">
                     <span className="active">١ <small>المستلم</small></span>
                     <i />
@@ -490,16 +526,18 @@ export function App() {
                   )}
                   {state.error && <p className="form-alert" role="alert">{state.error}</p>}
                 </section>
-              )}
+              ) : null}
 
-              <HistoryExplorer
-                api={api}
-                initialItems={status.recentTransfers}
-                online={state.online}
-                sessionToken={sessionTokenRef.current}
-                onReceipt={(receipt) => dispatch({ receipt, type: 'RECEIPT_SELECTED' })}
-                onTerminalError={handleTerminalApiError}
-              />
+              {workspaceView === 'history' && (
+                <HistoryExplorer
+                  api={api}
+                  initialItems={status.recentTransfers}
+                  online={state.online}
+                  sessionToken={sessionTokenRef.current}
+                  onReceipt={(receipt) => dispatch({ receipt, type: 'RECEIPT_SELECTED' })}
+                  onTerminalError={handleTerminalApiError}
+                />
+              )}
             </>
           )}
         </>
@@ -910,4 +948,23 @@ function relativeDate(value: string): string {
   if (minutes < 60) return `منذ ${minutes} د`;
   if (minutes < 1_440) return `منذ ${Math.round(minutes / 60)} س`;
   return fullDate(value);
+}
+
+function developmentPreviewStatus(pinState: 'not-configured' | 'ready'): PortalStatus {
+  return {
+    dailyAllowance: { coins: 75_000, diamonds: 3_500 },
+    feature: { available: true, enabled: true, policyConfigured: true, portalConfigured: true },
+    limits: {
+      configured: true,
+      effective: {
+        coins: { maxPerDay: 100_000, maxPerTransfer: 25_000, maxTransfersPerHour: 20 },
+        diamonds: { maxPerDay: 5_000, maxPerTransfer: 1_500, maxTransfersPerHour: 10 },
+      },
+      overrideCurrencies: [],
+    },
+    pin: { state: pinState },
+    privilege: { active: true, currencies: { coins: true, diamonds: true } },
+    recentTransfers: [],
+    wallet: { balances: { coins: 24_500, diamonds: 840 }, updatedAt: new Date().toISOString() },
+  };
 }

@@ -14,11 +14,14 @@ import type { CoupleConnectionSummary, CoupleMutationAction, CouplesOverview } f
 import { useRepresentativeBadgeProjection } from '../social/useRepresentativeBadgeProjection';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
+import { AvatarFrameLayer } from '../components/AvatarPresentation';
+import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Couples'>;
 const emptyOverview: CouplesOverview = { incoming: [], outgoing: [] };
 
 export function CouplesScreen({ navigation }: Props) {
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const [overview, setOverview] = useState<CouplesOverview>(emptyOverview);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -86,6 +89,7 @@ export function CouplesScreen({ navigation }: Props) {
                 <Text style={styles.currentEyebrow}>شريك الارتباط</Text>
                 <ProfileIdentity
                   badgeActive={activeBadges[overview.current.profile.uid] ?? overview.current.profile.representativeBadgeActive}
+                  cosmeticsFlags={cosmeticsFlags}
                   row={overview.current}
                   onOpen={() => navigation.navigate('UserProfile', { uid: overview.current!.profile.uid })}
                   large
@@ -113,6 +117,7 @@ export function CouplesScreen({ navigation }: Props) {
             <RequestSection
               activeBadges={activeBadges}
               busyUid={busyUid}
+              cosmeticsFlags={cosmeticsFlags}
               empty="لا توجد طلبات ارتباط واردة."
               onAction={(row, action) => void runAction(action, row.profile.uid)}
               onOpen={(uid) => navigation.navigate('UserProfile', { uid })}
@@ -123,6 +128,7 @@ export function CouplesScreen({ navigation }: Props) {
             <RequestSection
               activeBadges={activeBadges}
               busyUid={busyUid}
+              cosmeticsFlags={cosmeticsFlags}
               empty="لا توجد طلبات ارتباط مرسلة."
               onAction={(row, action) => void runAction(action, row.profile.uid)}
               onOpen={(uid) => navigation.navigate('UserProfile', { uid })}
@@ -137,9 +143,10 @@ export function CouplesScreen({ navigation }: Props) {
   );
 }
 
-function RequestSection({ activeBadges, busyUid, empty, onAction, onOpen, rows, title, type }: {
+function RequestSection({ activeBadges, busyUid, cosmeticsFlags, empty, onAction, onOpen, rows, title, type }: {
   activeBadges: Record<string, boolean>;
   busyUid: string;
+  cosmeticsFlags: CosmeticsFeatureFlags;
   empty: string;
   onAction: (row: CoupleConnectionSummary, action: CoupleMutationAction) => void;
   onOpen: (uid: string) => void;
@@ -157,6 +164,7 @@ function RequestSection({ activeBadges, busyUid, empty, onAction, onOpen, rows, 
         <View key={row.profile.uid} style={styles.requestCard}>
           <ProfileIdentity
             badgeActive={activeBadges[row.profile.uid] ?? row.profile.representativeBadgeActive}
+            cosmeticsFlags={cosmeticsFlags}
             row={row}
             onOpen={() => onOpen(row.profile.uid)}
           />
@@ -174,8 +182,9 @@ function RequestSection({ activeBadges, busyUid, empty, onAction, onOpen, rows, 
   );
 }
 
-function ProfileIdentity({ badgeActive, large = false, onOpen, row }: {
+function ProfileIdentity({ badgeActive, cosmeticsFlags, large = false, onOpen, row }: {
   badgeActive?: boolean;
+  cosmeticsFlags: CosmeticsFeatureFlags;
   large?: boolean;
   onOpen: () => void;
   row: CoupleConnectionSummary;
@@ -187,6 +196,7 @@ function ProfileIdentity({ badgeActive, large = false, onOpen, row }: {
         {row.profile.avatarModerationStatus === 'clear' && row.profile.avatarUrl
           ? <Image source={{ uri: row.profile.avatarUrl }} style={styles.avatarImage} />
           : <Text style={[styles.avatarText, large && styles.avatarTextLarge]}>{[...row.profile.displayName][0] || '؟'}</Text>}
+        <AvatarFrameLayer flags={cosmeticsFlags} frame={row.profile.equippedAvatarFrame} />
       </View>
       <View style={[styles.identityCopy, large && styles.identityCopyLarge]}>
         <View style={styles.nameRow}>

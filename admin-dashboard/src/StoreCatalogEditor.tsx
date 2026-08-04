@@ -6,6 +6,13 @@ import { useAdminFeedback } from './AdminFeedback';
 import { useAdminDialogFocus } from './useAdminDialogFocus';
 import { removePublishedStoreAsset, removeUploadedStoreAsset, UploadedStoreAsset, uploadStoreAsset } from './storeAssets';
 import { StoreCatalogDraft, validateStoreCatalogDraft } from './storeEditorPolicy';
+import { RoomThemeManifestEditor } from './RoomThemeManifestEditor';
+import {
+  createEntryPhysicalApprovalReceiptId,
+  defaultEntryPhysicalApproval,
+  defaultEntryPresentation,
+  EntryPresentationEditorFields,
+} from './EntryPresentationEditorFields';
 
 type CatalogEditorState = { duplicate?: boolean; kind: 'catalog'; item?: AdminStoreCatalogItem };
 
@@ -28,6 +35,7 @@ export default function StoreCatalogEditor({ editor, onClose, onSaved, user }: {
   const [preview, setPreview] = useState<File>();
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [entryPhysicalApproval, setEntryPhysicalApproval] = useState(defaultEntryPhysicalApproval);
   const cleanDraft = existing ? stripServerFields(existing) : editor.item && editor.duplicate ? { ...stripServerFields(editor.item), customId: undefined, featured: false, itemId: '', name: { ...editor.item.name } } : emptyCatalog;
   const dirty = Boolean(reason || thumbnail || preview || JSON.stringify(draft) !== JSON.stringify(cleanDraft));
 
@@ -54,10 +62,27 @@ export default function StoreCatalogEditor({ editor, onClose, onSaved, user }: {
       if (preview) uploadedPreview = await uploadStoreAsset(user, draft.itemId, 'preview', preview);
       const thumbnailUrl = uploadedThumbnail?.url || draft.thumbnailUrl;
       const previewAssetUrl = uploadedPreview?.url || draft.previewAssetUrl;
+      let entryPresentation = draft.category === 'cars'
+        ? (draft.entryPresentation || defaultEntryPresentation)
+        : undefined;
+      if (entryPresentation?.animationEnabled) {
+        entryPresentation = {
+          ...entryPresentation,
+          physicalApprovalReceiptId: await createEntryPhysicalApprovalReceiptId(
+            draft.itemId,
+            entryPresentation.visualAsset?.assetVersionId || '',
+          ),
+        };
+      }
       const normalizedItem: StoreCatalogDraft = draft.category === 'custom-ids'
-        ? { ...draft, duration: { kind: 'permanent' }, previewAssetUrl, stock: { kind: 'limited', remaining: Math.min(1, draft.stock.kind === 'limited' ? draft.stock.remaining : 1) }, thumbnailUrl }
-        : { ...draft, customId: undefined, previewAssetUrl, thumbnailUrl };
-      await upsertAdminStoreCatalog(user, { expectedUpdatedAt: existing?.updatedAt, item: normalizedItem, reason: reason.trim() });
+        ? { ...draft, cosmeticAsset: undefined, duration: { kind: 'permanent' }, entryPresentation: undefined, previewAssetUrl, stickerAsset: undefined, stock: { kind: 'limited', remaining: Math.min(1, draft.stock.kind === 'limited' ? draft.stock.remaining : 1) }, thumbnailUrl }
+        : { ...draft, cosmeticAsset: isCosmeticCategory(draft.category) ? draft.cosmeticAsset : undefined, customId: undefined, entryPresentation, previewAssetUrl, stickerAsset: draft.category === 'stickers' ? draft.stickerAsset : undefined, thumbnailUrl };
+      await upsertAdminStoreCatalog(user, {
+        ...(entryPresentation?.animationEnabled ? { entryPhysicalApproval } : {}),
+        expectedUpdatedAt: existing?.updatedAt,
+        item: normalizedItem,
+        reason: reason.trim(),
+      });
       if (existing) await Promise.allSettled([
         existing.thumbnailUrl !== thumbnailUrl ? removePublishedStoreAsset(existing.thumbnailUrl, existing.itemId, 'thumbnail') : Promise.resolve(false),
         existing.previewAssetUrl !== previewAssetUrl ? removePublishedStoreAsset(existing.previewAssetUrl, existing.itemId, 'preview') : Promise.resolve(false),
@@ -72,7 +97,7 @@ export default function StoreCatalogEditor({ editor, onClose, onSaved, user }: {
 
   return <Drawer title={existing ? 'تعديل عنصر الكتالوج' : editor.duplicate ? 'نسخ عنصر الكتالوج' : 'إضافة عنصر جديد'} subtitle="المعاينة والبيانات التجارية" onClose={() => void requestClose()}><form className="economy-editor-form" onSubmit={submit}><PreviewCard item={draft} previewFile={preview} thumbnailFile={thumbnail} />{errors.length ? <div className="economy-form-errors" role="alert"><strong>راجع البيانات قبل الحفظ</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div> : null}<div className="economy-form-grid">
     <label>معرّف العنصر<input disabled={Boolean(existing)} pattern="[a-z0-9][a-z0-9_-]{2,79}" required value={draft.itemId} onChange={(e) => setDraft({ ...draft, itemId: e.target.value })} /></label>
-    <label>القسم<select disabled={Boolean(existing)} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value as StoreCatalogDraft['category'] })}><option value="game-items">عناصر اللعبة</option><option value="chat-themes">سمات الدردشة</option><option value="avatar-frames">إطارات الصور</option><option value="cars">السيارات</option><option value="custom-ids">معرّفات مخصصة</option></select></label>
+    <label>القسم<select disabled={Boolean(existing)} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value as StoreCatalogDraft['category'] })}><option value="game-items">عناصر اللعبة</option><option value="chat-themes">سمات الغرف</option><option value="avatar-frames">إطارات الصور</option><option value="profile-skins">خلفيات الملف</option><option value="chat-bubbles">فقاعات الدردشة</option><option value="nameplates">لوحات الاسم</option><option value="cosmetic-badges">الشارات التجميلية</option><option value="seat-effects">تأثيرات المقعد</option><option value="stickers">ملصقات الدردشة</option><option value="cars">السيارات</option><option value="custom-ids">معرّفات مخصصة</option></select></label>
     {draft.category === 'custom-ids' ? <label>المعرّف المخصص<input disabled={Boolean(existing)} inputMode="numeric" pattern="[0-9]{7}" required value={draft.customId || ''} onChange={(e) => setDraft({ ...draft, customId: e.target.value, duration: { kind: 'permanent' }, stock: { kind: 'limited', remaining: 1 } })} /></label> : null}
     <label>الاسم العربي<input required value={draft.name.ar} onChange={(e) => setDraft({ ...draft, name: { ...draft.name, ar: e.target.value } })} /></label>
     <label>الاسم الإنجليزي<input dir="ltr" required value={draft.name.en} onChange={(e) => setDraft({ ...draft, name: { ...draft.name, en: e.target.value } })} /></label>
@@ -85,10 +110,12 @@ export default function StoreCatalogEditor({ editor, onClose, onSaved, user }: {
     <label>الترتيب<input min="0" type="number" value={draft.order} onChange={(e) => setDraft({ ...draft, order: Number(e.target.value) })} /></label>
     <label>الصورة المصغرة<input accept="image/jpeg,image/png,image/webp" required={!draft.thumbnailUrl} type="file" onChange={(e) => setThumbnail(e.target.files?.[0])} /></label>
     <label>صورة المعاينة<input accept="image/jpeg,image/png,image/webp" required={!draft.previewAssetUrl} type="file" onChange={(e) => setPreview(e.target.files?.[0])} /></label>
+    {draft.category === 'cars' ? <EntryPresentationEditorFields approval={entryPhysicalApproval} onApprovalChange={setEntryPhysicalApproval} onChange={(entryPresentation) => setDraft({ ...draft, entryPresentation })} value={draft.entryPresentation || defaultEntryPresentation} /> : null}
+    {draft.category === 'stickers' ? <><label>Sticker asset ID<input pattern="[a-z0-9][a-z0-9_-]{2,79}" required value={draft.stickerAsset?.assetId || ''} onChange={(e) => setDraft({ ...draft, stickerAsset: { assetId: e.target.value, assetVersionId: draft.stickerAsset?.assetVersionId || '' } })} /></label><label>Sticker immutable version<input pattern="v[1-9][0-9]{0,8}-[a-f0-9]{12}" required value={draft.stickerAsset?.assetVersionId || ''} onChange={(e) => setDraft({ ...draft, stickerAsset: { assetId: draft.stickerAsset?.assetId || '', assetVersionId: e.target.value } })} /></label></> : null}
     <label className="economy-checkbox span-2"><input checked={draft.purchasingEnabled} type="checkbox" onChange={(e) => setDraft({ ...draft, purchasingEnabled: e.target.checked })} /> السماح بالمشتريات الجديدة</label>
     <label className="economy-checkbox span-2"><input checked={draft.featured} type="checkbox" onChange={(e) => setDraft({ ...draft, featured: e.target.checked })} /> عرض كبطاقة مميّزة أعلى المتجر</label>
     <label className="span-2 required-reason">سبب التغيير<textarea minLength={2} placeholder="اكتب سببًا واضحًا يظهر في سجل التدقيق" required value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-  </div><EditorFooter saving={saving} onClose={() => void requestClose()} /></form></Drawer>;
+  </div><EditorFooter saving={saving} onClose={() => void requestClose()} /></form>{existing?.category === 'chat-themes' ? <RoomThemeManifestEditor themeId={existing.itemId} user={user} /> : null}</Drawer>;
 }
 
 function Drawer({ children, onClose, subtitle, title }: { children: React.ReactNode; onClose: () => void; subtitle: string; title: string }) { useAdminDialogFocus(true, onClose, '.economy-drawer'); return <div className="economy-drawer-layer" role="presentation"><button aria-label="إغلاق" className="economy-drawer-backdrop" onClick={onClose} type="button" /><aside aria-label={title} aria-modal="true" className="economy-drawer" role="dialog" tabIndex={-1}><header><div><span>المتجر والاقتصاد</span><h2>{title}</h2><p>{subtitle}</p></div><button aria-label="إغلاق" onClick={onClose} type="button">×</button></header>{children}</aside></div>; }
@@ -96,5 +123,6 @@ function EditorFooter({ onClose, saving }: { onClose: () => void; saving: boolea
 function PreviewCard({ item, previewFile, thumbnailFile }: { item: StoreCatalogDraft; previewFile?: File; thumbnailFile?: File }) { const preview = useMemo(() => previewFile ? URL.createObjectURL(previewFile) : item.previewAssetUrl, [item.previewAssetUrl, previewFile]); const thumb = useMemo(() => thumbnailFile ? URL.createObjectURL(thumbnailFile) : item.thumbnailUrl, [item.thumbnailUrl, thumbnailFile]); return <div className="catalog-live-preview" style={preview ? { backgroundImage: `linear-gradient(180deg, transparent, rgba(10,9,15,.92)), url(${preview})` } : undefined}><div>{thumb ? <img alt="" src={thumb} /> : <span>◇</span>}<section><small>{categoryLabel(item.category)}</small><h3>{item.name.ar || 'اسم العنصر'}</h3><p>{item.description.ar || 'ستظهر معاينة العنصر هنا قبل الحفظ.'}</p><Price prices={item.prices} /></section></div></div>; }
 function Price({ prices }: { prices: AdminStoreCatalogItem['prices'] }) { return <span className="economy-price">{prices.coins ? `${prices.coins.toLocaleString('ar-IQ')} ◈` : ''}{prices.coins && prices.diamonds ? ' · ' : ''}{prices.diamonds ? `${prices.diamonds.toLocaleString('ar-IQ')} ♦` : ''}</span>; }
 function stripServerFields(item: AdminStoreCatalogItem): StoreCatalogDraft { const { createdAt: _createdAt, lastEditorEmail: _lastEditorEmail, lastEditorUid: _lastEditorUid, updatedAt: _updatedAt, ...input } = item; return input; }
-function categoryLabel(value: AdminStoreCatalogItem['category']) { return ({ 'game-items': 'عناصر اللعبة', 'chat-themes': 'سمات الدردشة', 'avatar-frames': 'إطارات الصور', cars: 'السيارات', 'custom-ids': 'معرّفات مخصصة' } as const)[value]; }
+function categoryLabel(value: AdminStoreCatalogItem['category']) { return ({ 'game-items': 'عناصر اللعبة', 'chat-themes': 'سمات الغرف', 'avatar-frames': 'إطارات الصور', 'profile-skins': 'خلفيات الملف', 'chat-bubbles': 'فقاعات الدردشة', nameplates: 'لوحات الاسم', 'cosmetic-badges': 'الشارات التجميلية', 'seat-effects': 'تأثيرات المقعد', stickers: 'ملصقات الدردشة', cars: 'السيارات', 'custom-ids': 'معرّفات مخصصة' } as const)[value]; }
+function isCosmeticCategory(value: AdminStoreCatalogItem['category']) { return ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects'].includes(value); }
 function durationLabel(value: AdminStoreCatalogItem['duration']) { return value.kind === 'permanent' ? 'دائم' : `${value.value.toLocaleString('ar-IQ')} ${value.unit === 'days' ? 'يوم' : value.unit === 'weeks' ? 'أسبوع' : 'شهر'}`; }

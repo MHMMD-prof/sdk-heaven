@@ -13,6 +13,7 @@ import {
   requestRoomChatCommand,
 } from './requestRoomChatCommand';
 import { VoiceProviderConfig } from './types';
+import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
 
 export type RoomChatDeliveryStatus = 'failed' | 'pending' | 'sent';
 export type RoomChatMessage = RoomMessageDocument & {
@@ -21,6 +22,7 @@ export type RoomChatMessage = RoomMessageDocument & {
 
 type UseRoomChatInput = {
   avatarLabel: string;
+  avatarFrame?: AvatarFrameProjection;
   config?: VoiceProviderConfig['liveKit'];
   displayName: string;
   enabled: boolean;
@@ -33,6 +35,7 @@ const PAGE_SIZE = 50;
 
 export function useRoomChat({
   avatarLabel,
+  avatarFrame,
   config,
   displayName,
   enabled,
@@ -164,6 +167,7 @@ export function useRoomChat({
       senderUid: uid,
       senderDisplayName: displayName,
       senderAvatarLabel: avatarLabel,
+      ...(avatarFrame ? { senderAvatarFrame: avatarFrame } : {}),
       kind: 'chat',
       text: normalized,
       status: 'active',
@@ -192,7 +196,7 @@ export function useRoomChat({
       setErrorMessage(error instanceof Error ? error.message : 'تعذر إرسال الرسالة.');
       throw error;
     }
-  }, [avatarLabel, config, displayName, roomId, uid]);
+  }, [avatarFrame, avatarLabel, config, displayName, roomId, uid]);
 
   const retryMessage = useCallback(async (messageId: string) => {
     const message = optimisticMessages.find(

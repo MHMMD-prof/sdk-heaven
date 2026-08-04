@@ -261,5 +261,6 @@ module.exports = {
   isValidRepresentativeTransferPin,
   normalizeRepresentativePortalOrigin,
   normalizeRepresentativePortalRequest,
+  normalizeRepresentativeCurrencyLimits,
   normalizeRepresentativeTransferPolicy,
 };

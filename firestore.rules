@@ -78,6 +78,73 @@ service cloud.firestore {
         || exists(blockPath(userId, request.auth.uid));
     }
 
+    function directChatFeaturesPath() {
+      return /databases/$(database)/documents/appConfig/socialFeatures;
+    }
+
+    function directMessagesEnabled() {
+      return signedIn()
+        && exists(directChatFeaturesPath())
+        && get(directChatFeaturesPath()).data.directMessages == true;
+    }
+
+    function directConversationPath(conversationId) {
+      return /databases/$(database)/documents/directConversations/$(conversationId);
+    }
+
+    function isDirectChatMember(conversationId) {
+      return directMessagesEnabled()
+        && hasActivePublicProfile()
+        && exists(directConversationPath(conversationId))
+        && get(directConversationPath(conversationId)).data.memberUids is list
+        && get(directConversationPath(conversationId)).data.memberUids.size() == 2
+        && request.auth.uid in get(directConversationPath(conversationId)).data.memberUids;
+    }
+
+    function directChatPeer(conversationId) {
+      let members = get(directConversationPath(conversationId)).data.memberUids;
+      return members[0] == request.auth.uid ? members[1] : members[0];
+    }
+
+    function isAcceptedDirectChatMember(conversationId) {
+      return isDirectChatMember(conversationId)
+        && get(directConversationPath(conversationId)).data.lifecycleState == 'active'
+        && get(directConversationPath(conversationId)).data.requestState == 'accepted';
+    }
+
+    function hasActiveDirectChatRestriction() {
+      let path = /databases/$(database)/documents/directChatRestrictions/$(request.auth.uid);
+      return exists(path)
+        && get(path).data.state == 'restricted'
+        && !('endsAt' in get(path).data && get(path).data.endsAt <= request.time);
+    }
+
+    function isCurrentDirectChatFriend(conversationId) {
+      let conversation = get(directConversationPath(conversationId)).data;
+      return conversation.friendshipId is string
+        && exists(/databases/$(database)/documents/friendships/$(conversation.friendshipId));
+    }
+
+    function validDirectChatPresence(conversationId, userId, kind) {
+      let data = request.resource.data;
+      return userId == request.auth.uid
+        && isAcceptedDirectChatMember(conversationId)
+        && !hasActiveDirectChatRestriction()
+        && !isBlockedBetween(directChatPeer(conversationId))
+        && data.keys().hasOnly(['conversationId', 'expiresAt', 'kind', 'uid', 'updatedAt', 'value'])
+        && data.conversationId == conversationId
+        && data.uid == userId
+        && data.kind == kind
+        && data.updatedAt is timestamp
+        && data.expiresAt is timestamp
+        && data.expiresAt > request.time
+        && data.expiresAt <= request.time + duration.value(2, 'm')
+        && (
+          (kind == 'typing' && data.value == true)
+          || (kind == 'online' && data.value == 'online' && isCurrentDirectChatFriend(conversationId))
+        );
+    }
+
     function validSocialCountryCode(countryCode) {
       return countryCode == 'IQ'
         || countryCode == 'SA'
@@ -118,6 +185,8 @@ service cloud.firestore {
           'giftScore',
           'friendCount',
           'coupleLevel',
+          'equippedAvatarFrame',
+          'equippedCosmetics',
           'moderationStatus',
           'avatarModerationStatus',
           'createdAt',
@@ -161,10 +230,57 @@ service cloud.firestore {
         && data.friendCount >= 0
         && data.coupleLevel is int
         && data.coupleLevel >= 0
+        && (
+          !('equippedAvatarFrame' in data)
+          || (
+            data.equippedAvatarFrame is map
+            && data.equippedAvatarFrame.keys().hasOnly(['itemId', 'assetUrl'])
+            && data.equippedAvatarFrame.itemId is string
+            && data.equippedAvatarFrame.itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+            && data.equippedAvatarFrame.assetUrl is string
+            && data.equippedAvatarFrame.assetUrl.size() <= 2048
+          )
+        )
+        && (
+          !('equippedCosmetics' in data)
+          || (
+            data.equippedCosmetics is map
+            && data.equippedCosmetics.keys().hasOnly(['avatarFrame', 'profileSkin', 'chatBubble', 'nameplate', 'cosmeticBadge', 'seatEffect'])
+            && (
+              !('avatarFrame' in data.equippedCosmetics)
+              || (
+                data.equippedCosmetics.avatarFrame is map
+                && data.equippedCosmetics.avatarFrame.keys().hasOnly(['assetId', 'assetVersionId', 'itemId'])
+                && data.equippedCosmetics.avatarFrame.assetId is string
+                && data.equippedCosmetics.avatarFrame.assetId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+                && data.equippedCosmetics.avatarFrame.assetVersionId is string
+                && data.equippedCosmetics.avatarFrame.assetVersionId.matches('^v[1-9][0-9]{0,8}-[a-f0-9]{12}$')
+                && data.equippedCosmetics.avatarFrame.itemId is string
+                && data.equippedCosmetics.avatarFrame.itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+              )
+            )
+            && (!('profileSkin' in data.equippedCosmetics) || validEquipmentCosmeticProjection(data.equippedCosmetics.profileSkin))
+            && (!('chatBubble' in data.equippedCosmetics) || validEquipmentCosmeticProjection(data.equippedCosmetics.chatBubble))
+            && (!('nameplate' in data.equippedCosmetics) || validEquipmentCosmeticProjection(data.equippedCosmetics.nameplate))
+            && (!('cosmeticBadge' in data.equippedCosmetics) || validEquipmentCosmeticProjection(data.equippedCosmetics.cosmeticBadge))
+            && (!('seatEffect' in data.equippedCosmetics) || validEquipmentCosmeticProjection(data.equippedCosmetics.seatEffect))
+          )
+        )
         && (data.moderationStatus == 'active' || data.moderationStatus == 'suspended' || data.moderationStatus == 'removed')
         && (data.avatarModerationStatus == 'clear' || data.avatarModerationStatus == 'pending' || data.avatarModerationStatus == 'removed')
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
+    }
+
+    function validEquipmentCosmeticProjection(value) {
+      return value is map
+        && value.keys().hasOnly(['assetId', 'assetVersionId', 'itemId'])
+        && value.assetId is string
+        && value.assetId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && value.assetVersionId is string
+        && value.assetVersionId.matches('^v[1-9][0-9]{0,8}-[a-f0-9]{12}$')
+        && value.itemId is string
+        && value.itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$');
     }
 
     function validAccountDeletionRequest(userId) {
@@ -231,7 +347,15 @@ service cloud.firestore {
     }
 
     match /appConfig/{configId} {
-      allow read: if signedIn() && (configId == 'socialFeatures' || configId == 'voiceRoomFeatures');
+      allow read: if signedIn()
+        && (
+          configId == 'socialFeatures'
+          || configId == 'cosmeticsFeatures'
+          || configId == 'voiceRoomFeatures'
+          || configId == 'voiceRoomLaunch'
+          || configId == 'roomRocketPublic'
+          || configId == 'roomTargetPublic'
+        );
       allow write: if false;
     }
 
@@ -271,6 +395,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /roomGameRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /roomMusicRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /voiceRoomHttpRateLimits/{rateId} {
+      allow read, write: if false;
+    }
+
     match /pushDevices/{userId}/{document=**} {
       allow read, write: if false;
     }
@@ -284,6 +420,32 @@ service cloud.firestore {
     }
 
     match /notificationDeliveries/{deliveryId} {
+      allow read, write: if false;
+    }
+
+    match /roomOwnershipNotifications/{userId}/items/{notificationId} {
+      allow get, list: if hasActivePublicProfile()
+        && request.auth.uid == userId
+        && resource.data.recipientUid == userId;
+      allow update: if hasActivePublicProfile()
+        && request.auth.uid == userId
+        && resource.data.recipientUid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt'])
+        && request.resource.data.readAt is timestamp;
+      allow create, delete: if false;
+    }
+
+    match /roomGiftReceipts/{userId}/items/{receiptId} {
+      allow get, list: if hasActivePublicProfile()
+        && request.auth.uid == userId
+        && (
+          resource.data.senderUid == userId
+          || resource.data.recipientUid == userId
+        );
+      allow write: if false;
+    }
+
+    match /deletedRoomArchives/{roomId} {
       allow read, write: if false;
     }
 
@@ -304,6 +466,105 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Personal Chat Wave 3: persistent writes remain backend-only. Signed-in
+    // participants may read only their own projection and bounded conversation
+    // documents while the rollout flag is enabled.
+    match /directConversations/{conversationId} {
+      allow get: if isDirectChatMember(conversationId);
+      allow list, write: if false;
+    }
+
+    match /directConversations/{conversationId}/messages/{messageId} {
+      allow read: if isDirectChatMember(conversationId);
+      allow write: if false;
+    }
+
+    match /directConversations/{conversationId}/receipts/{userId} {
+      allow get: if isDirectChatMember(conversationId)
+        && userId in get(directConversationPath(conversationId)).data.memberUids;
+      allow list, write: if false;
+    }
+
+    match /directConversationMembers/{userId}/items/{conversationId} {
+      allow get, list: if directMessagesEnabled()
+        && hasActivePublicProfile()
+        && request.auth.uid == userId
+        && resource.data.ownerUid == userId;
+      allow write: if false;
+    }
+
+    match /directChatInboxSummaries/{userId} {
+      allow get: if directMessagesEnabled()
+        && hasActivePublicProfile()
+        && request.auth.uid == userId
+        && resource.data.uid == userId;
+      allow list, write: if false;
+    }
+
+    match /directMessageRequests/{conversationId} {
+      allow get: if isDirectChatMember(conversationId)
+        && resource.data.memberUids is list
+        && request.auth.uid in resource.data.memberUids;
+      allow list, write: if false;
+    }
+
+    match /directChatPresence/{conversationId}/typing/{userId} {
+      allow read: if isAcceptedDirectChatMember(conversationId)
+        && !hasActiveDirectChatRestriction()
+        && !isBlockedBetween(directChatPeer(conversationId));
+      allow create, update: if validDirectChatPresence(conversationId, userId, 'typing');
+      allow delete: if isAcceptedDirectChatMember(conversationId) && request.auth.uid == userId;
+    }
+
+    match /directChatPresence/{conversationId}/online/{userId} {
+      allow read: if isAcceptedDirectChatMember(conversationId)
+        && !hasActiveDirectChatRestriction()
+        && !isBlockedBetween(directChatPeer(conversationId))
+        && isCurrentDirectChatFriend(conversationId);
+      allow create, update: if validDirectChatPresence(conversationId, userId, 'online');
+      allow delete: if isAcceptedDirectChatMember(conversationId) && request.auth.uid == userId;
+    }
+
+    match /directConversations/{conversationId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /directConversationMembers/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /directChatCommands/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /directChatRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /directChatRestrictions/{userId} {
+      allow read, write: if false;
+    }
+
+    match /directChatReports/{reportId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /directChatRetention/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /directChatPresence/{conversationId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /directChatUploadAuthorizations/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /directChatUploads/{uploadId} {
+      allow read, write: if false;
+    }
+
     match /walletSummaries/{userId} {
       allow read, write: if false;
     }
@@ -312,8 +573,245 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /dailyLoginCampaign/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /dailyLoginStates/{userId} {
+      allow read, write: if false;
+    }
+
+    match /dailyLoginClaims/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /dailyLoginCommands/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /dailyLoginRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /dailyLoginAdminCommands/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /dailyLoginFailureMetrics/{metricId} {
+      allow read, write: if false;
+    }
+
+    match /economyRestrictions/{userId} {
+      allow read, write: if false;
+    }
+
+    match /weeklyIncentiveCycles/{cycleId} {
+      allow read, write: if false;
+    }
+
+    match /canonicalRoomGiftFacts/{factId} {
+      allow read, write: if false;
+    }
+
+    match /roomAttendanceEventReceipts/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /roomAttendanceSessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /roomAttendanceIntervals/{intervalId} {
+      allow read, write: if false;
+    }
+
+    match /attendanceOutageWindows/{windowId} {
+      allow read, write: if false;
+    }
+
+    match /attendanceOutageCommands/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /attendanceDeviceEnrollments/{userId} {
+      allow read, write: if false;
+    }
+
+    match /roomSupportPeriods/{periodKey} {
+      allow read, write: if false;
+    }
+
+    match /roomSupportLeaderboardRefreshes/{refreshId} {
+      allow read, write: if false;
+    }
+
+    match /rewardSettlements/{settlementId} {
+      allow read, write: if false;
+    }
+
+    match /rewardSettlementJobs/{settlementId} {
+      allow read, write: if false;
+    }
+
+    match /rewardEntitlementTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+
+    match /roomRocketCampaign/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /roomRocketPublicVersions/{versionId} {
+      allow get, list: if hasActivePublicProfile();
+      allow write: if false;
+    }
+
+    match /roomRocketProjectionReceipts/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /roomRocketRewardNotifications/{notificationId} {
+      allow read, write: if false;
+    }
+
+    match /roomTargetCampaign/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /roomTargetPublicVersions/{versionId} {
+      allow get, list: if hasActivePublicProfile();
+      allow write: if false;
+    }
+
+    match /roomTargetProjectionReceipts/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /roomTargetRosterNotifications/{notificationId} {
+      allow read, write: if false;
+    }
+
+    match /roomTargetCommandRequests/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /weeklyIncentiveHolds/{userId} {
+      allow read, write: if false;
+    }
+
+    match /weeklyIncentiveRiskAssessments/{assessmentId} {
+      allow read, write: if false;
+    }
+
+    match /weeklyIncentiveIntegrityAlerts/{alertId} {
+      allow read, write: if false;
+    }
+
+    match /incentiveReconciliationReports/{reportId} {
+      allow read, write: if false;
+    }
+
+    match /roomGiftIntegrityEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /roomTargetRosterChurn/{churnId} {
+      allow read, write: if false;
+    }
+
+    match /payrollPlans/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /payrollEnrollments/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /payrollCycles/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /payrollOutcomes/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /payrollExceptions/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /payrollAdminCommands/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /platformEconomyAccounts/{accountId} {
+      allow read, write: if false;
+    }
+
+    match /platformEconomyTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+
+    match /roomGiftCommissionPolicyVersions/{versionId} {
+      allow read, write: if false;
+    }
+
     match /storeCatalog/{itemId} {
       allow read, write: if false;
+    }
+
+    match /cosmeticAssets/{assetId} {
+      allow get, list: if hasActivePublicProfile()
+        && resource.data.schemaVersion == 1
+        && resource.data.assetId == assetId
+        && resource.data.publicationStatus == 'published'
+        && resource.data.renderingEnabled == true
+        && resource.data.publishedVersionId is string;
+      allow create, update, delete: if false;
+
+      match /versions/{versionId} {
+        allow get, list: if hasActivePublicProfile()
+          && resource.data.schemaVersion == 1
+          && resource.data.assetId == assetId
+          && resource.data.assetVersionId == versionId
+          && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.publicationStatus == 'published'
+          && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.renderingEnabled == true
+          && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.publishedVersionId == versionId;
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /cosmeticAssetApprovals/{approvalId} {
+      allow read, write: if false;
+    }
+
+    match /giftPresentationApprovalReceipts/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /entryPresentationApprovalReceipts/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /cosmeticAssetValidationReceipts/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /cosmeticUploadAuthorizations/{userId} {
+      allow read, write: if false;
+    }
+
+    match /cosmeticSubmissions/{submissionId} {
+      allow get, list: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    match /roomThemes/{themeId} {
+      allow get, list: if hasActivePublicProfile()
+        && resource.data.themeId == themeId
+        && resource.data.manifestVersion == 1
+        && resource.data.publicationStatus == 'published';
+      allow create, update, delete: if false;
     }
 
     match /storeCustomIds/{customId} {
@@ -402,6 +900,13 @@ service cloud.firestore {
 
     match /giftEvents/{eventId} {
       allow read, write: if false;
+    }
+
+    match /globalRoomEffects/{eventId} {
+      allow get, list: if hasActivePublicProfile()
+        && resource.data.kind == 'room-gift'
+        && resource.data.status == 'ready';
+      allow write: if false;
     }
 
     match /socialGiftRateLimits/{userId} {
@@ -528,7 +1033,7 @@ service cloud.firestore {
         && validRoomSeatMode(data.seatMode)
         && (!('announcement' in data) || (data.announcement is string && data.announcement.size() <= 160))
         && (!('welcomeMessage' in data) || (data.welcomeMessage is string && data.welcomeMessage.size() <= 200))
-        && (!('themeId' in data) || data.themeId in ['midnight', 'royal', 'ocean', 'emerald'])
+        && (!('themeId' in data) || (data.themeId is string && data.themeId.matches('^[a-z0-9][a-z0-9-]{2,63}$')))
         && (!('chatMode' in data) || data.chatMode in ['everyone', 'followers', 'off'])
         && (!('slowModeSeconds' in data) || data.slowModeSeconds in [0, 5, 10, 30, 60])
         && (!('historyVisibility' in data) || data.historyVisibility in ['everyone', 'after-join', 'hidden'])
@@ -813,13 +1318,79 @@ service cloud.firestore {
       return /databases/$(database)/documents/appConfig/voiceRoomFeatures;
     }
 
+    function voiceRoomLaunchPath() {
+      return /databases/$(database)/documents/appConfig/voiceRoomLaunch;
+    }
+
+    function roomLaunchAllowsAccess() {
+      let launchPath = voiceRoomLaunchPath();
+      return exists(launchPath)
+        && (
+          get(launchPath).data.status == 'testing'
+          || get(launchPath).data.status == 'active'
+        )
+        && get(launchPath).data.recordingDecision == 'rejected'
+        && (
+          isAdmin()
+          || (
+            get(launchPath).data.allowedUids is list
+            && request.auth.uid in get(launchPath).data.allowedUids
+          )
+          || get(launchPath).data.audienceMode == 'public'
+          || (
+            get(launchPath).data.audienceMode == 'region'
+            && get(launchPath).data.allowedRegionCodes is list
+            && exists(publicProfilePath(request.auth.uid))
+            && get(publicProfilePath(request.auth.uid)).data.countryCode
+              in get(launchPath).data.allowedRegionCodes
+          )
+        );
+    }
+
+    function roomNewJoinsAllowed() {
+      return !exists(voiceRoomFeaturePath())
+        || !('voice_room_new_joins' in get(voiceRoomFeaturePath()).data)
+        || get(voiceRoomFeaturePath()).data.voice_room_new_joins != false;
+    }
+
     function roomChatEnabled() {
       return exists(voiceRoomFeaturePath())
         && get(voiceRoomFeaturePath()).data.voice_room_chat == true;
     }
 
+    function roomGamesEnabled() {
+      return exists(voiceRoomFeaturePath())
+        && get(voiceRoomFeaturePath()).data.voice_room_games == true;
+    }
+
+    function roomMusicEnabled() {
+      return exists(voiceRoomFeaturePath())
+        && get(voiceRoomFeaturePath()).data.voice_room_shared_music == true;
+    }
+
+    function roomSupportRankingsEnabled() {
+      return exists(voiceRoomFeaturePath())
+        && get(voiceRoomFeaturePath()).data.voice_room_supporter_rankings == true;
+    }
+
+    function roomTargetsEnabled() {
+      return exists(voiceRoomFeaturePath())
+        && get(voiceRoomFeaturePath()).data.voice_room_owner_targets == true;
+    }
+
     function roomPresencePath(roomId, userId) {
       return /databases/$(database)/documents/rooms/$(roomId)/presence/$(userId);
+    }
+
+    function hasLiveReconnectPresence(roomId, userId) {
+      let presencePath = roomPresencePath(roomId, userId);
+      return exists(presencePath)
+        && get(presencePath).data.uid == userId
+        && (
+          get(presencePath).data.status == 'online'
+          || get(presencePath).data.status == 'reconnecting'
+        )
+        && get(presencePath).data.leaseExpiresAt >= request.time;
     }
 
     function canReadRoomChat(roomId) {
@@ -894,7 +1465,9 @@ service cloud.firestore {
     }
 
     function validJoinCountUpdate(roomId) {
-      return hasCompleteProfile()
+      return roomNewJoinsAllowed()
+        && roomLaunchAllowsAccess()
+        && hasCompleteProfile()
         && resource.data.status == 'active'
         && !exists(memberPath(roomId, request.auth.uid))
         && getAfter(memberPath(roomId, request.auth.uid)).data.uid == request.auth.uid
@@ -905,6 +1478,7 @@ service cloud.firestore {
 
     function canReadRoom(roomId) {
       return hasCompleteProfile()
+        && roomLaunchAllowsAccess()
         && resource.data.status == 'active'
         && (
           resource.data.visibility == 'public' ||
@@ -915,12 +1489,15 @@ service cloud.firestore {
     match /rooms/{roomId} {
       allow get: if canReadRoom(roomId);
       allow list: if hasCompleteProfile()
+        && roomLaunchAllowsAccess()
         && resource.data.status == 'active'
         && (
           resource.data.visibility == 'public' ||
           resource.data.hostId == request.auth.uid
         );
       allow create: if hasCompleteProfile()
+        && roomNewJoinsAllowed()
+        && roomLaunchAllowsAccess()
         && validActiveRoom(roomId)
         && getAfter(memberPath(roomId, request.auth.uid)).data.role == 'host';
       allow update: if validJoinCountUpdate(roomId);
@@ -930,11 +1507,18 @@ service cloud.firestore {
         allow get: if hasCompleteProfile() && request.auth.uid == userId;
         allow list: if false;
         allow create: if hasCompleteProfile()
+          && roomNewJoinsAllowed()
+          && roomLaunchAllowsAccess()
           && request.auth.uid == userId
           && getAfter(roomPath(roomId)).data.status == 'active'
           && validMember(roomId, userId);
         allow update: if hasCompleteProfile()
           && request.auth.uid == userId
+          && roomLaunchAllowsAccess()
+          && (
+            roomNewJoinsAllowed()
+            || hasLiveReconnectPresence(roomId, userId)
+          )
           && validMemberRefresh(userId);
         allow delete: if false;
       }
@@ -948,11 +1532,155 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      match /themeEntitlements/{themeId} {
+        allow read, write: if false;
+      }
+
+      match /ownershipTransferRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /ownershipTransfers/{transferId} {
+        allow get, list: if hasActivePublicProfile()
+          && resource.data.roomId == roomId
+          && (
+            request.auth.uid == resource.data.fromUid
+            || request.auth.uid == resource.data.toUid
+          );
+        allow write: if false;
+      }
+
+      match /giftCommandRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /giftQuotes/{quoteId} {
+        allow read, write: if false;
+      }
+
+      match /giftEvents/{eventId} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      match /giftContributions/{userId} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      match /giftCombos/{comboId} {
+        allow read, write: if false;
+      }
+
+      match /supportPeriods/{periodId}/{document=**} {
+        allow read, write: if false;
+      }
+
+      match /supportLeaderboards/{periodId} {
+        allow get, list: if roomSupportRankingsEnabled() && canReadPresence(roomId);
+        allow write: if false;
+      }
+
+      match /rocketCycles/{cycleId} {
+        allow get, list: if roomSupportRankingsEnabled() && canReadPresence(roomId);
+        allow write: if false;
+      }
+
+      match /targetCycles/{document=**} {
+        allow read, write: if false;
+      }
+
+      match /targetRosterDrafts/{cycleId} {
+        allow read, write: if false;
+      }
+
+      match /targetPublicCycles/{cycleId} {
+        allow get, list: if roomTargetsEnabled() && canReadPresence(roomId);
+        allow write: if false;
+      }
+
+      match /targetRosterPreviews/{cycleId} {
+        allow get: if roomTargetsEnabled()
+          && hasActivePublicProfile()
+          && resource.data.roomId == roomId
+          && resource.data.ownerUid == request.auth.uid;
+        allow list, write: if false;
+      }
+
+      match /entryEffectRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /entryEffectClaims/{claimId} {
+        allow read, write: if false;
+      }
+
+      match /entryEffectRateLimits/{userId} {
+        allow read, write: if false;
+      }
+
+      match /gameCommandRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /gameCommandRateLimits/{userId} {
+        allow read, write: if false;
+      }
+
+      match /gameRewardClaims/{rewardId} {
+        allow read, write: if false;
+      }
+
+      match /gameSessions/{sessionId} {
+        allow read: if roomGamesEnabled() && canReadPresence(roomId);
+        allow write: if false;
+      }
+
+      match /musicCommandRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /musicLeases/{leaseId} {
+        allow read: if roomMusicEnabled() && canReadPresence(roomId);
+        allow write: if false;
+      }
+
+      match /recordingCommandRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /recordingSessions/{sessionId} {
+        allow read: if canReadPresence(roomId);
+        allow write: if false;
+      }
+
+      match /recordingSegments/{segmentId} {
+        allow read, write: if false;
+      }
+
+      match /recordingNoticeAcks/{userId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow write: if false;
+      }
+
+      match /events/{eventId} {
+        allow read: if canReadPresence(roomId);
+        allow write: if false;
+      }
+
       match /chatRequests/{requestId} {
         allow read, write: if false;
       }
 
       match /chatRateLimits/{userId} {
+        allow read, write: if false;
+      }
+
+      match /commandRateLimits/{userId} {
+        allow read, write: if false;
+      }
+
+      match /giftRateLimits/{userId} {
         allow read, write: if false;
       }
 
@@ -994,6 +1722,37 @@ service cloud.firestore {
         allow create, update: if validOwnPresence(roomId, userId);
         allow delete: if false;
       }
+    }
+
+    match /roomEvidence/{evidenceId} {
+      allow read, write: if false;
+    }
+
+    match /roomEvidenceAccessLogs/{logId} {
+      allow read, write: if false;
+    }
+
+    match /roomModerationNotifications/{ownerUid}/items/{notificationId} {
+      allow read: if isOwner(ownerUid);
+      allow write: if false;
+    }
+
+    match /roomModerationAppeals/{appealId} {
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && resource.data.status == 'eligible'
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.requestId == resource.data.requestId
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.appealText is string
+        && request.resource.data.appealText.size() >= 10
+        && request.resource.data.appealText.size() <= 1000
+        && request.resource.data.submittedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['appealText', 'status', 'submittedAt']);
+      allow create, delete: if false;
     }
   }
 }

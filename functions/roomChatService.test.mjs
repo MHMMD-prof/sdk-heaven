@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { executeRoomChatCommand } = require('./roomChatService');
+const { cleanupExpiredRoomChatMessages, executeRoomChatCommand } = require('./roomChatService');
 
 describe('roomChatService', () => {
   it('creates an idempotent, server-authoritative message and rate record', async () => {
@@ -85,9 +85,13 @@ describe('roomChatService', () => {
     seedRoom(db);
     seedTarget(db);
     const { createFriendshipId } = require('./socialFriendsCore');
+    const { createDirectConversationId } = require('./directChatCore');
     const relationshipId = createFriendshipId('member-1', 'target-1');
+    const conversationId = createDirectConversationId('member-1', 'target-1');
     db.data.set(`friendships/${relationshipId}`, { memberUids: ['member-1', 'target-1'] });
     db.data.set(`friendRequests/${relationshipId}`, { status: 'pending' });
+    db.data.set(`directConversations/${conversationId}`, { requestState: 'pending' });
+    db.data.set(`directMessageRequests/${conversationId}`, { status: 'pending' });
 
     expect(await executeRoomChatCommand({
       body: {
@@ -109,6 +113,11 @@ describe('roomChatService', () => {
     });
     expect(db.data.has(`friendships/${relationshipId}`)).toBe(false);
     expect(db.data.has(`friendRequests/${relationshipId}`)).toBe(false);
+    expect(db.data.get(`directMessageRequests/${conversationId}`)).toMatchObject({
+      blockedByUid: 'member-1',
+      status: 'blocked',
+    });
+    expect(db.data.get(`directConversations/${conversationId}`)).toMatchObject({ requestState: 'blocked' });
   });
 
   it('snapshots reported message evidence and places the message on hold', async () => {
@@ -174,6 +183,36 @@ describe('roomChatService', () => {
       decodedToken: { uid: 'member-1' },
       fieldValue: fakeFieldValue,
     })).toMatchObject({ code: 'FEATURE_DISABLED', ok: false });
+  });
+
+  it('deletes only messages selected by the retention query', async () => {
+    const deleted = [];
+    const documents = [
+      { ref: { path: 'rooms/room-1/messages/expired-1' } },
+      { ref: { path: 'rooms/room-2/messages/expired-2' } },
+    ];
+    const query = {
+      where: () => query,
+      orderBy: () => query,
+      limit: () => query,
+      get: async () => ({ docs: documents, empty: false, size: documents.length }),
+    };
+    const db = {
+      batch: () => ({
+        commit: async () => undefined,
+        delete: (reference) => deleted.push(reference.path),
+      }),
+      collectionGroup: () => query,
+    };
+
+    await expect(cleanupExpiredRoomChatMessages({
+      clock: fakeClock,
+      db,
+    })).resolves.toEqual({ deleted: 2, scanned: 2 });
+    expect(deleted).toEqual([
+      'rooms/room-1/messages/expired-1',
+      'rooms/room-2/messages/expired-2',
+    ]);
   });
 });
 

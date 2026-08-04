@@ -5,7 +5,7 @@ const {
   normalizeUserDiscoveryInput,
 } = require('./socialDiscoveryCore');
 
-async function discoverUsers({ db, input, uid }) {
+async function discoverUsers({ db, input, skipFeatureGate = false, uid }) {
   const validation = normalizeUserDiscoveryInput(input);
 
   if (!validation.ok) {
@@ -14,7 +14,7 @@ async function discoverUsers({ db, input, uid }) {
 
   const featureSnapshot = await db.doc('appConfig/socialFeatures').get();
 
-  if (!featureSnapshot.exists || featureSnapshot.data()?.usersDiscovery !== true) {
+  if (!skipFeatureGate && (!featureSnapshot.exists || featureSnapshot.data()?.usersDiscovery !== true)) {
     return { errorCode: 'FEATURE_DISABLED' };
   }
 

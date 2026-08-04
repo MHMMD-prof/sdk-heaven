@@ -1,4 +1,6 @@
 const crypto = require('node:crypto');
+const { readPublicAvatarFrameProjection } = require('./avatarFrameProjectionCore');
+const { readPublicEquipmentCosmetics } = require('./equipmentCosmeticsCore');
 
 const DEFAULT_COUNTRY_CODE = 'IQ';
 const PUBLIC_ID_MAX = 9999999;
@@ -16,6 +18,9 @@ const SOCIAL_FEATURE_FLAGS = [
   'couples',
   'pushNotifications',
   'representativeTransfers',
+  'directMessages',
+  'directMessageRequests',
+  'directMessageMedia',
 ];
 
 const SOCIAL_ERRORS = Object.freeze({
@@ -205,6 +210,8 @@ function resolveSocialCommandRequest({ auth, data }) {
       'decline-friend-request',
       'cancel-friend-request',
       'remove-friend',
+      'block-user',
+      'unblock-user',
       'get-wallet-store',
       'purchase-special-id',
       'get-store-catalog',
@@ -286,6 +293,15 @@ function buildPublicProfileDocument({ existing = {}, privateProfile, publicId, t
       updatedAt: existing.representativeBadge.updatedAt,
     };
   }
+
+  const avatarFrame = readPublicAvatarFrameProjection(existing);
+  const equipmentCosmetics = readPublicEquipmentCosmetics(existing);
+  const equippedCosmetics = { ...equipmentCosmetics };
+  if (avatarFrame) {
+    document.equippedAvatarFrame = { assetUrl: avatarFrame.assetUrl, itemId: avatarFrame.itemId };
+    if (avatarFrame.canonicalAsset) equippedCosmetics.avatarFrame = { ...avatarFrame.canonicalAsset, itemId: avatarFrame.itemId };
+  }
+  if (Object.keys(equippedCosmetics).length) document.equippedCosmetics = equippedCosmetics;
 
   return document;
 }

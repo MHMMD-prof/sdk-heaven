@@ -37,6 +37,7 @@ import {
   shouldShowEventBanner,
 } from '../utils/carromPresentation';
 import { CARROM_WORLD_SIZE } from '../utils/carromEngine';
+import { useLeaveRoomGameOnExit } from '../voice/useLeaveRoomGameOnExit';
 
 const boardImage = require('../../assets/carrom/board-royal-majlis-v3.png');
 const SHOW_CARROM_DEBUG_OVERLAY = false;
@@ -45,7 +46,8 @@ const SHOW_CARROM_PERF_OVERLAY = false;
 
 type CarromScreenProps = NativeStackScreenProps<RootStackParamList, 'Carrom'>;
 
-export function CarromScreen({ navigation }: CarromScreenProps) {
+export function CarromScreen({ navigation, route }: CarromScreenProps) {
+  useLeaveRoomGameOnExit(route.params ?? {});
   const { height, width } = useWindowDimensions();
   const isCompactPhone = height < 720 || width < 380;
   const contentWidth = Math.min(width, 680);

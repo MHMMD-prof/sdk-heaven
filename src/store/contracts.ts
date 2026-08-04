@@ -2,6 +2,12 @@ export const STORE_CATEGORIES = [
   'game-items',
   'chat-themes',
   'avatar-frames',
+  'profile-skins',
+  'chat-bubbles',
+  'nameplates',
+  'cosmetic-badges',
+  'seat-effects',
+  'stickers',
   'cars',
   'custom-ids',
 ] as const;
@@ -40,18 +46,35 @@ export type StoreStock =
   | { kind: 'unlimited' }
   | { kind: 'limited'; remaining: number };
 
+export type StoreEntryPresentation = {
+  animationEnabled: boolean;
+  audioAsset?: { assetId: string; assetVersionId: string };
+  durationMs: number;
+  fallbackAsset?: { assetId: string; assetVersionId: string };
+  minimumClientVersion: string;
+  performanceTier: 'low' | 'standard' | 'high';
+  physicalApprovalReceiptId?: string;
+  schemaVersion: 1;
+  soundPolicy: 'off' | 'soft' | 'full';
+  visualAsset?: { assetId: string; assetVersionId: string };
+  visualFormat?: 'lottie-json' | 'mp4';
+};
+
 export type StoreCatalogItem = {
   availability: StoreAvailability;
   category: StoreCategory;
   customId?: string;
+  cosmeticAsset?: { assetId: string; assetVersionId: string };
   description: LocalizedStoreText;
   duration: StoreDuration;
+  entryPresentation?: StoreEntryPresentation;
   itemId: string;
   name: LocalizedStoreText;
   order: number;
   previewAssetUrl: string;
   prices: StorePrice;
   purchasingEnabled: boolean;
+  stickerAsset?: { assetId: string; assetVersionId: string };
   stock: StoreStock;
   thumbnailUrl: string;
 };
@@ -61,6 +84,7 @@ export type StoreOwnershipState = 'active' | 'expired';
 export type StoreOwnership = {
   acquiredAt: unknown;
   category: StoreCategory;
+  cosmeticAsset?: { assetId: string; assetVersionId: string };
   duration: StoreDuration;
   equipped: boolean;
   expiresAt?: unknown;

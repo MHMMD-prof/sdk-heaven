@@ -16,6 +16,8 @@ import type { StoreCategory } from '../../store/contracts';
 import { orderEquipmentItems } from '../../store/equipmentLibrary';
 import { resolveStoreArtwork } from '../../store/storeArtwork';
 import { colors, radius, spacing, typography } from '../../theme';
+import { AvatarFrameLayer } from '../AvatarPresentation';
+import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -25,6 +27,11 @@ const categoryOptions: Array<{
   label: string;
 }> = [
   { category: 'avatar-frames', icon: { ios: 'person.crop.circle', android: 'account_circle', web: 'account_circle' }, label: 'إطارات الصورة' },
+  { category: 'profile-skins', icon: { ios: 'person.text.rectangle.fill', android: 'badge', web: 'badge' }, label: 'خلفيات الملف' },
+  { category: 'chat-bubbles', icon: { ios: 'bubble.left.and.bubble.right.fill', android: 'chat_bubble', web: 'chat_bubble' }, label: 'فقاعات الدردشة' },
+  { category: 'nameplates', icon: { ios: 'rectangle.and.pencil.and.ellipsis', android: 'label', web: 'label' }, label: 'لوحات الاسم' },
+  { category: 'cosmetic-badges', icon: { ios: 'seal.fill', android: 'verified', web: 'verified' }, label: 'الشارات التجميلية' },
+  { category: 'seat-effects', icon: { ios: 'mic.circle.fill', android: 'mic', web: 'mic' }, label: 'تأثيرات المقعد' },
   { category: 'chat-themes', icon: { ios: 'paintpalette.fill', android: 'palette', web: 'palette' }, label: 'ثيمات الدردشة' },
   { category: 'cars', icon: { ios: 'car.fill', android: 'directions_car', web: 'directions_car' }, label: 'السيارات' },
   { category: 'game-items', icon: { ios: 'gamecontroller.fill', android: 'sports_esports', web: 'sports_esports' }, label: 'عناصر اللعبة' },
@@ -39,6 +46,7 @@ export function MyItemsEquipment({
   avatarLabel = '؟',
   busy,
   catalogItems,
+  cosmeticsFlags,
   compact,
   onEquip,
   onOpenCategory,
@@ -48,6 +56,7 @@ export function MyItemsEquipment({
   avatarLabel: string;
   busy: string;
   catalogItems: CustomerStoreCatalogItem[];
+  cosmeticsFlags: CosmeticsFeatureFlags;
   compact: boolean;
   onEquip: (row: MyStoreItem) => void;
   onOpenCategory: (category: StoreCategory) => void;
@@ -99,7 +108,15 @@ export function MyItemsEquipment({
 
         <PlayerMannequin
           avatarArtwork={equippedAvatar?.catalog?.previewAssetUrl || equippedAvatar?.catalog?.thumbnailUrl}
+          avatarFrame={equippedAvatar ? {
+            assetUrl: equippedAvatar.catalog?.previewAssetUrl || equippedAvatar.catalog?.thumbnailUrl || '',
+            itemId: equippedAvatar.ownership.itemId,
+            ...((equippedAvatar.catalog?.cosmeticAsset || equippedAvatar.ownership.cosmeticAsset)
+              ? { canonicalAsset: equippedAvatar.catalog?.cosmeticAsset || equippedAvatar.ownership.cosmeticAsset }
+              : {}),
+          } : undefined}
           avatarLabel={avatarLabel}
+          cosmeticsFlags={cosmeticsFlags}
         />
 
         {categoryOptions.map((option, index) => {
@@ -127,14 +144,14 @@ export function MyItemsEquipment({
 }
 
 const slotPositions: StyleProp<ViewStyle>[] = [
-  { right: 14, top: 28 },
-  { left: 14, top: 28 },
-  { right: 14, top: 180 },
-  { left: 14, top: 180 },
-  { left: '50%', marginLeft: -50, top: 360 },
+  { right: 14, top: 22 }, { left: 14, top: 22 },
+  { right: 14, top: 150 }, { left: 14, top: 150 },
+  { right: 14, top: 278 }, { left: 14, top: 278 },
+  { right: 14, top: 406 }, { left: 14, top: 406 },
+  { right: 14, top: 534 }, { left: 14, top: 534 },
 ];
 
-function PlayerMannequin({ avatarArtwork, avatarLabel }: { avatarArtwork?: string; avatarLabel: string }) {
+function PlayerMannequin({ avatarArtwork, avatarFrame, avatarLabel, cosmeticsFlags }: { avatarArtwork?: string; avatarFrame?: import('../../cosmetics/avatarFrameProjection').AvatarFrameProjection; avatarLabel: string; cosmeticsFlags: CosmeticsFeatureFlags }) {
   const initial = typeof avatarLabel === 'string' ? ([...avatarLabel.trim()][0] || '؟') : '؟';
 
   return (
@@ -147,6 +164,7 @@ function PlayerMannequin({ avatarArtwork, avatarLabel }: { avatarArtwork?: strin
             <Text style={styles.playerInitial}>{initial}</Text>
           )}
         </LinearGradient>
+        <AvatarFrameLayer flags={cosmeticsFlags} frame={avatarFrame} />
         <View style={styles.previewJewel} />
       </View>
       <LinearGradient colors={['#6E121C', '#28080C', '#090304']} style={styles.playerTorso}>
@@ -380,8 +398,8 @@ const styles = StyleSheet.create({
   sectionHeading: { alignItems: 'flex-end', gap: 6, marginTop: 2 },
   sectionTitle: { color: '#F7D98D', fontSize: 22, fontWeight: typography.weights.black, textAlign: 'right' },
   sectionRule: { backgroundColor: '#9C7029', height: 1, width: 90 },
-  equipmentBoard: { backgroundColor: '#090405', borderColor: 'rgba(216,168,78,.5)', borderRadius: 24, borderWidth: 1, height: 510, overflow: 'hidden', position: 'relative' },
-  equipmentBoardCompact: { height: 490 },
+  equipmentBoard: { backgroundColor: '#090405', borderColor: 'rgba(216,168,78,.5)', borderRadius: 24, borderWidth: 1, height: 670, overflow: 'hidden', position: 'relative' },
+  equipmentBoardCompact: { height: 670 },
   boardHaloOuter: { borderColor: 'rgba(216,168,78,.13)', borderRadius: 127, borderWidth: 1, height: 254, left: '50%', marginLeft: -127, position: 'absolute', top: 64, width: 254 },
   boardHaloInner: { borderColor: 'rgba(141,27,39,.3)', borderRadius: 102, borderWidth: 1, height: 204, left: '50%', marginLeft: -102, position: 'absolute', top: 89, width: 204 },
   connector: { backgroundColor: 'rgba(216,168,78,.28)', height: 1, position: 'absolute', width: 74 },

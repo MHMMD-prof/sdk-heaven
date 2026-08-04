@@ -258,12 +258,20 @@ async function executeAdminRepresentativeUpdate({ db, decodedToken, fieldValue, 
     if (!profile.exists) throw Object.assign(new Error('Target public profile was not found.'), { status: 404 });
     const currentUpdatedAt = privilege.exists && isTimestampLike(privilege.data()?.updatedAt)
       ? new Date(privilege.data().updatedAt.toMillis()).toISOString()
-      : '';
-    if (input.expectedUpdatedAt && input.expectedUpdatedAt !== currentUpdatedAt) {
+      : 'missing';
+    if (input.expectedUpdatedAt !== currentUpdatedAt) {
       throw Object.assign(new Error('Representative permissions changed since the user record was opened. Refresh before continuing.'), { status: 409 });
     }
     const timestamp = fieldValue.serverTimestamp();
-    transaction.set(privilegeRef, { active: input.active, createdAt: privilege.exists && privilege.data()?.createdAt ? privilege.data().createdAt : timestamp, currencies: input.currencies, grantedBy: decodedToken.uid, uid: input.targetUid, updatedAt: timestamp });
+    transaction.set(privilegeRef, {
+      active: input.active,
+      createdAt: privilege.exists && privilege.data()?.createdAt ? privilege.data().createdAt : timestamp,
+      currencies: input.currencies,
+      grantedBy: decodedToken.uid,
+      limits: privilege.data()?.limits || {},
+      uid: input.targetUid,
+      updatedAt: timestamp,
+    });
     transaction.update(profileRef, {
       representativeBadge: {
         active: input.active,
@@ -271,7 +279,7 @@ async function executeAdminRepresentativeUpdate({ db, decodedToken, fieldValue, 
       },
       updatedAt: timestamp,
     });
-    transaction.create(auditRef, { action: 'representative-update', active: input.active, actorEmail: decodedToken.email || '', actorUid: decodedToken.uid, createdAt: timestamp, currencies: input.currencies, kind: 'economy', targetUid: input.targetUid });
+    transaction.create(auditRef, { action: 'representative-update', active: input.active, actorEmail: decodedToken.email || '', actorUid: decodedToken.uid, createdAt: timestamp, currencies: input.currencies, kind: 'economy', note: input.reason, status: 'completed', targetUid: input.targetUid });
     return auditRef.id;
   });
 }
@@ -571,7 +579,12 @@ function resolveRepresentativeTransferPolicy(policyData, privilegeData) {
   const globalPolicy = normalizeRepresentativeTransferPolicy(policyData?.limits);
   if (!globalPolicy.ok) return { configured: false, effective: undefined, overrideCurrencies: [] };
   const rawOverrides = privilegeData?.limits;
-  if (rawOverrides === undefined) return { configured: true, effective: globalPolicy.value, overrideCurrencies: [] };
+  const hasNoOverrides = rawOverrides === undefined
+    || (rawOverrides !== null
+      && typeof rawOverrides === 'object'
+      && !Array.isArray(rawOverrides)
+      && Object.keys(rawOverrides).length === 0);
+  if (hasNoOverrides) return { configured: true, effective: globalPolicy.value, overrideCurrencies: [] };
   const overrides = normalizeRepresentativeTransferPolicy(rawOverrides, { allowPartial: true });
   if (!overrides.ok) return { configured: false, effective: undefined, overrideCurrencies: [] };
   return {

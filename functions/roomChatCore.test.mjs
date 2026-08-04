@@ -51,11 +51,22 @@ test('resolves room authority with staff region scope above room roles', () => {
   assert.deepEqual(
     resolveRoomChatAuthority({
       decodedToken: { admin: true, adminRole: 'super-moderator' },
+      featureFlags: { voice_room_super_moderation: true },
       membership: { authorityRole: 'member', status: 'active', uid: 'actor' },
       operatorProfile: { role: 'super-moderator', status: 'active', regionCodes: ['IQ'] },
       room: { countryCode: 'IQ' },
     }),
     { authority: 'super-moderator', canManage: true },
+  );
+  assert.deepEqual(
+    resolveRoomChatAuthority({
+      decodedToken: { admin: true, adminRole: 'super-moderator' },
+      featureFlags: { voice_room_super_moderation: false },
+      membership: { authorityRole: 'member', status: 'active', uid: 'actor' },
+      operatorProfile: { role: 'super-moderator', status: 'active', regionCodes: ['IQ'] },
+      room: { countryCode: 'IQ' },
+    }),
+    { authority: 'member', canManage: false },
   );
   assert.deepEqual(
     resolveRoomChatAuthority({

@@ -2,7 +2,11 @@ import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { applyLiveKitPlan, executeRoomCommand } = require('./roomCommandService');
+const {
+  applyLiveKitPlan,
+  executeRoomCommand,
+  synchronizeRoomCommandLiveKit,
+} = require('./roomCommandService');
 
 describe('roomCommandService', () => {
   it('applies a command once and replays the stored result without a second mutation', async () => {
@@ -63,6 +67,37 @@ describe('roomCommandService', () => {
     }));
   });
 
+  it('leases pending LiveKit work so concurrent workers apply it once', async () => {
+    const db = createFakeDb();
+    db.data.set('rooms/room-1/commandRequests/room_request_sync_01', {
+      actorAuthority: 'owner',
+      liveKitSyncAttempts: 0,
+      liveKitSyncStatus: 'pending',
+    });
+    db.data.set('rooms/room-1/moderationEvents/command_room_request_sync_01', {
+      liveKitSyncStatus: 'pending',
+    });
+    const roomService = {
+      updateParticipant: vi.fn(async () => new Promise((resolve) => setTimeout(resolve, 5))),
+    };
+    const options = {
+      db,
+      fieldValue: fakeFieldValue,
+      liveKit: { type: 'update-permission', targetUid: 'member-1', canPublish: false },
+      requestId: 'room_request_sync_01',
+      roomId: 'room-1',
+      roomService,
+    };
+
+    const statuses = await Promise.all([
+      synchronizeRoomCommandLiveKit({ ...options, workerId: 'worker-1' }),
+      synchronizeRoomCommandLiveKit({ ...options, workerId: 'worker-2' }),
+    ]);
+
+    expect(statuses.sort()).toEqual(['leased', 'synced']);
+    expect(roomService.updateParticipant).toHaveBeenCalledTimes(1);
+  });
+
   it('audits and replays cross-region Super Moderator denials', async () => {
     const db = createFakeDb();
     seedCommandState(db);
@@ -83,6 +118,68 @@ describe('roomCommandService', () => {
     expect(db.data.get('rooms/room-1/moderationEvents/denied_room_request_0002')).toMatchObject({
       code: 'REGION_SCOPE_DENIED',
       status: 'denied',
+    });
+  });
+
+  it('records complete staff lockdown evidence, owner notice, and appeal eligibility', async () => {
+    const db = createFakeDb();
+    seedCommandState(db);
+    db.data.set('appConfig/voiceRoomFeatures', {
+      voice_room_command_center: true,
+      voice_room_super_moderation: true,
+    });
+    db.data.set('users/staff-1', {
+      uid: 'staff-1', email: 'staff@example.com', displayName: 'Region Staff', avatarLabel: 'R',
+    });
+    db.data.set('publicProfiles/staff-1', { uid: 'staff-1', moderationStatus: 'active' });
+    db.data.set('adminProfiles/staff-1', {
+      uid: 'staff-1', role: 'super-moderator', status: 'active', regionCodes: ['IQ'],
+    });
+    const result = await executeRoomCommand({
+      body: {
+        action: 'staff-lockdown',
+        expectedRevision: 7,
+        reason: 'violent incident',
+        reportId: 'case-1',
+        requestId: 'room_staff_lock_0001',
+        roomId: 'room-1',
+      },
+      db,
+      decodedToken: {
+        admin: true,
+        adminRole: 'super-moderator',
+        auth_time: Math.floor(Date.now() / 1000),
+        email: 'staff@example.com',
+        uid: 'staff-1',
+      },
+      fieldValue: fakeFieldValue,
+    });
+    expect(result).toMatchObject({ ok: true, result: { liveKitSyncStatus: 'pending' } });
+    expect(db.data.get('rooms/room-1')).toMatchObject({
+      audioLockdown: true,
+      chatMode: 'off',
+      staffLockdown: {
+        previousState: {
+          audioLockdown: false,
+          chatMode: 'everyone',
+          effectsPolicy: 'full',
+        },
+      },
+    });
+    expect(db.data.get('adminAuditEvents/room_command_room_staff_lock_0001')).toMatchObject({
+      actorRole: 'super-moderator',
+      before: { audioLockdown: false, chatMode: 'everyone' },
+      after: { audioLockdown: true, chatMode: 'off' },
+      countryCode: 'IQ',
+      liveKitSyncStatus: 'pending',
+    });
+    expect(db.data.get('roomModerationNotifications/owner-1/items/room_staff_lock_0001')).toMatchObject({
+      appealStatus: 'available',
+      ownerUid: 'owner-1',
+    });
+    expect(db.data.get('roomModerationAppeals/room-1_room_staff_lock_0001')).toMatchObject({
+      ownerUid: 'owner-1',
+      status: 'eligible',
     });
   });
 
@@ -132,7 +229,6 @@ describe('roomCommandService', () => {
         chatMode: 'everyone',
         effectsPolicy: 'reduced',
         slowModeSeconds: 10,
-        themeId: 'royal',
       },
     };
 
@@ -146,11 +242,10 @@ describe('roomCommandService', () => {
       effectsPolicy: 'reduced',
       revision: 8,
       slowModeSeconds: 10,
-      themeId: 'royal',
     });
     expect(await executeRoomCommand({
       ...base,
-      body: { ...body, settings: { ...body.settings, themeId: 'ocean' } },
+      body: { ...body, settings: { ...body.settings, announcement: 'تغيير مختلف' } },
     })).toMatchObject({ ok: false, code: 'REQUEST_ID_CONFLICT' });
   });
 
@@ -214,6 +309,7 @@ describe('roomCommandService', () => {
 });
 
 const fakeFieldValue = {
+  delete: () => null,
   increment: (value) => value,
   serverTimestamp: () => 'SERVER_TIMESTAMP',
 };
@@ -237,6 +333,7 @@ function seedCommandState(db) {
 
 function createFakeDb() {
   const data = new Map();
+  let transactionTail = Promise.resolve();
   const ref = (path) => ({
     path,
     collection(name) { return collection(`${path}/${name}`); },
@@ -272,6 +369,10 @@ function createFakeDb() {
     data,
     doc: ref,
     collection: (name) => collection(name),
-    runTransaction: (callback) => callback(transaction),
+    runTransaction(callback) {
+      const result = transactionTail.then(() => callback(transaction));
+      transactionTail = result.then(() => undefined, () => undefined);
+      return result;
+    },
   };
 }

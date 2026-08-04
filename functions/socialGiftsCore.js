@@ -1,4 +1,10 @@
 const GIFT_CATALOG_LIMIT = 30;
+const { readPublicAvatarFrameProjection } = require('./avatarFrameProjectionCore');
+const {
+  buildLegacyGiftPresentation,
+  createGiftPhysicalApprovalReceiptId,
+  mapGiftPresentation,
+} = require('./roomGiftPresentationCore');
 const GIFT_HISTORY_LIMIT = 20;
 const GIFT_KINDS = Object.freeze(['rose', 'crown', 'diamond', 'heart', 'star']);
 
@@ -33,11 +39,16 @@ function mapGiftCatalogItem(data) {
   if (!/^[a-z0-9_-]{2,40}$/.test(giftId) || nameAr.length < 2 || nameAr.length > 32) return undefined;
   if (!GIFT_KINDS.includes(data.iconKey) || !['available', 'disabled'].includes(data.status)) return undefined;
   if (!Number.isSafeInteger(data.price) || data.price < 1 || !Number.isSafeInteger(data.scoreValue) || data.scoreValue < 1) return undefined;
+  const presentation = data.presentation === undefined
+    ? buildLegacyGiftPresentation()
+    : mapGiftPresentation(data.presentation);
+  if (!presentation) return undefined;
   return {
     giftId,
     iconKey: data.iconKey,
     nameAr,
     price: data.price,
+    presentation,
     scoreValue: data.scoreValue,
     status: data.status,
   };
@@ -59,9 +70,17 @@ function mapGiftEvent(document) {
     nameAr: typeof data.nameAr === 'string' ? data.nameAr.slice(0, 32) : '',
     price: readNonNegativeInteger(data.price),
     recipientDisplayName: typeof data.recipientDisplayName === 'string' ? data.recipientDisplayName.slice(0, 32) : '',
+    ...(readPublicAvatarFrameProjection({
+      equippedAvatarFrame: data.recipientAvatarFrame,
+      equippedCosmetics: { avatarFrame: data.recipientAvatarFrame?.canonicalAsset ? { ...data.recipientAvatarFrame.canonicalAsset, itemId: data.recipientAvatarFrame.itemId } : undefined },
+    }) ? { recipientAvatarFrame: data.recipientAvatarFrame } : {}),
     recipientUid,
     scoreValue: readNonNegativeInteger(data.scoreValue),
     senderDisplayName: typeof data.senderDisplayName === 'string' ? data.senderDisplayName.slice(0, 32) : '',
+    ...(readPublicAvatarFrameProjection({
+      equippedAvatarFrame: data.senderAvatarFrame,
+      equippedCosmetics: { avatarFrame: data.senderAvatarFrame?.canonicalAsset ? { ...data.senderAvatarFrame.canonicalAsset, itemId: data.senderAvatarFrame.itemId } : undefined },
+    }) ? { senderAvatarFrame: data.senderAvatarFrame } : {}),
     senderUid,
   };
 }
@@ -70,6 +89,8 @@ function normalizeAdminGiftCatalogInput(input) {
   const expectedUpdatedAt = typeof input?.expectedUpdatedAt === 'string' ? input.expectedUpdatedAt.trim().slice(0, 80) : '';
   const reason = typeof input?.reason === 'string' ? input.reason.trim().slice(0, 300) : '';
   const requestId = typeof input?.requestId === 'string' ? input.requestId.trim() : '';
+  const rawPresentation = normalizeAdminGiftPresentationInput(input?.presentation, input);
+  if (!rawPresentation.ok) return rawPresentation;
   const item = mapGiftCatalogItem({
     giftId: typeof input?.giftId === 'string' ? input.giftId.trim() : '',
     iconKey: input?.iconKey,
@@ -77,11 +98,83 @@ function normalizeAdminGiftCatalogInput(input) {
     price: Number(input?.price),
     scoreValue: Number(input?.scoreValue),
     status: input?.status,
+    presentation: rawPresentation.value,
   });
   if (!/^[A-Za-z0-9_-]{12,80}$/.test(requestId) || reason.length < 2 || !item) {
     return { ok: false, error: 'Valid requestId and gift catalog fields are required.' };
   }
-  return { ok: true, value: { ...item, expectedUpdatedAt, reason, requestId } };
+  return {
+    ok: true,
+    value: {
+      ...item,
+      expectedUpdatedAt,
+      ...(rawPresentation.physicalApproval ? { physicalApproval: rawPresentation.physicalApproval } : {}),
+      reason,
+      requestId,
+    },
+  };
+}
+
+function normalizeAdminGiftPresentationInput(value, input) {
+  if (value === undefined || value === null) return { ok: true, value: buildLegacyGiftPresentation() };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, error: 'Gift presentation is invalid.' };
+  }
+  const animationEnabled = value.animationEnabled === true;
+  const existingReceiptId = typeof value.physicalApprovalReceiptId === 'string'
+    ? value.physicalApprovalReceiptId.trim()
+    : '';
+  const generatedReceiptId = animationEnabled
+    ? createGiftPhysicalApprovalReceiptId(
+      typeof input?.giftId === 'string' ? input.giftId.trim() : '',
+      typeof value?.visualAsset?.assetVersionId === 'string' ? value.visualAsset.assetVersionId.trim() : '',
+    )
+    : '';
+  const presentation = mapGiftPresentation({
+    ...value,
+    animationEnabled,
+    physicalApprovalReceiptId: animationEnabled
+      ? generatedReceiptId
+      : undefined,
+    schemaVersion: 1,
+  });
+  if (!presentation) return { ok: false, error: 'Gift presentation fields are invalid.' };
+  const reusesReceipt = animationEnabled && existingReceiptId === generatedReceiptId;
+  const androidDevice = typeof input?.physicalApproval?.androidDevice === 'string'
+    ? input.physicalApproval.androidDevice.trim().slice(0, 120)
+    : '';
+  const iosDevice = typeof input?.physicalApproval?.iosDevice === 'string'
+    ? input.physicalApproval.iosDevice.trim().slice(0, 120)
+    : '';
+  const testedClientVersion = typeof input?.physicalApproval?.testedClientVersion === 'string'
+    ? input.physicalApproval.testedClientVersion.trim()
+    : '';
+  if (animationEnabled && !reusesReceipt && (
+    input?.physicalApproval?.androidPassed !== true
+    || input?.physicalApproval?.iosPassed !== true
+    || androidDevice.length < 2
+    || iosDevice.length < 2
+    || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(testedClientVersion)
+  )) {
+    return { ok: false, error: 'Android and iOS physical approval are required for animated paid gifts.' };
+  }
+  const notes = typeof input?.physicalApproval?.notes === 'string'
+    ? input.physicalApproval.notes.trim().slice(0, 500)
+    : '';
+  return {
+    ok: true,
+    value: presentation,
+    ...(animationEnabled && !reusesReceipt ? {
+      physicalApproval: {
+        androidPassed: true,
+        androidDevice,
+        iosPassed: true,
+        iosDevice,
+        notes,
+        testedClientVersion,
+      },
+    } : {}),
+  };
 }
 
 function readNonNegativeInteger(value) {

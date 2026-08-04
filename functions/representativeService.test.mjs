@@ -177,6 +177,8 @@ describe('representativeService status and administration', () => {
       input: {
         active: true,
         currencies: { coins: true, diamonds: false },
+        expectedUpdatedAt: '1970-01-01T00:00:00.001Z',
+        reason: 'Activate representative access',
         requestId: 'activate_representative_1',
         targetUid: 'sender',
       },
@@ -199,6 +201,8 @@ describe('representativeService status and administration', () => {
       input: {
         active: false,
         currencies: { coins: false, diamonds: false },
+        expectedUpdatedAt: '1970-01-01T00:00:00.001Z',
+        reason: 'Revoke representative access',
         requestId: 'revoke_representative_1',
         targetUid: 'sender',
       },
@@ -270,7 +274,7 @@ describe('representativeService status and administration', () => {
       db,
       decodedToken: { email: 'admin@example.com', uid: 'admin' },
       fieldValue,
-      input: { active: true, currencies: { coins: true, diamonds: false }, expectedUpdatedAt: '2026-07-21T00:00:00.000Z', requestId: 'stale_representative_1', targetUid: 'sender' },
+      input: { active: true, currencies: { coins: true, diamonds: false }, expectedUpdatedAt: '2026-07-21T00:00:00.000Z', reason: 'Stale update test', requestId: 'stale_representative_1', targetUid: 'sender' },
     })).rejects.toMatchObject({ status: 409 });
     expect(db.read('adminAuditEvents/representative_stale_representative_1')).toBeUndefined();
   });
@@ -375,6 +379,11 @@ describe('representativeService status and administration', () => {
 
   it('maps overrides, PIN states, and deterministic UTC buckets', () => {
     const global = representativeDb().read('appConfig/representativeTransferPolicy');
+    expect(resolveRepresentativeTransferPolicy(global, { limits: {} })).toMatchObject({
+      configured: true,
+      effective: global.limits,
+      overrideCurrencies: [],
+    });
     expect(resolveRepresentativeTransferPolicy(global, { limits: { coins: { maxPerDay: 200, maxPerTransfer: 50, maxTransfersPerHour: 5 } } })).toMatchObject({
       configured: true,
       effective: { coins: { maxPerDay: 200 }, diamonds: { maxPerDay: 100_000 } },

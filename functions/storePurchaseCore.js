@@ -1,4 +1,5 @@
 const { isStoreCategory, isStoreCurrency, mapStoreCatalogItem, mapStoreDuration } = require('./storeCore');
+const { mapCosmeticAssetReference } = require('./avatarFrameProjectionCore');
 
 const STORE_CATALOG_LIMIT = 200;
 
@@ -36,10 +37,13 @@ function normalizeStoreGiftInput(input) {
 function mapStoreOwnership(data, documentId) {
   if (!data || data.kind !== 'store-ownership' || data.ownershipId !== documentId || data.itemId !== documentId) return undefined;
   const duration = mapStoreDuration(data.duration);
+  const cosmeticAsset = mapCosmeticAssetReference(data.cosmeticAsset);
+  if (data.cosmeticAsset !== undefined && !cosmeticAsset) return undefined;
   if (!data.uid || !isStoreCategory(data.category) || !duration || !['active', 'expired'].includes(data.state) || typeof data.equipped !== 'boolean') return undefined;
   return {
     acquiredAt: data.acquiredAt,
     category: data.category,
+    ...(cosmeticAsset ? { cosmeticAsset } : {}),
     duration,
     equipped: data.equipped,
     ...(data.expiresAt ? { expiresAt: data.expiresAt } : {}),
@@ -71,6 +75,7 @@ function buildStoreOwnership({ acquiredAt, expiresAt, item, ownershipId, uid }) 
   return {
     acquiredAt,
     category: item.category,
+    ...(item.cosmeticAsset ? { cosmeticAsset: item.cosmeticAsset } : {}),
     duration: item.duration,
     equipped: true,
     ...(expiresAt ? { expiresAt } : {}),

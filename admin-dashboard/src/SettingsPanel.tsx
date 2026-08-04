@@ -11,6 +11,7 @@ import {
   requestAdminAdministrators,
   requestAdminSettings,
   updateAdminFeatureFlag,
+  updateRoomGiftPolicy,
   updateAdminSettings,
 } from './adminDashboardApi';
 import { useAdminFeedback } from './AdminFeedback';
@@ -44,6 +45,8 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
   const [newRole, setNewRole] = useState<AdminRole>('support');
   const [reason, setReason] = useState('');
   const [busyKey, setBusyKey] = useState('');
+  const [commissionBps, setCommissionBps] = useState('');
+  const [commissionReason, setCommissionReason] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingGovernanceAction | null>(null);
   const [actionReason, setActionReason] = useState('');
   const { notify } = useAdminFeedback();
@@ -55,6 +58,7 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
     try {
       const [settings, administrators] = await Promise.all([requestAdminSettings(user), requestAdminAdministrators(user)]);
       setState({ status: 'ready', administrators, settings });
+      setCommissionBps(String(settings.roomGiftPolicy.commissionBps));
       applyDisplayPreferences(settings.preferences);
     } catch (error) {
       setState({ status: 'error', message: error instanceof Error ? error.message : 'تعذّر تحميل إعدادات الإدارة.' });
@@ -95,17 +99,46 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
     setPendingAction({ action, administrator, kind: 'administrator', role });
   }
 
+  async function saveRegionScope(administrator: AdminAdministrator, regionCodes: string[]) {
+    if (!reason.trim() && !window.prompt) {
+      notify('سبب التحديث مطلوب', { tone: 'error' });
+      return;
+    }
+    const scopeReason = window.prompt('سبب تحديث النطاق الإقليمي', 'تحديث نطاق المشرف الإقليمي') || '';
+    if (scopeReason.trim().length < 3) {
+      notify('سبب التحديث مطلوب', { tone: 'error' });
+      return;
+    }
+    setBusyKey(`scope:${administrator.uid}`);
+    try {
+      await executeAdministratorAction(user, {
+        administratorAction: 'set-region-scope',
+        reason: scopeReason.trim(),
+        regionCodes,
+        targetUid: administrator.uid,
+      });
+      notify('حُدّث النطاق الإقليمي', { tone: 'success' });
+      await load();
+    } catch (error) {
+      notify('تعذّر تحديث النطاق', { description: error instanceof Error ? error.message : '', tone: 'error' });
+    } finally {
+      setBusyKey('');
+    }
+  }
+
   async function submitGovernanceAction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!pendingAction || actionReason.trim().length < 3) return;
     if (pendingAction.kind === 'feature') {
       const { enabled, flag } = pendingAction;
+      if (state.status !== 'ready') return;
+      const expectedUpdatedAt = state.settings.featureFlagsUpdatedAt;
       setBusyKey(`flag:${flag}`);
       try {
-        await updateAdminFeatureFlag(user, { enabled, flag, reason: actionReason.trim() });
-        if (state.status === 'ready') setState({ ...state, settings: { ...state.settings, featureFlags: { ...state.settings.featureFlags, [flag]: enabled } } });
+        await updateAdminFeatureFlag(user, { enabled, expectedUpdatedAt, flag, reason: actionReason.trim() });
         notify('حُدّث مفتاح الميزة', { description: 'سُجّل التغيير مع حالته السابقة والجديدة.', tone: 'success' });
         setPendingAction(null);
+        await load();
       } catch (error) { notify('تعذّر تحديث الميزة', { description: error instanceof Error ? error.message : '', tone: 'error' }); }
       finally { setBusyKey(''); }
       return;
@@ -125,6 +158,35 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
   async function toggleFeature(flag: keyof AdminSettings['featureFlags'], enabled: boolean) {
     setActionReason('');
     setPendingAction({ enabled, flag, kind: 'feature' });
+  }
+
+  async function saveRoomGiftPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (state.status !== 'ready' || !canManageFlags) return;
+    const nextCommissionBps = Number(commissionBps);
+    if (!Number.isInteger(nextCommissionBps) || nextCommissionBps < 0 || nextCommissionBps > 10_000) {
+      notify('نسبة العمولة غير صالحة', { description: 'استخدم قيمة صحيحة بين 0 و10000 نقطة أساس.', tone: 'error' });
+      return;
+    }
+    if (commissionReason.trim().length < 3) {
+      notify('سبب التغيير مطلوب', { description: 'اكتب سبباً واضحاً لتسجيله في سجل التدقيق.', tone: 'error' });
+      return;
+    }
+    setBusyKey('room-gift-policy');
+    try {
+      await updateRoomGiftPolicy(user, {
+        commissionBps: nextCommissionBps,
+        expectedVersion: state.settings.roomGiftPolicy.version,
+        reason: commissionReason.trim(),
+      });
+      setCommissionReason('');
+      notify('حُدّثت عمولة هدايا الغرف', { description: 'أُنشئ إصدار سياسة جديد وسُجّل التغيير في سجل التدقيق.', tone: 'success' });
+      await load();
+    } catch (error) {
+      notify('تعذّر تحديث عمولة الهدايا', { description: error instanceof Error ? error.message : '', tone: 'error' });
+    } finally {
+      setBusyKey('');
+    }
   }
 
   if (state.status !== 'ready') {
@@ -199,11 +261,58 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
         ) : <p className="settings-permission-note">يمكنك مراجعة الفريق، بينما تغيير الأدوار محصور بمالك النظام.</p>}
         <div className="administrator-table" role="table">
           <div className="administrator-row administrator-head" role="row"><span>المسؤول</span><span>الدور</span><span>آخر دخول</span><span>الأمان</span></div>
-          {administrators.map((administrator) => <AdministratorRow administrator={administrator} busyKey={busyKey} canManage={canManageAdmins} currentUid={session.uid} key={administrator.uid} onAction={runAdministratorAction} />)}
+          {administrators.map((administrator) => (
+            <AdministratorRow
+              administrator={administrator}
+              busyKey={busyKey}
+              canManage={canManageAdmins}
+              currentUid={session.uid}
+              key={administrator.uid}
+              onAction={runAdministratorAction}
+              onSaveScope={saveRegionScope}
+            />
+          ))}
         </div>
       </AdminSurface>
 
       <div className="settings-grid settings-lower-grid">
+        <AdminSurface className="settings-card">
+          <SettingsHeading
+            icon="٪"
+            title="عمولة هدايا الغرف"
+            description="سياسة مالية بإصدارات متزايدة. عروض السعر المفتوحة تحتفظ بالإصدار الذي عُرض للمستخدم حتى انتهاء صلاحيتها."
+          />
+          <form className="admin-invite-form" onSubmit={saveRoomGiftPolicy}>
+            <label>
+              <span>النسبة المئوية</span>
+              <input
+                aria-label="عمولة هدايا الغرف بالنسبة المئوية"
+                disabled={!canManageFlags || busyKey === 'room-gift-policy'}
+                max="100"
+                min="0"
+                onChange={(event) => setCommissionBps(String(Math.round(Number(event.target.value) * 100)))}
+                step="0.01"
+                type="number"
+                value={commissionBps === '' ? '' : String(Number(commissionBps) / 100)}
+              />
+            </label>
+            <input
+              aria-label="سبب تغيير عمولة هدايا الغرف"
+              disabled={!canManageFlags || busyKey === 'room-gift-policy'}
+              onChange={(event) => setCommissionReason(event.target.value)}
+              placeholder="سبب التغيير"
+              value={commissionReason}
+            />
+            <button className="secondary-button compact" disabled={!canManageFlags || busyKey === 'room-gift-policy'} type="submit">
+              {busyKey === 'room-gift-policy' ? 'جارٍ الحفظ…' : 'حفظ إصدار جديد'}
+            </button>
+          </form>
+          <p className="settings-permission-note">
+            الإصدار {settings.roomGiftPolicy.version} · العمولة {(settings.roomGiftPolicy.commissionBps / 100).toFixed(2)}%
+            {settings.roomGiftPolicy.updatedAt ? ` · آخر تحديث ${formatDate(settings.roomGiftPolicy.updatedAt)}` : ''}
+          </p>
+          {!canManageFlags ? <p className="settings-permission-note">تغيير العمولة محصور بمالك المنصة.</p> : null}
+        </AdminSurface>
         <AdminSurface className="settings-card settings-flags-card">
           <SettingsHeading icon="⚑" title="مفاتيح المنصة المعتمدة" description="لا تظهر هنا إلا الميزات المدرجة صراحة في قائمة الخادم الآمنة." />
           <div className="feature-flag-list">
@@ -227,15 +336,49 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
   );
 }
 
-function AdministratorRow({ administrator, busyKey, canManage, currentUid, onAction }: { administrator: AdminAdministrator; busyKey: string; canManage: boolean; currentUid: string; onAction: (administrator: AdminAdministrator, action: 'change-role' | 'remove-admin' | 'revoke-sessions', role?: AdminRole) => Promise<void> }) {
+const ROOM_COUNTRY_CODES = [
+  'IQ', 'SA', 'SY', 'LB', 'YE', 'DZ', 'EG', 'JO', 'PS', 'AE', 'KW',
+  'QA', 'BH', 'OM', 'MA', 'TN', 'LY', 'SD', 'SO', 'DJ', 'MR', 'KM',
+] as const;
+
+function AdministratorRow({ administrator, busyKey, canManage, currentUid, onAction, onSaveScope }: {
+  administrator: AdminAdministrator;
+  busyKey: string;
+  canManage: boolean;
+  currentUid: string;
+  onAction: (administrator: AdminAdministrator, action: 'change-role' | 'remove-admin' | 'revoke-sessions', role?: AdminRole) => Promise<void>;
+  onSaveScope: (administrator: AdminAdministrator, regionCodes: string[]) => Promise<void>;
+}) {
   const [role, setRole] = useState(administrator.role);
+  const [regionCodes, setRegionCodes] = useState(administrator.regionCodes.join(','));
   const isSelf = administrator.uid === currentUid;
   return <div className="administrator-row" role="row">
-    <div className="administrator-identity"><span className="administrator-avatar">{(administrator.displayName || administrator.email || 'م').slice(0, 1)}</span><span><strong>{administrator.displayName || 'مسؤول'}</strong><small dir="ltr">{administrator.email || administrator.uid}</small></span></div>
+    <div className="administrator-identity"><span className="administrator-avatar">{(administrator.displayName || administrator.email || 'م').slice(0, 1)}</span><span><strong>{administrator.displayName || 'مسؤول'}</strong><small dir="ltr">{administrator.email || administrator.uid}</small>{administrator.role === 'super-moderator' ? <small>نطاق: {administrator.regionCodes.join(', ') || 'pending'}</small> : null}</span></div>
     <div>{canManage && !isSelf ? <select aria-label="دور المسؤول" onChange={(event) => setRole(event.target.value as AdminRole)} value={role}>{roles.map((item) => <option key={item} value={item}>{roleLabels[item]}</option>)}</select> : <AdminStatusBadge tone={administrator.role === 'owner' ? 'warning' : 'info'}>{roleLabels[administrator.role]}</AdminStatusBadge>}</div>
     <span className="administrator-date">{formatDate(administrator.lastSignInAt)}</span>
     <div className="administrator-actions">
       {canManage && !isSelf && role !== administrator.role ? <button disabled={Boolean(busyKey)} onClick={() => void onAction(administrator, 'change-role', role)} type="button">حفظ الدور</button> : null}
+      {canManage && administrator.role === 'super-moderator' ? (
+        <>
+          <input
+            aria-label="رموز الدول"
+            dir="ltr"
+            onChange={(event) => setRegionCodes(event.target.value)}
+            placeholder="IQ,SA"
+            value={regionCodes}
+          />
+          <button
+            disabled={Boolean(busyKey)}
+            onClick={() => void onSaveScope(
+              administrator,
+              regionCodes.split(',').map((code) => code.trim().toUpperCase()).filter((code) => ROOM_COUNTRY_CODES.includes(code as typeof ROOM_COUNTRY_CODES[number])),
+            )}
+            type="button"
+          >
+            حفظ النطاق
+          </button>
+        </>
+      ) : null}
       {(canManage || isSelf) ? <button disabled={Boolean(busyKey)} onClick={() => void onAction(administrator, 'revoke-sessions')} type="button">سحب الجلسات</button> : null}
       {canManage && !isSelf ? <button className="danger" disabled={Boolean(busyKey)} onClick={() => void onAction(administrator, 'remove-admin')} type="button">إزالة</button> : null}
     </div>
@@ -248,8 +391,31 @@ function SecurityCheck({ detail, title }: { detail: string; title: string }) { r
 function SettingToggle({ checked, description, disabled, label, onChange }: { checked: boolean; description: string; disabled?: boolean; label: string; onChange: (checked: boolean) => void }) { return <label className={`setting-toggle-row${disabled ? ' disabled' : ''}`}><span><strong>{label}</strong><small>{description}</small></span><input checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} type="checkbox" /><i aria-hidden="true" /></label>; }
 function applyDisplayPreferences(preferences: AdminPreferences) { document.documentElement.dataset.density = preferences.density; document.documentElement.dataset.motion = preferences.reduceMotion ? 'reduced' : 'full'; }
 function formatDate(value: string) { if (!value) return 'لا يوجد'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'غير متاح' : new Intl.DateTimeFormat('ar-IQ', { dateStyle: 'medium', timeStyle: 'short' }).format(date); }
-function translateEvent(action: string) { return ({ 'administrator-grant-role': 'منح دور إداري', 'administrator-change-role': 'تغيير دور إداري', 'administrator-remove-admin': 'إزالة مسؤول', 'administrator-revoke-sessions': 'سحب جلسات', 'admin-settings-update': 'تحديث التفضيلات', 'feature-flag-update': 'تحديث مفتاح ميزة' } as Record<string, string>)[action] || action; }
-function selfAdministrator(session: AdminDashboardSession): AdminAdministrator { return { createdAt: '', disabled: false, displayName: '', email: session.email, lastSignInAt: '', role: session.role, tokensValidAfterAt: '', uid: session.uid }; }
+function translateEvent(action: string) {
+  return ({
+    'administrator-grant-role': 'منح دور إداري',
+    'administrator-change-role': 'تغيير دور إداري',
+    'administrator-remove-admin': 'إزالة مسؤول',
+    'administrator-revoke-sessions': 'سحب جلسات',
+    'super-moderator-scope-update': 'تحديث نطاق مشرف إقليمي',
+    'admin-settings-update': 'تحديث التفضيلات',
+    'feature-flag-update': 'تحديث مفتاح ميزة',
+  } as Record<string, string>)[action] || action;
+}
+function selfAdministrator(session: AdminDashboardSession): AdminAdministrator {
+  return {
+    createdAt: '',
+    disabled: false,
+    displayName: '',
+    email: session.email,
+    lastSignInAt: '',
+    regionCodes: [],
+    role: session.role,
+    scopeStatus: '',
+    tokensValidAfterAt: '',
+    uid: session.uid,
+  };
+}
 
 function GovernanceDialog({ action, busy, onCancel, onReasonChange, onSubmit, reason }: { action: PendingGovernanceAction; busy: boolean; onCancel: () => void; onReasonChange: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; reason: string }) {
   const dialogRef = useAdminDialogFocus<HTMLFormElement>(true, onCancel);

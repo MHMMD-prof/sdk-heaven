@@ -25,12 +25,15 @@ import { useSocialFeatureFlags } from '../social/useSocialFeatureFlags';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
 import type { RoomCountryCode } from '../types/voice';
+import { AvatarFrameLayer } from '../components/AvatarPresentation';
+import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
 
 type UsersDiscoveryScreenProps = NativeStackScreenProps<RootStackParamList, 'UsersDiscovery'>;
 type CountryFilter = 'all' | RoomCountryCode;
 
 export function UsersDiscoveryScreen({ navigation }: UsersDiscoveryScreenProps) {
   const flags = useSocialFeatureFlags();
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const { width } = useWindowDimensions();
   const countryRailRef = useRef<ScrollView>(null);
   const requestSequence = useRef(0);
@@ -208,6 +211,7 @@ export function UsersDiscoveryScreen({ navigation }: UsersDiscoveryScreenProps) 
           renderItem={({ item }) => (
             <UserCard
               badgeActive={activeBadges[item.uid] ?? item.representativeBadgeActive}
+              cosmeticsFlags={cosmeticsFlags}
               onPress={() => navigation.navigate('UserProfile', { uid: item.uid })}
               profile={item}
             />
@@ -219,8 +223,9 @@ export function UsersDiscoveryScreen({ navigation }: UsersDiscoveryScreenProps) 
   );
 }
 
-function UserCard({ badgeActive, onPress, profile }: {
+function UserCard({ badgeActive, cosmeticsFlags, onPress, profile }: {
   badgeActive?: boolean;
+  cosmeticsFlags: CosmeticsFeatureFlags;
   onPress: () => void;
   profile: PublicUserProfile;
 }) {
@@ -241,6 +246,7 @@ function UserCard({ badgeActive, onPress, profile }: {
                 <Image source={{ uri: profile.avatarUrl }} style={styles.avatarImage} />
               ) : <Text style={styles.avatarLabel}>{avatarLabel}</Text>}
             </View>
+            <AvatarFrameLayer flags={cosmeticsFlags} frame={profile.equippedAvatarFrame} />
           </View>
           <View style={styles.userCopy}>
             <View style={styles.userNameRow}>

@@ -33,7 +33,6 @@ import {
   createDrawingGuessGuessId,
   createDrawingGuessMatchId,
   createDrawingGuessMessageId,
-  createDrawingGuessPlayerId,
   createDrawingGuessStrokeId,
 } from './createDrawingGuessIds';
 import { createDrawingGuessRoomCode } from './createDrawingGuessRoomCode';
@@ -57,8 +56,6 @@ import {
   StrokePreviewThrottleState,
 } from './strokePreviewModel';
 
-const localPlayerId = createDrawingGuessPlayerId('local');
-
 export function useDrawingGuessController(
   params: DrawingGuessRouteParams | undefined,
   onLeave: () => void,
@@ -66,6 +63,9 @@ export function useDrawingGuessController(
   const initialLaunch = useMemo(() => resolveDrawingGuessLaunch(params), [params]);
   const initialRoomCode = initialLaunch.roomCode;
   const initialMode = initialLaunch.mode;
+  const localPlayerId = initialLaunch.playerId;
+  const localDisplayName = initialLaunch.displayName;
+  const gameSessionId = initialLaunch.sessionId;
   const [launchSource, setLaunchSource] = useState(initialLaunch.source);
   const [launchTitle, setLaunchTitle] = useState(initialLaunch.title);
   const [launchSubtitle, setLaunchSubtitle] = useState(initialLaunch.subtitle);
@@ -82,7 +82,7 @@ export function useDrawingGuessController(
   const simulatedConnectionRefs = useRef<Record<string, DrawingGuessConnection>>({});
   const connectionsRef = useRef<DrawingGuessConnection[]>([]);
   const stateRef = useRef(
-    createInitialState(initialRoomCode, initialMode),
+    createInitialState(initialRoomCode, initialMode, localPlayerId),
   );
   const sequenceRef = useRef(0);
   const previewThrottleRef = useRef<StrokePreviewThrottleState>(initialStrokePreviewThrottleState);
@@ -187,7 +187,8 @@ export function useDrawingGuessController(
         const localConnection = await transportRef.current.connect({
           roomId: roomCode,
           playerId: localPlayerId,
-          displayName: 'You',
+          displayName: localDisplayName,
+          ...(gameSessionId ? { sessionId: gameSessionId } : {}),
         });
         const simConnectionOne =
           mode === 'local-simulated'
@@ -343,7 +344,15 @@ export function useDrawingGuessController(
       localConnectionRef.current = undefined;
       simulatedConnectionRefs.current = {};
     };
-  }, [mode, nextSequence, publishSnapshotChunks, roomCode]);
+  }, [
+    gameSessionId,
+    localDisplayName,
+    localPlayerId,
+    mode,
+    nextSequence,
+    publishSnapshotChunks,
+    roomCode,
+  ]);
 
   const publishControl = useCallback(
     async (payload: Parameters<typeof createControlMessage>[0]['payload']) => {
@@ -435,7 +444,7 @@ export function useDrawingGuessController(
     setIsRecoveringSnapshot(nextMode === 'online');
     dispatch({
       type: 'apply-snapshot',
-      state: createInitialState(nextRoomCode, nextMode),
+      state: createInitialState(nextRoomCode, nextMode, localPlayerId),
     });
   }, [mode]);
 
@@ -973,7 +982,11 @@ export function useDrawingGuessController(
   };
 }
 
-const createInitialState = (roomCode: string, mode: DrawingGuessRouteParams['mode']) =>
+const createInitialState = (
+  roomCode: string,
+  mode: DrawingGuessRouteParams['mode'],
+  localPlayerId: string,
+) =>
   mode === 'online'
     ? createOnlineDrawingGuessState({
         roomCode,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const { executeAdminStoreCatalogUpsert, stableFingerprint } = require('./adminStoreService');
+const { createEntryPhysicalApprovalReceiptId } = require('./roomEntryPresentationCore');
 
 const item = {
   availability: 'available', category: 'custom-ids', customId: '0000777', description: { ar: 'معرّف', en: 'ID' },
@@ -46,12 +47,77 @@ describe('adminStoreService', () => {
     });
     expect(writes.find((write) => write.ref.path === 'appConfig/storefront')?.data).toMatchObject({ featuredItemId: item.itemId });
   });
+
+  it('creates one immutable exact-version receipt before assigning animated car entry assets', async () => {
+    const writes = [];
+    const visual = { assetId: 'royal-entry', assetVersionId: 'v1-aaaaaaaaaaaa' };
+    const fallback = { assetId: 'royal-entry-static', assetVersionId: 'v1-bbbbbbbbbbbb' };
+    const receiptId = createEntryPhysicalApprovalReceiptId('car-1', visual.assetVersionId);
+    const car = {
+      ...item,
+      category: 'cars',
+      customId: undefined,
+      entryPresentation: {
+        animationEnabled: true, durationMs: 4_000, fallbackAsset: fallback,
+        minimumClientVersion: '1.0.0', performanceTier: 'standard',
+        physicalApprovalReceiptId: receiptId, schemaVersion: 1, soundPolicy: 'off',
+        visualAsset: visual, visualFormat: 'lottie-json',
+      },
+      itemId: 'car-1',
+      stock: { kind: 'unlimited' },
+    };
+    const seed = {};
+    seedApprovedAsset(seed, visual, 'lottie-json', 'a'.repeat(64), {
+      fallbackAssetId: fallback.assetId,
+      fallbackAssetVersionId: fallback.assetVersionId,
+      usage: 'one-shot',
+    });
+    seedApprovedAsset(seed, fallback, 'png', 'b'.repeat(64), { usage: 'static' });
+    await executeAdminStoreCatalogUpsert({
+      db: fakeDb(seed, writes),
+      decodedToken: { email: 'admin@example.com', uid: 'admin-1' },
+      fieldValue: { serverTimestamp: () => 'SERVER_TIME' },
+      input: {
+        entryPhysicalApproval: {
+          androidDevice: 'Pixel 9', androidPassed: true, controlsSafeZonePassed: true,
+          iosDevice: 'iPhone 16', iosPassed: true, notes: 'Safe zone verified.',
+          opaqueCompositionPassed: false, testedClientVersion: '1.0.0',
+        },
+        expectedUpdatedAt: '', item: car, reason: 'Approve entrance motion', requestId: 'request_entry_0001',
+      },
+    });
+    expect(writes.find((write) => write.ref.path === `entryPresentationApprovalReceipts/${receiptId}`)?.data)
+      .toMatchObject({ controlsSafeZonePassed: true, status: 'passed', visualChecksum: 'a'.repeat(64) });
+    expect(writes.find((write) => write.ref.path === 'storeCatalog/car-1')?.data.entryPresentation)
+      .toMatchObject({ fallbackFormat: 'png', visualFormat: 'lottie-json' });
+  });
 });
+
+function seedApprovedAsset(seed, reference, format, checksum, extra) {
+  seed[`cosmeticAssets/${reference.assetId}`] = {
+    approvalId: `${reference.assetId}__${reference.assetVersionId}`,
+    approvedVersionId: reference.assetVersionId, assetId: reference.assetId,
+    moderationStatus: 'approved', publicationStatus: 'published',
+    publishedVersionId: reference.assetVersionId, renderingEnabled: true,
+  };
+  seed[`cosmeticAssets/${reference.assetId}/versions/${reference.assetVersionId}`] = {
+    assetId: reference.assetId, assetVersionId: reference.assetVersionId,
+    category: 'entry-effect', format, height: 720, sha256: checksum,
+    transparent: format === 'lottie-json', width: 1280,
+    ...(['lottie-json', 'mp4'].includes(format) ? { durationMs: 4_000 } : {}),
+    ...extra,
+  };
+  seed[`cosmeticAssetApprovals/${reference.assetId}__${reference.assetVersionId}`] = {
+    assetId: reference.assetId, assetVersionId: reference.assetVersionId,
+    checksum, decision: 'approved',
+  };
+}
 
 function fakeDb(seed, writes) {
   const makeRef = (collection, id) => ({ path: `${collection}/${id}` });
   return {
     collection(collection) { return { doc(id) { return makeRef(collection, id); } }; },
+    doc(path) { return { path }; },
     async runTransaction(handler) {
       return handler({
         async getAll(...refs) { return refs.map((ref) => ({ data: () => seed[ref.path], exists: Object.hasOwn(seed, ref.path), ref })); },

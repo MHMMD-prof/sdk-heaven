@@ -1,4 +1,4 @@
-# Voice Room Production Wave Plan
+﻿# Voice Room Production Wave Plan
 
 ## Objective
 
@@ -374,6 +374,8 @@ A wave cannot close until all applicable items pass:
 
 ## Wave 6 — Chat, blocking, reporting, and room moderation
 
+**Implementation status (2026-07-24): backend deployed, dark pending physical-device acceptance.** The dedicated chat/safety service is server-authoritative, revision-independent, idempotent, rate-limited, normalized, filtered, paginated, and covered by 30-day retention with evidence holds. Firestore Rules enforce active membership and owner-selected history boundaries. Soft deletion, pinning, personal blocks, structured reports, report evidence snapshots, and the existing admin triage workflow are integrated. The Node.js 22 command/retention functions, Firestore Rules, and message indexes are live. Both `voice_room_chat` and `voice_room_safety` fail closed and were not activated by deployment.
+
 ### Chat
 
 - Add server-authoritative text messages with bounded length, rate limits, normalized content, server timestamps, pagination, and stable ordering.
@@ -399,6 +401,8 @@ A wave cannot close until all applicable items pass:
 ---
 
 ## Wave 7 — Ownership transfer and persistent lifecycle
+
+**Implementation status (2026-07-25): backend deployed dark; physical-device acceptance remains the release gate.** The legacy immediate ownership swap is retired. A dedicated fail-closed service now creates 15-minute recipient-approved offers, requires Firebase password reauthentication for offer and acceptance, enforces active/complete profiles, blocking restrictions, ownership revisions, replay safety, and a seven-day cooldown, and completes both role changes atomically. Firestore limits transfer visibility to the two parties and denies all client writes. Recoverable room removal schedules 30-day finalization, Platform Owners can restore during that window, and the finalizer preserves a safety archive while making the room permanently undiscoverable. Production deploy on `yallgame-ebd19` left `voice_room_ownership_transfer` disabled. See `VOICE_ROOM_WAVE7_OWNERSHIP_LIFECYCLE.md`.
 
 ### Transfer workflow
 
@@ -427,6 +431,8 @@ A wave cannot close until all applicable items pass:
 
 ## Wave 8 — Room gifts and separated economy
 
+**Implementation status (2026-07-25): backend deployed dark.** Spend coins and diamonds stay separate from new economy balances (`giftEarnings`, `gameRewards`, `promotions`). Room gifts use quote → atomic send behind `voice_room_gifts`, snapshot versioned commission policy, debit coins, credit gift earnings, write dual ledgers/receipts/room events, and emit effects only after commit. Diamonds are not redefined as earnings. Production deploy on `yallgame-ebd19` left `voice_room_gifts` disabled. See `VOICE_ROOM_WAVE8_GIFTS_ECONOMY.md`.
+
 ### Economy contract
 
 - Define distinct ledgers/balance fields for purchased spend coins, closed-loop game rewards, gift earnings, and promotions.
@@ -453,6 +459,8 @@ A wave cannot close until all applicable items pass:
 ---
 
 ## Wave 9 — Entry vehicles and room effects runtime
+
+**Implementation status (2026-07-26): enabled for controlled production testing.** Equipped cars announce once per presence session behind `voice_room_entry_effects`. The hardened runtime has duration-based queue advancement, per-kind feature isolation, compact reduced/off presentation, presence/block filtering, cancellation controls, request rate limiting, bounded retention cleanup, version compatibility checks, and approved immutable static assets. `roomEntryEffectCommand`, `cleanupRoomEntryEffects`, and Firestore rules are deployed on `yallgame-ebd19`; the flag is enabled with the isolated one-coin `wave9_test_royal_car` test item. No Lottie/video dependency was added before the Expo 56 asset-format gate. See `VOICE_ROOM_WAVE9_ENTRY_EFFECTS.md`.
 
 ### Catalog and equipment
 
@@ -485,6 +493,8 @@ A wave cannot close until all applicable items pass:
 
 ## Wave 10 — Room-linked games and closed-loop rewards
 
+**Implementation status (2026-07-26): deployed and enabled for controlled production testing.** The shared session envelope supports Drawing Guess as isolated multiplayer and exposes Carrom Royal plus Royal Majlis honestly as host-local activities. The fail-closed `voice_room_games` flag is enabled on `yallgame-ebd19`; activation is recorded in `adminAuditEvents/voice_room_games_enable_1785070247152`. Public reward minting was retired because no server-authoritative result system exists, so all game rewards remain disabled. See `VOICE_ROOM_WAVE10_GAMES.md`.
+
 ### Game orchestration
 
 - Introduce a room game registry mapping every current game to capabilities, player limits, client route, reward policy, region availability, and minimum client version.
@@ -493,12 +503,12 @@ A wave cannot close until all applicable items pass:
 - Voice remains connected when game UI opens and nonplayers remain in the room.
 - One room-linked game session at a time in v1, with expiry and abandoned-session cleanup.
 - Owner/moderators/Super Moderators may end a disruptive or stuck session.
-- Drawing Guess and Carrom adopt the common room session envelope without rewriting their internal game controllers unnecessarily.
+- Drawing Guess uses the common multiplayer session envelope and an isolated, data-only LiveKit transport. Carrom Royal and Royal Majlis use the same launch envelope in truthful `host-local` mode until multiplayer controllers exist.
 
 ### Game economy boundary
 
-- Server decides eligibility, entry cost, random outcomes where applicable, and reward credit.
-- Closed-loop game rewards cannot be withdrawn, gifted as earnings, or mixed with gift-recipient balances.
+- Reward settlement remains unavailable until the server can authoritatively decide eligibility, outcomes, and credits.
+- Clients, room hosts, and room staff cannot mint game rewards or mix them with coins, diamonds, gift earnings, or gift-recipient balances.
 - Store game items and promotional credits declare explicitly whether they are eligible for a given game.
 - Add per-region kill switches and responsible-use controls before enabling gambling-like mechanics.
 
@@ -511,7 +521,7 @@ A wave cannot close until all applicable items pass:
 
 ## Wave 11 — Shared device music and DJ controls
 
-This wave begins only after the Wave 0 native feasibility gate passes.
+**Implementation status (2026-07-26): deployed and enabled for controlled production testing.** The fail-closed `voice_room_shared_music` flag now enables foreground, server-clock-synchronized catalog playback through `expo-audio`, with lease heartbeat/expiry, client deadline enforcement, drift correction, independent listener volume/mute, rate limits, bounded retention, minute cleanup, and DJ removal/lockdown/room-close termination. Activation is recorded in `adminAuditEvents/voice_room_shared_music_enable_1785075336558`. User-selected device-file → distinct LiveKit audio-track publishing remains disabled until a native audio-source bridge exists. See `VOICE_ROOM_WAVE11_SHARED_MUSIC.md`.
 
 ### Permissions and state
 
@@ -523,7 +533,7 @@ This wave begins only after the Wave 0 native feasibility gate passes.
 
 ### Experience
 
-- Local permitted-media picker, queue, play/pause/seek/skip, and now-playing metadata.
+- V1 provides an allowlisted catalog, synchronized play/pause, late-join seeking, drift correction, and now-playing metadata. Local picker, queue, manual seek, and skip remain deferred.
 - Separate listener volume and mute controls for room music versus voices.
 - Clear DJ identity and source state in the room without exposing local filesystem paths.
 - Handle calls, alarms, route changes, Bluetooth disconnect, microphone coexistence, backgrounding, and network degradation.
@@ -531,12 +541,14 @@ This wave begins only after the Wave 0 native feasibility gate passes.
 
 ### Exit gate
 
-- Two-platform native matrix proves everyone hears synchronized music as a distinct controllable source.
+- Two-platform native matrix proves foreground catalog playback converges within the synchronization tolerance and remains independently controllable from voices. A distinct published LiveKit music source remains the exit gate for device-file broadcasting.
 - Forced stop completes within the operational target and cannot be bypassed with an old token or reconnect.
 
 ---
 
 ## Wave 12 — Super Moderator regional operations and emergency control
+
+**Implementation status (2026-07-26): deployed and enabled for production testing.** Fail-closed `voice_room_super_moderation`, explicit owner/Super Moderator hierarchy, dashboard region assignment, scoped discovery/actions/exports/evidence, exact-state staff lockdown recovery, LiveKit-backed kick-everyone and reconnect denial, platform-staff target protection, fresh-auth on high-risk actions, owner notification/appeal records, and repeated-emergency alerts are active on `yallgame-ebd19`. The sole legacy administrator was migrated to an explicit Platform Owner and both migration and activation were audited. Automated, rules-emulator, build, Hosting, function-state, and production read-back checks pass; physical-device acceptance and emergency drills remain before broad release. See `VOICE_ROOM_WAVE12_SUPER_MODERATORS.md`.
 
 ### Governance
 
@@ -571,6 +583,8 @@ This wave begins only after the Wave 0 native feasibility gate passes.
 
 ## Wave 13 — Rolling safety recording and evidence governance
 
+**Implementation status (2026-07-27): rejected by product and permanently disabled.** The production flag is forced false, the authenticated command endpoint returns `410 RECORDING_REJECTED`, and launch stage 9 cannot become ready. Historical metadata and cleanup code remain only to safely retire any prior records. See `VOICE_ROOM_WAVE13_SAFETY_RECORDING.md`.
+
 ### Recording service
 
 - Use server-side LiveKit audio-only egress/segmented output; never record safety evidence on an ordinary user's device.
@@ -602,6 +616,8 @@ This wave begins only after the Wave 0 native feasibility gate passes.
 ---
 
 ## Wave 14 — Scale, resilience, accessibility, and abuse hardening
+
+**Implementation status (2026-07-27): deployed and enabled for controlled production testing.** The new-joins freeze is server-authoritative with live-lease reconnect semantics; revoked tokens are rejected; global and per-action rolling limits cover denied, seat, command, and gift traffic; expiring operational records have scheduled cleanup; LiveKit retries use a worker lease and propagate dead-letter alerts; and presence/count recovery uses fair ordering plus a persistent room cursor. The sole production room passed the v2/seat preflight, was migrated, and has seat-engine version 1. Firestore rules/indexes, seven functions, the audited flags, and production read-back are complete. Recording remains explicitly disabled. Physical load/chaos/accessibility testing, App Check rollout, economy anomaly fanout, and measured telemetry remain Wave 15 broad-release gates. See `VOICE_ROOM_WAVE14_HARDENING.md`.
 
 ### Scale and performance
 
@@ -638,6 +654,8 @@ This wave begins only after the Wave 0 native feasibility gate passes.
 
 ## Wave 15 — Staged launch and production acceptance
 
+**Implementation status (2026-07-27): deployed and enabled for development testing; real-user release blocked.** Because the app has no real users, stage 10 testing is open to every authenticated development account with minimum client version `1.0.0`; no release allowlist is used. Firestore rules, LiveKit token issuance, and all command endpoints enforce the policy. Production mocks fail closed, recording is permanently rejected, and the live readiness report returns `highestReadyStageId=10` with `broadReleaseReady=false`. See `docs/VOICE_ROOM_WAVE15_STAGED_LAUNCH.md`.
+
 ### Rollout order
 
 1. Staff-only rooms and dashboard operators.
@@ -648,7 +666,7 @@ This wave begins only after the Wave 0 native feasibility gate passes.
 6. Add gifts and effects after wallet reconciliation remains clean.
 7. Add games.
 8. Add music only after the native feasibility and operational stop controls pass.
-9. Add rolling recording only after legal, cost, retention, and staff-access gates pass.
+9. Recording is rejected and this stage remains permanently unavailable.
 10. Increase audience and region coverage gradually.
 
 ### Release indicators
@@ -662,7 +680,7 @@ Set final SLOs from baseline measurements, then require at least:
 - wallet ledger reconciliation with no unexplained imbalance
 - bounded effect queue and no sustained room frame-rate regression
 - moderation actions fully audited with no cross-region authorization escape
-- evidence retention/deletion jobs healthy before recording expansion
+- historical evidence retention/deletion jobs remain healthy
 - support and appeal runbooks staffed for enabled regions
 
 ### Rollback
@@ -702,6 +720,7 @@ Set final SLOs from baseline measurements, then require at least:
 | 13 Recording | Waves 2, 6, 12 | Separate legal/operational launch |
 | 14 Hardening | All enabled waves | Required before broad launch |
 | 15 Rollout | Wave 14 | Final gate |
+| 16 Room themes | Waves 4–5, 8, 14 | Rendering may ship independently; purchases stay separately flagged |
 
 Critical path for a credible first room release: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 12 → 14 → 15**. Gifts, entry effects, games, music, and recording are separately controlled expansions and must not delay a safe, excellent voice-room core.
 

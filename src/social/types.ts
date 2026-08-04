@@ -1,4 +1,6 @@
 import type { RoomCountryCode } from '../types/voice';
+import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
 
 export type ProfileGender = 'male' | 'female';
 export type PublicProfileModerationStatus = 'active' | 'suspended' | 'removed';
@@ -11,6 +13,8 @@ export type PublicUserProfile = {
   coupleLevel: number;
   createdAt?: unknown;
   displayName: string;
+  equippedAvatarFrame?: AvatarFrameProjection;
+  equippedCosmetics?: EquipmentCosmetics;
   friendCount: number;
   gender?: ProfileGender;
   giftScore: number;
@@ -225,9 +229,11 @@ export type GiftEventSummary = {
   nameAr: string;
   price: number;
   recipientDisplayName: string;
+  recipientAvatarFrame?: AvatarFrameProjection;
   recipientUid: string;
   scoreValue: number;
   senderDisplayName: string;
+  senderAvatarFrame?: AvatarFrameProjection;
   senderUid: string;
 };
 
@@ -240,6 +246,9 @@ export type GiftCenterResult = {
 };
 
 export type GiftSendResult = { balances: StoreCurrencyAmounts; eventId: string; giftScore: number };
+
+export type BlockMutationAction = 'block-user' | 'unblock-user';
+export type BlockMutationResult = { blocked: boolean; targetUid: string };
 
 export type SocialCommandAction =
   | 'bootstrap-profile'
@@ -259,6 +268,7 @@ export type SocialCommandAction =
   | 'representative-transfer'
   | 'get-gift-center'
   | 'send-gift'
+  | BlockMutationAction
   | 'get-couples'
   | 'get-couple-status'
   | 'get-notification-settings'
@@ -301,6 +311,9 @@ export type SocialCommandResult<T> =
 
 export type SocialFeatureFlags = {
   couples: boolean;
+  directMessageMedia: boolean;
+  directMessageRequests: boolean;
+  directMessages: boolean;
   friends: boolean;
   gifts: boolean;
   pushNotifications: boolean;

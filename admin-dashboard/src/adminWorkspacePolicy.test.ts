@@ -16,9 +16,28 @@ describe('admin workspace policy', () => {
   });
 
   it('separates support, moderation, and economy capabilities', () => {
-    expect(getUserWorkspaceCapabilities(['users:view', 'users:note'])).toEqual({ canAddNotes: true, canManageEconomy: false, canManageUsers: false });
-    expect(getUserWorkspaceCapabilities(['users:view', 'users:manage'])).toEqual({ canAddNotes: true, canManageEconomy: false, canManageUsers: true });
-    expect(getUserWorkspaceCapabilities(['users:view', 'store:manage'])).toEqual({ canAddNotes: false, canManageEconomy: true, canManageUsers: false });
+    expect(getUserWorkspaceCapabilities(['users:view', 'users:note'])).toEqual({
+      canAddNotes: true,
+      canManageEconomy: false,
+      canManageRepresentative: false,
+      canManageUsers: false,
+    });
+    expect(getUserWorkspaceCapabilities(['users:view', 'users:manage'])).toEqual({
+      canAddNotes: true,
+      canManageEconomy: false,
+      canManageRepresentative: false,
+      canManageUsers: true,
+    });
+    expect(getUserWorkspaceCapabilities(['users:view', 'store:manage'])).toEqual({
+      canAddNotes: false,
+      canManageEconomy: true,
+      canManageRepresentative: true,
+      canManageUsers: false,
+    });
+    expect(parseUserWorkspaceSearch('?user=user-1&section=representative')).toEqual({
+      section: 'representative',
+      uid: 'user-1',
+    });
     expect(canManageStoreWorkspace(['store:view'])).toBe(false);
     expect(canManageStoreWorkspace(['store:view', 'store:manage'])).toBe(true);
   });

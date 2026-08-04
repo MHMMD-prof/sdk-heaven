@@ -86,10 +86,14 @@ function ProfileSetupScreenEntry(_props: RootStackScreenProps<'ProfileSetup'>) {
 
 function MainAppStack() {
   const { VoiceRoomsProvider } = require('../voice/VoiceRoomsProvider') as typeof import('../voice/VoiceRoomsProvider');
+  const { DirectChatProvider } = require('../personalChat/DirectChatProvider') as typeof import('../personalChat/DirectChatProvider');
+  const { AppSwitcherPrivacyShield } = require('../privacy/AppSwitcherPrivacyShield') as typeof import('../privacy/AppSwitcherPrivacyShield');
 
   return (
-    <VoiceRoomsProvider>
-      <Stack.Navigator screenOptions={stackScreenOptions}>
+    <AppSwitcherPrivacyShield>
+      <DirectChatProvider>
+        <VoiceRoomsProvider>
+          <Stack.Navigator screenOptions={stackScreenOptions}>
         <Stack.Screen name="Main" component={MainScreenEntry} />
         <Stack.Screen name="MeProfile" component={MeProfileScreenEntry} />
         <Stack.Screen name="Friends" component={FriendsScreenEntry} />
@@ -101,14 +105,20 @@ function MainAppStack() {
         <Stack.Screen name="MyItems" component={MyItemsScreenEntry} />
         <Stack.Screen name="RepresentativeTransfer" component={RepresentativeTransferScreenEntry} />
         <Stack.Screen name="UserProfile" component={UserProfileScreenEntry} />
+        <Stack.Screen name="DirectChat" component={DirectChatScreenEntry} />
         <Stack.Screen name="UsersDiscovery" component={UsersDiscoveryScreenEntry} />
         <Stack.Screen name="AccountSettings" component={AccountSettingsScreenEntry} />
+        {__DEV__ ? (
+          <Stack.Screen name="CosmeticsLab" component={CosmeticsFeasibilityScreenEntry} />
+        ) : null}
         <Stack.Screen name="MiniGame" component={MiniGameScreenEntry} />
         <Stack.Screen name="Carrom" component={CarromScreenEntry} />
         <Stack.Screen name="DrawingGuess" component={DrawingGuessScreenEntry} />
         <Stack.Screen name="VoiceRoom" component={VoiceRoomScreenEntry} />
-      </Stack.Navigator>
-    </VoiceRoomsProvider>
+          </Stack.Navigator>
+        </VoiceRoomsProvider>
+      </DirectChatProvider>
+    </AppSwitcherPrivacyShield>
   );
 }
 
@@ -122,6 +132,12 @@ function AccountSettingsScreenEntry(props: RootStackScreenProps<'AccountSettings
   const { AccountSettingsScreen } = require('../screens/AccountSettingsScreen') as typeof import('../screens/AccountSettingsScreen');
 
   return <AccountSettingsScreen {...props} />;
+}
+
+function CosmeticsFeasibilityScreenEntry(props: RootStackScreenProps<'CosmeticsLab'>) {
+  const { CosmeticsFeasibilityScreen } = require('../cosmetics/CosmeticsFeasibilityScreen') as typeof import('../cosmetics/CosmeticsFeasibilityScreen');
+
+  return <CosmeticsFeasibilityScreen {...props} />;
 }
 
 function MeProfileScreenEntry(props: RootStackScreenProps<'MeProfile'>) {
@@ -178,6 +194,12 @@ function UserProfileScreenEntry(props: RootStackScreenProps<'UserProfile'>) {
   const { UserProfileScreen } = require('../screens/UserProfileScreen') as typeof import('../screens/UserProfileScreen');
 
   return <UserProfileScreen {...props} />;
+}
+
+function DirectChatScreenEntry(props: RootStackScreenProps<'DirectChat'>) {
+  const { DirectChatScreen } = require('../screens/DirectChatScreen') as typeof import('../screens/DirectChatScreen');
+
+  return <DirectChatScreen {...props} />;
 }
 
 function UsersDiscoveryScreenEntry(props: RootStackScreenProps<'UsersDiscovery'>) {

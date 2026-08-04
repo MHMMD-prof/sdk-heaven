@@ -9,6 +9,7 @@ type VoiceRoomHeaderProps = {
   onLeave: () => void;
   onShare: () => void;
   ownerName: string;
+  recordingActive?: boolean;
   roomId: string;
   title: string;
 };
@@ -19,6 +20,7 @@ export function VoiceRoomHeader({
   onLeave,
   onShare,
   ownerName,
+  recordingActive = false,
   roomId,
   title,
 }: VoiceRoomHeaderProps) {
@@ -35,6 +37,12 @@ export function VoiceRoomHeader({
           <Text numberOfLines={1} style={styles.owner}>المالك: {ownerName}</Text>
           <View style={styles.dot} />
           <Text style={styles.roomId}>ID {roomId}</Text>
+          {recordingActive ? (
+            <>
+              <View style={styles.dot} />
+              <Text accessibilityLabel="تسجيل أمان نشط" style={styles.recording}>REC</Text>
+            </>
+          ) : null}
         </View>
       </View>
       <View style={styles.actions}>
@@ -117,6 +125,11 @@ const styles = StyleSheet.create({
     color: colors.textSubtle,
     fontSize: 10,
     writingDirection: 'ltr',
+  },
+  recording: {
+    color: colors.ruby,
+    fontSize: 10,
+    fontWeight: typography.weights.bold,
   },
   dot: {
     backgroundColor: colors.goldDeep,

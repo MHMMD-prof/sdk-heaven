@@ -25,12 +25,15 @@ function normalizeAdminRepresentativeInput(input) {
   const coins = input?.coins;
   const diamonds = input?.diamonds;
   const expectedUpdatedAt = typeof input?.expectedUpdatedAt === 'string' ? input.expectedUpdatedAt.trim().slice(0, 80) : '';
+  const reason = typeof input?.reason === 'string' ? input.reason.trim().slice(0, 300) : '';
   if (!targetUid || targetUid.length > 128 || !/^[A-Za-z0-9_-]{12,80}$/.test(requestId)
     || typeof active !== 'boolean' || typeof coins !== 'boolean' || typeof diamonds !== 'boolean'
-    || (active && !coins && !diamonds)) {
-    return { ok: false, error: 'Valid target, request ID, active state, and at least one currency permission are required.' };
+    || (active && !coins && !diamonds)
+    || (expectedUpdatedAt !== 'missing' && !Number.isFinite(Date.parse(expectedUpdatedAt)))
+    || reason.length < 3) {
+    return { ok: false, error: 'Valid target, current revision, reason, active state, and at least one currency permission are required.' };
   }
-  return { ok: true, value: { active, currencies: { coins, diamonds }, expectedUpdatedAt, requestId, targetUid } };
+  return { ok: true, value: { active, currencies: { coins, diamonds }, expectedUpdatedAt: expectedUpdatedAt === 'missing' ? 'missing' : new Date(expectedUpdatedAt).toISOString(), reason, requestId, targetUid } };
 }
 
 function normalizeAdminRepresentativeReversalInput(input) {

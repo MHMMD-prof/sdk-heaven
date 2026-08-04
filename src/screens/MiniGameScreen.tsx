@@ -14,9 +14,11 @@ import { BattleshipPreMatchPanel } from '../battleship/BattleshipPreMatchPanel';
 import { BattleshipVictoryPanel } from '../battleship/BattleshipVictoryPanel';
 import { useBattleshipScreenModel } from '../battleship/useBattleshipScreenModel';
 import { RootStackParamList } from '../types/navigation';
+import { useLeaveRoomGameOnExit } from '../voice/useLeaveRoomGameOnExit';
 
 type MiniGameScreenProps = NativeStackScreenProps<RootStackParamList, 'MiniGame'>;
 export function MiniGameScreen({ navigation, route }: MiniGameScreenProps) {
+  useLeaveRoomGameOnExit(route.params ?? {});
   const initialMode = route.params?.initialMode ?? 'naval';
   const { width } = useWindowDimensions();
   const screenModel = useBattleshipScreenModel({

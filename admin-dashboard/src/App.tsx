@@ -25,10 +25,13 @@ import { firebaseAuth } from './firebase';
 
 const SettingsPanel = lazy(() => import('./SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
 const StoreCatalogPanel = lazy(() => import('./StoreCatalogPanel').then((module) => ({ default: module.StoreCatalogPanel })));
+const CosmeticsAssetRegistryPanel = lazy(() => import('./CosmeticsAssetRegistryPanel').then((module) => ({ default: module.CosmeticsAssetRegistryPanel })));
 const AuditWorkspace = lazy(() => import('./AuditPanel').then((module) => ({ default: module.AuditWorkspace })));
 const ReportsPanel = lazy(() => import('./ReportsPanel').then((module) => ({ default: module.ReportsPanel })));
 const RoomsPanel = lazy(() => import('./RoomsPanel').then((module) => ({ default: module.RoomsPanel })));
 const UsersPanel = lazy(() => import('./UsersPanel').then((module) => ({ default: module.UsersPanel })));
+const RepresentativeOperationsPanel = lazy(() => import('./RepresentativeOperationsPanel').then((module) => ({ default: module.RepresentativeOperationsPanel })));
+const RocketCampaignPanel = lazy(() => import('./RocketCampaignPanel').then((module) => ({ default: module.RocketCampaignPanel })));
 
 type AuthState =
   | { status: 'checking' }
@@ -320,6 +323,12 @@ export function App() {
             <ReportsPanel user={authState.user} />
           ) : activeRoute.key === 'store' ? (
             <StoreCatalogPanel permissions={authState.session.permissions} user={authState.user} />
+          ) : activeRoute.key === 'cosmetics' ? (
+            <CosmeticsAssetRegistryPanel permissions={authState.session.permissions} user={authState.user} />
+          ) : activeRoute.key === 'incentives' ? (
+            <RocketCampaignPanel permissions={authState.session.permissions} user={authState.user} />
+          ) : activeRoute.key === 'representatives' ? (
+            <RepresentativeOperationsPanel permissions={authState.session.permissions} user={authState.user} />
           ) : activeRoute.key === 'audit' ? (
             <AuditWorkspace user={authState.user} />
           ) : activeRoute.key === 'settings' ? (
@@ -353,6 +362,9 @@ function NavIcon({ routeKey }: { routeKey: string }) {
     rooms: <><path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h7v18M14 8h5v13" /><path d="M9 9h1M9 13h1M9 17h1" /></>,
     reports: <><path d="M5 22V4a2 2 0 0 1 2-2h8l4 4v16" /><path d="M14 2v5h5M9 12h6M9 16h6" /></>,
     store: <><path d="M3 9h18l-1 12H4L3 9Z" /><path d="M7 9a5 5 0 0 1 10 0M8 13v4M16 13v4" /></>,
+    cosmetics: <><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>,
+    incentives: <><path d="M12 2c3 3 5 6 5 10a5 5 0 0 1-10 0c0-2 1-4 3-6 0 3 1 4 2 5 1-2 1-5 0-9Z" /><path d="M8 20h8M10 16h4" /></>,
+    representatives: <><path d="M4 7h16M7 4l-3 3 3 3M17 14h3v6H4v-6h3" /><circle cx="12" cy="10" r="3" /><path d="M8 17a4 4 0 0 1 8 0" /></>,
     audit: <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.1A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.14.39.36.73.66 1 .3.26.68.4 1.07.4H21v4h-.1A1.7 1.7 0 0 0 19.4 15Z" /></>,
     refresh: <><path d="M20 6v5h-5" /><path d="M4 18v-5h5" /><path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 11M4 13l2.4 4.6A7 7 0 0 0 17.9 15" /></>,
@@ -365,7 +377,7 @@ function NavIcon({ routeKey }: { routeKey: string }) {
 function canAccessAdminRoute(session: AdminDashboardSession, routeKey: string) {
   const permissionByRoute: Record<string, string> = {
     overview: 'overview', users: 'users:view', rooms: 'rooms:view', reports: 'reports:view',
-    store: 'store:view', audit: 'audit:view', settings: 'settings:manage',
+    store: 'store:view', cosmetics: 'store:view', incentives: 'incentives:view', representatives: 'store:view', audit: 'audit:view', settings: 'settings:manage',
   };
   return session.permissions.includes(permissionByRoute[routeKey] || 'overview');
 }

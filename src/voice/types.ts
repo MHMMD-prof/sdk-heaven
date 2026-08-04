@@ -1,4 +1,5 @@
 import { VoiceRoom } from '../types/voice';
+import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
 
 export type VoiceConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -11,7 +12,12 @@ export type VoiceParticipant = {
   isMuted: boolean;
   isSpeaking: boolean;
   avatarLabel: string;
+  avatarFrameAssetUrl?: string;
+  avatarFrameAssetId?: string;
+  avatarFrameAssetVersionId?: string;
+  avatarFrameItemId?: string;
   representativeBadgeActive?: boolean;
+  equipmentCosmetics?: EquipmentCosmetics;
 };
 
 export type VoiceConnectOptions = {
@@ -31,7 +37,16 @@ export type VoiceProviderConfig = {
     tokenEndpoint: string;
     roomChatCommandEndpoint?: string;
     roomCommandEndpoint?: string;
+    roomEntryEffectCommandEndpoint?: string;
+    roomGameCommandEndpoint?: string;
+    roomGiftCommandEndpoint?: string;
     roomMediaCommandEndpoint?: string;
+    roomMusicCommandEndpoint?: string;
+    roomOwnershipCommandEndpoint?: string;
+    roomRecordingCommandEndpoint?: string;
+    roomThemeCommandEndpoint?: string;
+    roomTargetCommandEndpoint?: string;
+    roomAttendanceCommandEndpoint?: string;
     canPublishAudio?: boolean;
   };
 };

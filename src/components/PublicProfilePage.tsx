@@ -26,9 +26,17 @@ import type {
 } from '../social/types';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RoomCountryCode } from '../types/voice';
+import { AvatarFrameLayer } from './AvatarPresentation';
+import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import { EquipmentCosmeticAsset } from './EquipmentCosmeticAsset';
 
 type PublicProfilePageProps = {
   bottomNavigation?: ReactNode;
+  chatAction?: {
+    disabled?: boolean;
+    onPress: () => void;
+  };
   coupleAction?: {
     disabled?: boolean;
     label: string;
@@ -65,6 +73,7 @@ type PublicProfilePageProps = {
 
 export function PublicProfilePage({
   bottomNavigation,
+  chatAction,
   coupleAction,
   friendAction,
   giftAction,
@@ -87,6 +96,7 @@ export function PublicProfilePage({
   profile,
   status,
 }: PublicProfilePageProps) {
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const { width } = useWindowDimensions();
   const [editorVisible, setEditorVisible] = useState(false);
   const compact = width < 390;
@@ -108,6 +118,7 @@ export function PublicProfilePage({
           start={{ x: 1, y: 0 }}
           style={styles.hero}
         >
+          <EquipmentCosmeticAsset category="profile-skin" enabled={cosmeticsFlags.profileSkins} flags={cosmeticsFlags} projection={profile?.equippedCosmetics?.profileSkin} style={styles.profileSkin} />
           <View style={styles.heroHaloLarge} />
           <View style={styles.heroHaloSmall} />
           <View style={styles.header}>
@@ -134,13 +145,17 @@ export function PublicProfilePage({
               avatarLabel={fallbackAvatarLabel}
               avatarUrl={profile?.avatarModerationStatus === 'clear' ? profile.avatarUrl : ''}
               compact={compact}
+              flags={cosmeticsFlags}
+              frame={profile?.equippedAvatarFrame}
             />
             <View style={styles.identityCopy}>
               <View style={styles.nameRow}>
+                <EquipmentCosmeticAsset category="nameplate" enabled={cosmeticsFlags.nameplates} flags={cosmeticsFlags} projection={profile?.equippedCosmetics?.nameplate} style={styles.nameplate} />
                 {country ? <Image accessibilityLabel={country.label} source={country.flag} style={styles.flag} /> : null}
                 <Text numberOfLines={1} style={styles.displayName}>
                   {profile?.displayName || fallbackDisplayName}
                 </Text>
+                <EquipmentCosmeticAsset category="cosmetic-badge" enabled={cosmeticsFlags.cosmeticBadges} flags={cosmeticsFlags} projection={profile?.equippedCosmetics?.cosmeticBadge} style={styles.cosmeticBadge} />
               </View>
               <RepresentativeBadge
                 active={profile?.representativeBadgeActive}
@@ -212,6 +227,17 @@ export function PublicProfilePage({
                     />
                   )}
                   <Text style={styles.friendActionText}>{friendAction.label}</Text>
+                </Pressable>
+              ) : null}
+
+              {!isSelf && chatAction ? (
+                <Pressable
+                  disabled={chatAction.disabled}
+                  onPress={chatAction.onPress}
+                  style={({ pressed }) => [styles.chatAction, pressed && styles.pressed, chatAction.disabled && styles.disabled]}
+                >
+                  <SymbolView name={{ ios: 'bubble.left.fill', android: 'chat', web: 'chat' }} size={22} tintColor="#2A090C" />
+                  <Text style={styles.chatActionText}>محادثة خاصة</Text>
                 </Pressable>
               ) : null}
 
@@ -368,7 +394,13 @@ export function PublicProfilePage({
   );
 }
 
-function Avatar({ avatarLabel, avatarUrl, compact }: { avatarLabel: string; avatarUrl: string; compact: boolean }) {
+function Avatar({ avatarLabel, avatarUrl, compact, flags, frame }: {
+  avatarLabel: string;
+  avatarUrl: string;
+  compact: boolean;
+  flags: CosmeticsFeatureFlags;
+  frame?: AvatarFrameProjection;
+}) {
   const size = compact ? 96 : 112;
   return (
     <View style={[styles.avatarFrame, { height: size, width: size }]}>
@@ -381,6 +413,7 @@ function Avatar({ avatarLabel, avatarUrl, compact }: { avatarLabel: string; avat
           )}
         </View>
       </LinearGradient>
+      <AvatarFrameLayer flags={flags} frame={frame} />
     </View>
   );
 }
@@ -628,6 +661,9 @@ function readTimestampDate(value: unknown): Date | undefined {
 }
 
 const styles = StyleSheet.create({
+  profileSkin: { bottom: 0, left: 0, opacity: 0.55, position: 'absolute', right: 0, top: 0 },
+  nameplate: { height: 44, left: -12, position: 'absolute', right: -12, top: -8 },
+  cosmeticBadge: { height: 24, width: 24, zIndex: 2 },
   page: { alignSelf: 'center', maxWidth: 720, minHeight: '100%', width: '100%' },
   hero: { borderBottomColor: 'rgba(232,190,97,0.48)', borderBottomWidth: 1, minHeight: 286, overflow: 'hidden', paddingBottom: spacing.xxl, paddingHorizontal: spacing.lg },
   heroHaloLarge: { borderColor: 'rgba(246,217,145,0.13)', borderRadius: 180, borderWidth: 1, height: 360, position: 'absolute', right: -140, top: -180, width: 360 },
@@ -658,6 +694,8 @@ const styles = StyleSheet.create({
   statsPanel: { alignItems: 'stretch', backgroundColor: '#100607', borderColor: 'rgba(232,190,97,0.36)', borderRadius: radius.xl, borderWidth: 1, flexDirection: 'row-reverse', minHeight: 94, paddingVertical: spacing.md },
   friendAction: { alignItems: 'center', alignSelf: 'stretch', backgroundColor: colors.gold, borderRadius: radius.full, flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'center', minHeight: 50, paddingHorizontal: spacing.xl },
   friendActionText: { color: '#2A090C', fontSize: 15, fontWeight: typography.weights.black, writingDirection: 'rtl' },
+  chatAction: { alignItems: 'center', alignSelf: 'stretch', backgroundColor: '#E8BE61', borderColor: '#FFF0BE', borderRadius: radius.full, borderWidth: 1, flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'center', minHeight: 50, paddingHorizontal: spacing.xl },
+  chatActionText: { color: '#2A090C', fontSize: 15, fontWeight: typography.weights.black, writingDirection: 'rtl' },
   giftAction: { alignItems: 'center', alignSelf: 'stretch', backgroundColor: '#72121A', borderColor: colors.gold, borderRadius: radius.full, borderWidth: 1, flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'center', minHeight: 50, paddingHorizontal: spacing.xl },
   giftActionText: { color: '#FFF0BE', fontSize: 15, fontWeight: typography.weights.black, writingDirection: 'rtl' },
   coupleAction: { alignItems: 'center', alignSelf: 'stretch', backgroundColor: '#3A090E', borderColor: '#D89B3C', borderRadius: radius.full, borderWidth: 1, flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'center', minHeight: 50, paddingHorizontal: spacing.xl },

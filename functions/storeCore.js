@@ -1,7 +1,15 @@
+const { mapEntryPhysicalApproval, mapEntryPresentation } = require('./roomEntryPresentationCore');
+
 const STORE_CATEGORIES = Object.freeze([
   'game-items',
   'chat-themes',
   'avatar-frames',
+  'profile-skins',
+  'chat-bubbles',
+  'nameplates',
+  'cosmetic-badges',
+  'seat-effects',
+  'stickers',
   'cars',
   'custom-ids',
 ]);
@@ -38,9 +46,13 @@ function isStoreAvailability(value) {
 function mapStoreCatalogItem(data, documentId) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
   if (Object.keys(data).some((key) => ![
-    'availability', 'category', 'createdAt', 'customId', 'description', 'duration', 'itemId',
+    'availability', 'category', 'cosmeticAsset', 'createdAt', 'customId', 'description', 'duration',
+    'entryPresentation',
+    'entryEffectAssetVersion', 'entryEffectDurationMs', 'entryEffectFallbackUrl',
+    'entryEffectHeight', 'entryEffectMinimumClientVersion', 'entryEffectPerformanceTier',
+    'entryEffectSoundPolicy', 'entryEffectWidth', 'itemId',
     'lastEditorEmail', 'lastEditorUid', 'name', 'order', 'previewAssetUrl', 'prices', 'purchasingEnabled',
-    'stock', 'thumbnailUrl', 'updatedAt',
+    'stickerAsset', 'stock', 'thumbnailUrl', 'updatedAt',
   ].includes(key))) return undefined;
   const itemId = readStoreItemId(data.itemId);
   if (!itemId || itemId !== documentId || !isStoreCategory(data.category)) return undefined;
@@ -71,21 +83,42 @@ function mapStoreCatalogItem(data, documentId) {
     : undefined;
   if ((data.category === 'custom-ids' && !customId) || (data.category !== 'custom-ids' && data.customId !== undefined)) return undefined;
   if (data.category === 'custom-ids' && (duration.kind !== 'permanent' || stock.kind !== 'limited' || stock.remaining > 1)) return undefined;
+  const cosmeticAsset = mapCosmeticAssetReference(data.cosmeticAsset);
+  const stickerAsset = mapCosmeticAssetReference(data.stickerAsset);
+  const cosmeticCategories = ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects'];
+  if ((data.cosmeticAsset !== undefined && !cosmeticAsset) || (cosmeticAsset && !cosmeticCategories.includes(data.category))) return undefined;
+  if ((data.stickerAsset !== undefined && !stickerAsset) || (data.category === 'stickers' && !stickerAsset) || (stickerAsset && data.category !== 'stickers')) return undefined;
+  const entryPresentation = data.entryPresentation === undefined
+    ? undefined
+    : mapEntryPresentation(data.entryPresentation);
+  if ((data.entryPresentation !== undefined && !entryPresentation) || (entryPresentation && data.category !== 'cars')) return undefined;
   return {
     availability: data.availability,
     category: data.category,
+    ...(cosmeticAsset ? { cosmeticAsset } : {}),
     ...(customId ? { customId } : {}),
     description,
     duration,
+    ...(entryPresentation ? { entryPresentation } : {}),
     itemId,
     name,
     order,
     previewAssetUrl,
     prices,
     purchasingEnabled: data.purchasingEnabled,
+    ...(stickerAsset ? { stickerAsset } : {}),
     stock,
     thumbnailUrl,
   };
+}
+
+function mapCosmeticAssetReference(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !['assetId', 'assetVersionId'].includes(key))) return undefined;
+  const assetId = typeof value.assetId === 'string' ? value.assetId.trim() : '';
+  const assetVersionId = typeof value.assetVersionId === 'string' ? value.assetVersionId.trim() : '';
+  return /^[a-z0-9][a-z0-9_-]{2,79}$/.test(assetId) && /^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(assetVersionId)
+    ? { assetId, assetVersionId }
+    : undefined;
 }
 
 function mapLocalizedText(value, maxLength, allowEmpty = false) {
@@ -172,7 +205,26 @@ function normalizeAdminStoreCatalogInput(input = {}) {
   if (!item) {
     return { ok: false, status: 400, error: 'Store item is invalid.' };
   }
-  return { ok: true, value: { expectedUpdatedAt, featured, item, reason, requestId } };
+  const entryPhysicalApproval = input.entryPhysicalApproval === undefined
+    ? undefined
+    : mapEntryPhysicalApproval(input.entryPhysicalApproval);
+  if (input.entryPhysicalApproval !== undefined && !entryPhysicalApproval) {
+    return { ok: false, status: 400, error: 'Entry-effect physical approval is invalid.' };
+  }
+  if (entryPhysicalApproval && !item.entryPresentation?.animationEnabled) {
+    return { ok: false, status: 400, error: 'Physical approval requires an animated car entry presentation.' };
+  }
+  return {
+    ok: true,
+    value: {
+      ...(entryPhysicalApproval ? { entryPhysicalApproval } : {}),
+      expectedUpdatedAt,
+      featured,
+      item,
+      reason,
+      requestId,
+    },
+  };
 }
 
 module.exports = {

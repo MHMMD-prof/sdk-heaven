@@ -51,11 +51,16 @@ export function buildRoomSeatViewModels({
       : undefined;
     const participant = connectedParticipant || (member ? {
       avatarLabel: member.avatarLabel,
+      avatarFrameAssetUrl: member.avatarFrameAssetUrl,
+      avatarFrameAssetId: member.avatarFrameAssetId,
+      avatarFrameAssetVersionId: member.avatarFrameAssetVersionId,
+      avatarFrameItemId: member.avatarFrameItemId,
       displayName: member.displayName,
       id: member.id,
       isMuted: member.canPublishAudio === false,
       isSpeaking: false,
       representativeBadgeActive: member.representativeBadgeActive,
+      equipmentCosmetics: member.equipmentCosmetics,
       role: member.role === 'listener' ? 'listener' as const : member.role === 'host' ? 'host' as const : 'speaker' as const,
     } : undefined);
     const displayName = participant?.displayName || member?.displayName;

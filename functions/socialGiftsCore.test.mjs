@@ -37,4 +37,51 @@ describe('socialGiftsCore', () => {
     expect(normalizeAdminGiftCatalogInput({ giftId: 'rose', iconKey: 'rose', nameAr: 'وردة', price: 20, scoreValue: 5, status: 'available' }))
       .toMatchObject({ ok: false });
   });
+
+  it('keeps animation off by default and requires both physical-device approvals', () => {
+    const base = {
+      giftId: 'rose', iconKey: 'rose', nameAr: 'وردة ملكية', price: 20,
+      reason: 'إضافة العرض', requestId: 'admin_123456789', scoreValue: 5, status: 'available',
+    };
+    expect(normalizeAdminGiftCatalogInput(base)).toMatchObject({
+      ok: true,
+      value: { presentation: { animationEnabled: false, tier: 'inline' } },
+    });
+    const animated = {
+      ...base,
+      presentation: {
+        animationEnabled: true,
+        durationMs: 3000,
+        fallbackAsset: { assetId: 'gift-fallback', assetVersionId: 'v1-bbbbbbbbbbbb' },
+        hapticPolicy: 'light',
+        minimumClientVersion: '1.0.0',
+        performanceTier: 'standard',
+        soundPolicy: 'off',
+        tier: 'targeted',
+        visualAsset: { assetId: 'gift-motion', assetVersionId: 'v1-aaaaaaaaaaaa' },
+      },
+    };
+    expect(normalizeAdminGiftCatalogInput(animated)).toMatchObject({ ok: false });
+    expect(normalizeAdminGiftCatalogInput({
+      ...animated,
+      physicalApproval: {
+        androidDevice: 'Pixel 9',
+        androidPassed: true,
+        iosDevice: 'iPhone 16',
+        iosPassed: true,
+        notes: 'Voice coexistence passed',
+        testedClientVersion: '1.0.0',
+      },
+    })).toMatchObject({
+      ok: true,
+      value: {
+        physicalApproval: { androidPassed: true, iosPassed: true },
+        presentation: {
+          animationEnabled: true,
+          physicalApprovalReceiptId: expect.stringMatching(/^gift_physical_/),
+          tier: 'targeted',
+        },
+      },
+    });
+  });
 });

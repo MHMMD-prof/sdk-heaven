@@ -9,16 +9,20 @@ import { RepresentativeBadge } from '../RepresentativeBadge';
 import { RoomAuthorityRole } from '../../voice/roomV2Contract';
 import { hasRoomCommandCenterCapability } from '../../voice/roomCommandCenterModel';
 import { VoiceParticipant } from '../../voice/types';
+import { AvatarPresentation } from '../AvatarPresentation';
+import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
 type RoomCommandCenterSheetProps = {
   authorityRole?: RoomAuthorityRole;
   hasPendingSeatOffer?: boolean;
+  musicEnabled?: boolean;
   onClose: () => void;
   onGame: () => void;
   onGift: () => void;
   onMicrophones: () => void;
+  onMusic?: () => void;
   onOwnership: () => void;
   onParticipants: () => void;
   onPeople: () => void;
@@ -34,10 +38,12 @@ type RoomCommandCenterSheetProps = {
 export function RoomCommandCenterSheet({
   authorityRole,
   hasPendingSeatOffer,
+  musicEnabled = false,
   onClose,
   onGame,
   onGift,
   onMicrophones,
+  onMusic,
   onOwnership,
   onParticipants,
   onPeople,
@@ -98,11 +104,13 @@ export function RoomCommandCenterSheet({
           />
         ) : null}
         <Tool
-          disabled
+          disabled={!musicEnabled}
           icon={{ ios: 'music.note', android: 'music_note', web: 'music_note' }}
           label="موسيقى"
-          note="بانتظار الصوت المشترك"
-          onPress={() => undefined}
+          note={musicEnabled ? undefined : 'بانتظار تفعيل الميزة'}
+          onPress={() => {
+            if (musicEnabled) onMusic?.();
+          }}
         />
         {canManageMicrophones ? (
           <Tool
@@ -145,14 +153,18 @@ export function RoomCommandCenterSheet({
 }
 
 export function RoomParticipantsSheet({
+  cosmeticsFlags,
   listeners,
   onClose,
+  onChat,
   onParticipantPress,
   speakers,
   visible,
 }: {
+  cosmeticsFlags: CosmeticsFeatureFlags;
   listeners: VoiceParticipant[];
   onClose: () => void;
+  onChat?: (participant: VoiceParticipant) => void;
   onParticipantPress: (participant: VoiceParticipant) => void;
   speakers: VoiceParticipant[];
   visible: boolean;
@@ -162,11 +174,11 @@ export function RoomParticipantsSheet({
       <ScrollView contentContainerStyle={styles.participantList} showsVerticalScrollIndicator={false}>
         {speakers.length ? <Text style={styles.sectionLabel}>على الميكروفون</Text> : null}
         {speakers.map((participant) => (
-          <ParticipantRow key={participant.id} onPress={() => onParticipantPress(participant)} participant={participant} />
+          <ParticipantRow cosmeticsFlags={cosmeticsFlags} key={participant.id} onChat={onChat ? () => onChat(participant) : undefined} onPress={() => onParticipantPress(participant)} participant={participant} />
         ))}
         {listeners.length ? <Text style={styles.sectionLabel}>المستمعون</Text> : null}
         {listeners.map((participant) => (
-          <ParticipantRow key={participant.id} onPress={() => onParticipantPress(participant)} participant={participant} />
+          <ParticipantRow cosmeticsFlags={cosmeticsFlags} key={participant.id} onChat={onChat ? () => onChat(participant) : undefined} onPress={() => onParticipantPress(participant)} participant={participant} />
         ))}
         {!speakers.length && !listeners.length ? (
           <Text style={styles.emptyText}>لا يوجد مشاركون آخرون الآن.</Text>
@@ -241,7 +253,12 @@ function Tool({
   );
 }
 
-function ParticipantRow({ onPress, participant }: { onPress: () => void; participant: VoiceParticipant }) {
+function ParticipantRow({ cosmeticsFlags, onChat, onPress, participant }: { cosmeticsFlags: CosmeticsFeatureFlags; onChat?: () => void; onPress: () => void; participant: VoiceParticipant }) {
+  const frame = participant.avatarFrameAssetUrl && participant.avatarFrameItemId ? {
+    assetUrl: participant.avatarFrameAssetUrl,
+    itemId: participant.avatarFrameItemId,
+    ...(participant.avatarFrameAssetId && participant.avatarFrameAssetVersionId ? { canonicalAsset: { assetId: participant.avatarFrameAssetId, assetVersionId: participant.avatarFrameAssetVersionId } } : {}),
+  } : undefined;
   return (
     <Pressable
       accessibilityLabel={`${participant.displayName}، ${participant.role === 'listener' ? 'مستمع' : 'على الميكروفون'}`}
@@ -249,9 +266,7 @@ function ParticipantRow({ onPress, participant }: { onPress: () => void; partici
       onPress={onPress}
       style={({ pressed }) => [styles.participantRow, pressed && styles.pressed]}
     >
-      <View style={styles.rowAvatar}>
-        <Text style={styles.rowAvatarText}>{participant.avatarLabel}</Text>
-      </View>
+      <AvatarPresentation flags={cosmeticsFlags} frame={frame} label={participant.avatarLabel} size={48} />
       <View style={styles.rowCopy}>
         <View style={styles.participantNameRow}>
           <Text numberOfLines={1} style={styles.rowName}>{participant.displayName}</Text>
@@ -266,6 +281,20 @@ function ParticipantRow({ onPress, participant }: { onPress: () => void; partici
         size={18}
         tintColor={colors.textSubtle}
       />
+      {onChat ? (
+        <Pressable
+          accessibilityLabel={`محادثة خاصة مع ${participant.displayName}`}
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={(event) => {
+            event.stopPropagation();
+            onChat();
+          }}
+          style={styles.participantChat}
+        >
+          <SymbolView name={{ ios: 'bubble.left.fill', android: 'chat', web: 'chat' }} size={19} tintColor={colors.goldSoft} />
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -318,6 +347,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  participantChat: {
+    alignItems: 'center',
+    backgroundColor: '#5B1118',
+    borderColor: colors.borderGold,
     borderRadius: radius.full,
     borderWidth: 1,
     height: 38,

@@ -12,7 +12,12 @@ const {
   resolveStaffRoomAuthority,
 } = require('./roomCommandCore');
 
-const decodedToken = { email: 'salem@example.com', uid: 'owner-1' };
+const nowMs = 2_000_000_000_000;
+const decodedToken = {
+  auth_time: Math.floor((nowMs - 60_000) / 1000),
+  email: 'salem@example.com',
+  uid: 'owner-1',
+};
 const profile = { avatarLabel: 'S', displayName: 'Salem', email: 'salem@example.com', uid: 'owner-1' };
 const room = {
   availability: 'active',
@@ -55,6 +60,7 @@ function resolve(action, extra = {}) {
     actorMembership: ownerMembership,
     body: body(action, extra),
     decodedToken,
+    nowMs,
     profile,
     room,
     targetMembership: extra.targetUid ? memberMembership : undefined,
@@ -88,7 +94,6 @@ describe('roomCommandCore v2', () => {
       historyVisibility: 'after-join',
       keywordFilterMode: 'standard',
       slowModeSeconds: 10,
-      themeId: 'royal',
       welcomeMessage: '  أهلاً بكم  ',
     })).toEqual({
       ok: true,
@@ -99,11 +104,11 @@ describe('roomCommandCore v2', () => {
         historyVisibility: 'after-join',
         keywordFilterMode: 'standard',
         slowModeSeconds: 10,
-        themeId: 'royal',
         welcomeMessage: 'أهلاً بكم',
       },
     });
     expect(normalizeRoomSettingsPatch({ unknownSetting: true })).toMatchObject({ ok: false });
+    expect(normalizeRoomSettingsPatch({ themeId: 'royal-theater' })).toMatchObject({ ok: false });
     expect(normalizeRoomSettingsPatch({ slowModeSeconds: 7 })).toMatchObject({ ok: false });
     expect(normalizeRoomSettingsPatch({ announcement: 'x'.repeat(161) })).toMatchObject({ ok: false });
   });
@@ -190,6 +195,7 @@ describe('roomCommandCore v2', () => {
     expect(resolveRoomCommand({
       body: body('lock-audio'),
       decodedToken: staffToken,
+      featureFlags: { voice_room_super_moderation: true },
       operatorProfile,
       profile: staffProfile,
       room,
@@ -197,6 +203,7 @@ describe('roomCommandCore v2', () => {
     expect(resolveRoomCommand({
       body: body('lock-audio'),
       decodedToken: staffToken,
+      featureFlags: { voice_room_super_moderation: true },
       operatorProfile: { ...operatorProfile, regionCodes: ['SA'] },
       profile: staffProfile,
       room,
@@ -204,6 +211,7 @@ describe('roomCommandCore v2', () => {
     expect(resolveRoomCommand({
       body: body('lock-audio'),
       decodedToken: staffToken,
+      featureFlags: { voice_room_super_moderation: true },
       operatorProfile,
       profile: staffProfile,
       room: { ...room, countryCode: undefined },
@@ -223,16 +231,55 @@ describe('roomCommandCore v2', () => {
       liveKit: { type: 'update-permission', targetUid: 'member-1', canPublish: true },
     });
 
-    const transferred = resolve('transfer-ownership', { targetUid: 'member-1' });
+    expect(resolve('transfer-ownership', { targetUid: 'member-1' }))
+      .toMatchObject({ ok: false, code: 'OWNERSHIP_OFFER_REQUIRED' });
+  });
+
+  it('terminates the music lease when the DJ is removed or the room closes', () => {
+    const musicRoom = {
+      ...room,
+      activeDjUid: 'member-1',
+      activeMusicLeaseId: 'rml_lease_000000000001',
+    };
+    const removed = resolveRoomCommand({
+      actorMembership: ownerMembership,
+      body: body('remove-member', { targetUid: 'member-1' }),
+      decodedToken,
+      profile,
+      room: musicRoom,
+      targetMembership: memberMembership,
+    });
     expect(buildRoomCommandMutationPlan({
       actorMembership: ownerMembership,
-      command: transferred.value,
-      room,
+      command: removed.value,
+      room: musicRoom,
       targetMembership: memberMembership,
     })).toMatchObject({
-      actorMemberPatch: { authorityRole: 'member', role: 'listener' },
-      roomPatch: { hostId: 'member-1', ownerUid: 'member-1', revision: 8 },
-      targetMemberPatch: { authorityRole: 'owner', role: 'host' },
+      clearActiveMusicLease: true,
+      roomPatch: {
+        activeDjUid: null,
+        activeMusicLeaseId: null,
+      },
+    });
+
+    const closed = resolveRoomCommand({
+      actorMembership: ownerMembership,
+      body: body('close-room'),
+      decodedToken,
+      profile,
+      room: musicRoom,
+    });
+    expect(buildRoomCommandMutationPlan({
+      actorMembership: ownerMembership,
+      command: closed.value,
+      room: musicRoom,
+    })).toMatchObject({
+      clearActiveMusicLease: true,
+      roomPatch: {
+        activeDjUid: null,
+        activeMusicLeaseId: null,
+        status: 'closed',
+      },
     });
   });
 
@@ -250,7 +297,7 @@ describe('roomCommandCore v2', () => {
   it('gates owner settings and recoverable room removal behind the Command Center flag', () => {
     expect(resolveRoomCommand({
       actorMembership: ownerMembership,
-      body: body('update-room-settings', { settings: { themeId: 'royal' } }),
+      body: body('update-room-settings', { settings: { announcement: 'مغلق' } }),
       decodedToken,
       featureFlags: { voice_room_command_center: false },
       profile,
@@ -260,7 +307,7 @@ describe('roomCommandCore v2', () => {
     const settingsResolution = resolveRoomCommand({
       actorMembership: ownerMembership,
       body: body('update-room-settings', {
-        settings: { announcement: 'أهلاً', slowModeSeconds: 10, themeId: 'royal' },
+        settings: { announcement: 'أهلاً', slowModeSeconds: 10 },
       }),
       decodedToken,
       featureFlags: { voice_room_command_center: true },
@@ -273,7 +320,7 @@ describe('roomCommandCore v2', () => {
       command: settingsResolution.value,
       room,
     })).toMatchObject({
-      roomPatch: { announcement: 'أهلاً', revision: 8, slowModeSeconds: 10, themeId: 'royal' },
+      roomPatch: { announcement: 'أهلاً', revision: 8, slowModeSeconds: 10 },
       liveKit: { type: 'none' },
     });
 
@@ -282,6 +329,7 @@ describe('roomCommandCore v2', () => {
       body: body('remove-room', { reason: 'owner-request' }),
       decodedToken,
       featureFlags: { voice_room_command_center: true },
+      nowMs,
       profile,
       room,
     });
@@ -331,5 +379,195 @@ describe('roomCommandCore v2', () => {
       room,
       targetBan: { status: 'revoked', targetUid: 'member-1' },
     })).toMatchObject({ ok: false, code: 'ROOM_BAN_NOT_ACTIVE' });
+  });
+
+  it('applies atomic staff lockdown behind the fail-closed flag and blocks owner reversal', () => {
+    const staffToken = {
+      admin: true,
+      adminRole: 'super-moderator',
+      auth_time: Math.floor((nowMs - 30_000) / 1000),
+      email: 'staff@example.com',
+      uid: 'staff-1',
+    };
+    const staffProfile = { avatarLabel: 'R', displayName: 'Region Staff', email: 'staff@example.com', uid: 'staff-1' };
+    const operatorProfile = { regionCodes: ['IQ'], role: 'super-moderator', status: 'active', uid: 'staff-1' };
+    expect(resolveRoomCommand({
+      body: body('staff-lockdown', { reason: 'abuse-report' }),
+      decodedToken: staffToken,
+      featureFlags: { voice_room_super_moderation: false },
+      nowMs,
+      operatorProfile,
+      profile: staffProfile,
+      room,
+    })).toMatchObject({ ok: false, code: 'FEATURE_DISABLED' });
+
+    const lockdown = resolveRoomCommand({
+      body: body('staff-lockdown', { reason: 'abuse-report', reportId: 'report-1' }),
+      decodedToken: staffToken,
+      featureFlags: { voice_room_super_moderation: true },
+      nowMs,
+      operatorProfile,
+      profile: staffProfile,
+      room,
+    });
+    expect(lockdown.ok).toBe(true);
+    expect(buildRoomCommandMutationPlan({
+      command: lockdown.value,
+      room,
+    })).toMatchObject({
+      clearActiveGameSession: true,
+      liveKit: { type: 'mute-all' },
+      roomPatch: {
+        audioLockdown: true,
+        chatMode: 'off',
+        effectsPolicy: 'off',
+        gamesPaused: true,
+        giftsPaused: true,
+        seatRequestsPaused: true,
+      },
+    });
+
+    const lockedRoom = {
+      ...room,
+      staffLockdown: {
+        byUid: 'staff-1',
+        reason: 'abuse-report',
+        requestId: 'room_request_0001',
+      },
+    };
+    expect(resolveRoomCommand({
+      actorMembership: ownerMembership,
+      body: body('unlock-audio'),
+      decodedToken,
+      nowMs,
+      profile,
+      room: lockedRoom,
+    })).toMatchObject({ ok: false, code: 'STAFF_LOCKDOWN_ACTIVE' });
+    expect(resolveRoomCommand({
+      actorMembership: ownerMembership,
+      body: body('update-room-settings', { settings: { chatMode: 'everyone' } }),
+      decodedToken,
+      featureFlags: { voice_room_command_center: true },
+      nowMs,
+      profile,
+      room: lockedRoom,
+    })).toMatchObject({ ok: false, code: 'STAFF_LOCKDOWN_ACTIVE' });
+  });
+
+  it('protects platform staff targets from room-owner actions and requires fresh auth', () => {
+    expect(resolveRoomCommand({
+      actorMembership: ownerMembership,
+      body: body('mute-member', { targetUid: 'member-1' }),
+      decodedToken,
+      nowMs,
+      profile,
+      room,
+      targetMembership: memberMembership,
+      targetOperatorProfile: {
+        role: 'super-moderator',
+        status: 'active',
+        uid: 'member-1',
+      },
+    })).toMatchObject({ ok: false, code: 'TARGET_PROTECTED' });
+
+    expect(resolveRoomCommand({
+      actorMembership: ownerMembership,
+      body: body('remove-room', { reason: 'owner-request' }),
+      decodedToken: { ...decodedToken, auth_time: Math.floor((nowMs - 20 * 60_000) / 1000) },
+      featureFlags: { voice_room_command_center: true },
+      nowMs,
+      profile,
+      room,
+    })).toMatchObject({ ok: false, code: 'FRESH_AUTH_REQUIRED' });
+  });
+
+  it('gates every Super Moderator command and protects equal or higher platform staff', () => {
+    const staffToken = {
+      admin: true,
+      adminRole: 'super-moderator',
+      auth_time: Math.floor((nowMs - 30_000) / 1000),
+      email: 'staff@example.com',
+      uid: 'staff-1',
+    };
+    const staffProfile = { avatarLabel: 'S', displayName: 'Staff', email: 'staff@example.com', uid: 'staff-1' };
+    const operatorProfile = { regionCodes: ['IQ'], role: 'super-moderator', status: 'active', uid: 'staff-1' };
+    expect(resolveRoomCommand({
+      body: body('lock-audio'),
+      decodedToken: staffToken,
+      featureFlags: { voice_room_super_moderation: false },
+      nowMs,
+      operatorProfile,
+      profile: staffProfile,
+      room,
+    })).toMatchObject({ code: 'FEATURE_DISABLED', ok: false });
+    for (const role of ['owner', 'super-moderator']) {
+      expect(resolveRoomCommand({
+        body: body('mute-member', { targetUid: 'member-1' }),
+        decodedToken: staffToken,
+        featureFlags: { voice_room_super_moderation: true },
+        nowMs,
+        operatorProfile,
+        profile: staffProfile,
+        room,
+        targetMembership: memberMembership,
+        targetOperatorProfile: { role, status: 'active' },
+      })).toMatchObject({ code: 'TARGET_PROTECTED', ok: false });
+    }
+  });
+
+  it('restores the exact pre-lockdown controls and supports kick everyone', () => {
+    const previousRoom = {
+      ...room,
+      audioLockdown: true,
+      chatMode: 'followers',
+      effectsPolicy: 'reduced',
+      gamesPaused: true,
+      giftsPaused: false,
+      musicPaused: true,
+      seatRequestsPaused: false,
+    };
+    const lockdownPlan = buildRoomCommandMutationPlan({
+      command: {
+        action: 'kick-everyone',
+        actorAuthority: 'super-moderator',
+        actorUid: 'staff-1',
+        nextRevision: 8,
+        reason: 'violent incident',
+        reportId: 'case-1',
+        requestId: 'room_request_0001',
+      },
+      room: previousRoom,
+    });
+    expect(lockdownPlan.liveKit).toEqual({ type: 'close-room' });
+    expect(lockdownPlan.roomPatch.staffLockdown.previousState).toMatchObject({
+      audioLockdown: true,
+      chatMode: 'followers',
+      effectsPolicy: 'reduced',
+      gamesPaused: true,
+      giftsPaused: false,
+      musicPaused: true,
+      seatRequestsPaused: false,
+    });
+    const clearPlan = buildRoomCommandMutationPlan({
+      command: {
+        action: 'clear-staff-lockdown',
+        actorAuthority: 'super-moderator',
+        actorUid: 'staff-1',
+        nextRevision: 9,
+        reason: 'incident resolved',
+        requestId: 'room_request_0002',
+      },
+      room: { ...lockdownPlan.roomPatch, id: room.id },
+    });
+    expect(clearPlan.roomPatch).toMatchObject({
+      audioLockdown: true,
+      chatMode: 'followers',
+      effectsPolicy: 'reduced',
+      gamesPaused: true,
+      giftsPaused: false,
+      musicPaused: true,
+      seatRequestsPaused: false,
+    });
+    expect(clearPlan.liveKit).toEqual({ type: 'mute-all' });
   });
 });

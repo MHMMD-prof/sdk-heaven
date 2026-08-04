@@ -18,15 +18,34 @@ describe('storeCore', () => {
       'game-items',
       'chat-themes',
       'avatar-frames',
+      'profile-skins',
+      'chat-bubbles',
+      'nameplates',
+      'cosmetic-badges',
+      'seat-effects',
+      'stickers',
       'cars',
       'custom-ids',
     ]);
+  });
+
+  it('requires immutable assets for sticker catalog items', () => {
+    const sticker = {
+      availability: 'available', category: 'stickers', description: { ar: 'ملصق', en: 'Sticker' }, duration: { kind: 'permanent' },
+      itemId: 'ruby-sticker', name: { ar: 'ياقوت', en: 'Ruby' }, order: 1,
+      previewAssetUrl: 'https://cdn.example.com/sticker-preview.png', prices: { coins: 25 }, purchasingEnabled: true,
+      stickerAsset: { assetId: 'ruby-reaction', assetVersionId: 'v1-123456789abc' }, stock: { kind: 'unlimited' }, thumbnailUrl: 'https://cdn.example.com/sticker.png',
+    };
+    expect(mapStoreCatalogItem(sticker, sticker.itemId)).toMatchObject({ category: 'stickers', stickerAsset: sticker.stickerAsset });
+    expect(mapStoreCatalogItem({ ...sticker, stickerAsset: undefined }, sticker.itemId)).toBeUndefined();
+    expect(mapStoreCatalogItem({ ...sticker, category: 'cars' }, sticker.itemId)).toBeUndefined();
   });
 
   it('maps a bilingual dual-currency timed catalog card', () => {
     expect(mapStoreCatalogItem({
       availability: 'available',
       category: 'avatar-frames',
+      cosmeticAsset: { assetId: 'royal-frame', assetVersionId: 'v1-123456789abc' },
       description: { ar: 'إطار ملكي', en: 'Royal frame' },
       duration: { kind: 'timed', unit: 'weeks', value: 2 },
       itemId: 'royal-frame',
@@ -38,6 +57,7 @@ describe('storeCore', () => {
       stock: { kind: 'unlimited' },
       thumbnailUrl: 'https://cdn.example.com/thumb.png',
     }, 'royal-frame')).toMatchObject({
+      cosmeticAsset: { assetId: 'royal-frame', assetVersionId: 'v1-123456789abc' },
       duration: { kind: 'timed', unit: 'weeks', value: 2 },
       prices: { coins: 500, diamonds: 5 },
     });

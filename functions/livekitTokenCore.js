@@ -1,4 +1,7 @@
+const { createHash } = require('node:crypto');
+
 const ROOM_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const GAME_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{15,95}$/;
 
 function extractBearerToken(headers = {}) {
   const headerValue = headers.authorization || headers.Authorization || '';
@@ -58,6 +61,9 @@ function resolveTokenRequest({ ban, body = {}, decodedToken, membership, profile
   if (!isActiveRoom(room, roomId) || !isCompleteMembership(membership, decodedToken.uid)) {
     return tokenError(403, 'Room membership is required.');
   }
+  if (room.staffLockdown?.byUid) {
+    return tokenError(423, 'This room is temporarily locked by platform safety staff.');
+  }
   if (isActiveBan(ban)) return tokenError(403, 'Room access is banned.');
 
   const seatCanPublish = resolveSeatCanPublish(membership, seat, room);
@@ -76,6 +82,67 @@ function resolveTokenRequest({ ban, body = {}, decodedToken, membership, profile
       role: membership.role,
       roomId,
       seatId: typeof membership.seatId === 'string' ? membership.seatId : '',
+    },
+  };
+}
+
+function resolveGameTransportTokenRequest({
+  ban,
+  body = {},
+  decodedToken,
+  featureFlags,
+  gameSession,
+  membership,
+  profile,
+  room,
+}) {
+  const roomId = typeof body.roomId === 'string' ? body.roomId.trim() : '';
+  const gameSessionId = typeof body.gameSessionId === 'string' ? body.gameSessionId.trim() : '';
+  if (!isValidRoomId(roomId) || !GAME_SESSION_ID_PATTERN.test(gameSessionId)) {
+    return tokenError(400, 'A valid room and game session are required.');
+  }
+  if (featureFlags?.voice_room_games !== true) {
+    return tokenError(503, 'Room games are not enabled.');
+  }
+  if (!isCompleteProfile(profile, decodedToken.uid, decodedToken.email)) {
+    return tokenError(403, 'A complete profile is required.');
+  }
+  if (!isActiveRoom(room, roomId) || !isCompleteMembership(membership, decodedToken.uid)) {
+    return tokenError(403, 'Active room membership is required.');
+  }
+  if (isActiveBan(ban)) return tokenError(403, 'Room access is banned.');
+  const expiresAtMs = timestampToMillis(gameSession?.expiresAt);
+  if (
+    !gameSession
+    || gameSession.sessionId !== gameSessionId
+    || gameSession.roomId !== roomId
+    || room.activeGameSessionId !== gameSessionId
+    || gameSession.sessionMode !== 'multiplayer'
+    || !['lobby', 'active'].includes(gameSession.status)
+    || expiresAtMs === undefined
+    || expiresAtMs <= Date.now()
+    || !Array.isArray(gameSession.playerUids)
+    || !gameSession.playerUids.includes(decodedToken.uid)
+  ) {
+    return tokenError(403, 'An active joined multiplayer game session is required.');
+  }
+  const transportRoomId = `vrg_${createHash('sha256')
+    .update(`${roomId}|${gameSessionId}`)
+    .digest('hex')
+    .slice(0, 32)}`;
+  return {
+    ok: true,
+    value: {
+      authorityRole: resolveAuthorityRole(membership, decodedToken.uid, room),
+      avatarLabel: membership.avatarLabel.trim(),
+      canPublish: false,
+      displayName: membership.displayName.trim(),
+      gameSessionId,
+      participantId: decodedToken.uid,
+      role: membership.role,
+      roomId: transportRoomId,
+      sourceRoomId: roomId,
+      transport: 'room-game',
     },
   };
 }
@@ -124,5 +191,6 @@ module.exports = {
   isCompleteProfile,
   isValidRoomId,
   resolveSeatCanPublish,
+  resolveGameTransportTokenRequest,
   resolveTokenRequest,
 };

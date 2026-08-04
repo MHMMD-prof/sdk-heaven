@@ -45,7 +45,7 @@ export function GamesScreen({ bottomNavigation, navigation }: GamesScreenProps) 
             key={game.id}
             onPress={
               game.id === 'carrom-royal'
-                ? () => navigation.navigate('Carrom')
+                ? () => navigation.navigate('Carrom', {})
                 : game.id === 'royal-majlis'
                   ? () => navigation.navigate('MiniGame', { initialMode: 'naval' })
                   : game.id === 'drawing-guess'

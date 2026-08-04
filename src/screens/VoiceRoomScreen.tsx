@@ -1,12 +1,16 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useRepresentativeBadgeProjection } from '../social/useRepresentativeBadgeProjection';
+import { useAvatarFrameProjection } from '../social/useAvatarFrameProjection';
+import { useEquipmentCosmetics } from '../social/useEquipmentCosmetics';
+import { useSocialFeatureFlags } from '../social/useSocialFeatureFlags';
 import {
   RoomMicrophonesSheet,
+  RoomOwnershipOfferSheet,
   RoomOwnershipSheet,
   RoomPeopleManagementSheet,
   RoomSafetySheet,
@@ -20,9 +24,17 @@ import {
   RoomParticipantsSheet,
 } from '../components/voice-room/VoiceRoomSheets';
 import { RoomChatSheet } from '../components/voice-room/RoomChatSheet';
+import { RoomGameInviteCard } from '../components/voice-room/RoomGameInviteCard';
+import { RoomGiftSheet } from '../components/voice-room/RoomGiftSheet';
+import { RoomEffectOverlay } from '../components/voice-room/RoomEffectOverlay';
+import { useCosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import { RoomMusicSheet } from '../components/voice-room/RoomMusicSheet';
+import { RoomRocketButton, RoomRocketSheet } from '../components/voice-room/RoomRocketSheet';
+import { RoomTargetButton, RoomTargetSheet } from '../components/voice-room/RoomTargetSheet';
 import { VoiceRoomStage } from '../components/voice-room/VoiceRoomStage';
 import { colors, radius, spacing, typography } from '../theme';
 import { RootStackParamList } from '../types/navigation';
+import { VoiceRoom } from '../types/voice';
 import { debugError, debugLog, isDebugLogEnabled, useDebugEvents } from '../utils/debugLog';
 import {
   RoomSeatViewModel,
@@ -37,30 +49,113 @@ import { RoomReportCategory } from '../voice/requestRoomChatCommand';
 import { RoomChatMessage, useRoomChat } from '../voice/roomChat';
 import { useRoomImageUrl, useRoomMediaControls } from '../voice/roomMedia';
 import { activeVoiceProviderConfig } from '../voice/activeVoiceProviderConfig';
+import {
+  RoomEntryEffectRequestError,
+  createRoomEntryEffectRequestId,
+  requestRoomEntryEffectCommand,
+} from '../voice/requestRoomEntryEffectCommand';
+import {
+  RoomGameId,
+  RoomGameRequestError,
+  RoomGameSession,
+  requestRoomGameCommand,
+  roomGameErrorMessage,
+} from '../voice/requestRoomGameCommand';
+import { useRoomEffectsQueue } from '../voice/useRoomEffectsQueue';
+import { useRoomGameSession } from '../voice/useRoomGameSession';
+import { useRoomMusicSession } from '../voice/useRoomMusicSession';
+import { useRoomRocketData } from '../voice/useRoomRocketData';
+import { useRoomTargetData } from '../voice/useRoomTargetData';
+import { useRoomRecordingSafety } from '../voice/useRoomRecordingSafety';
 import { useVoiceRoomController } from '../voice/useVoiceRoomController';
 import { useVoiceRooms } from '../voice/useVoiceRooms';
 import { useVoiceRoomFeatureFlags } from '../voice/voiceRoomFeatureFlags';
+import { useRoomOwnershipTransfer } from '../voice/useRoomOwnershipTransfer';
+import { useResolvedRoomTheme } from '../voice/roomThemeRuntime';
 
 type VoiceRoomScreenProps = NativeStackScreenProps<RootStackParamList, 'VoiceRoom'>;
 
 const REACTIONS = ['👏', '❤️', '🔥', '✨'];
 
 export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
-  const { getRoomById, startRoomPresence, stopRoomPresence } = useVoiceRooms();
+  const { getRoomById, roomsStatus } = useVoiceRooms();
   const sourceRoom = getRoomById(route.params.roomId);
+  if (!sourceRoom) {
+    return (
+      <ScreenContainer>
+        <View style={styles.unavailableRoom}>
+          {roomsStatus === 'loading' ? <ActivityIndicator color={colors.gold} /> : null}
+          <Text style={styles.unavailableRoomTitle}>
+            {roomsStatus === 'loading' ? 'جارٍ تحميل الغرفة…' : 'الغرفة غير متاحة'}
+          </Text>
+          <Text style={styles.unavailableRoomText}>
+            {roomsStatus === 'loading'
+              ? 'يتم التحقق من حالة الغرفة.'
+              : 'ربما أُغلقت الغرفة أو لم يعد مسموحاً لك بالدخول.'}
+          </Text>
+          {roomsStatus !== 'loading' ? (
+            <Pressable onPress={() => navigation.goBack()} style={styles.unavailableRoomButton}>
+              <Text style={styles.unavailableRoomButtonText}>رجوع</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </ScreenContainer>
+    );
+  }
+  return <ResolvedVoiceRoomScreen navigation={navigation} route={route} sourceRoom={sourceRoom} />;
+}
+
+type ResolvedVoiceRoomScreenProps = VoiceRoomScreenProps & { sourceRoom: VoiceRoom };
+
+function ResolvedVoiceRoomScreen({
+  navigation,
+  route,
+  sourceRoom,
+}: ResolvedVoiceRoomScreenProps) {
+  const { getPresenceSessionId, startRoomPresence, stopRoomPresence } = useVoiceRooms();
   const voiceRoomFeatureFlags = useVoiceRoomFeatureFlags();
+  const socialFeatureFlags = useSocialFeatureFlags();
+  const cosmeticsFeatureFlags = useCosmeticsFeatureFlags();
   const roomMediaControls = useRoomMediaControls(sourceRoom);
   const roomImageUrl = useRoomImageUrl(sourceRoom.activeRoomImagePath);
+  const resolvedTheme = useResolvedRoomTheme({
+    enabled: voiceRoomFeatureFlags.themes,
+    roomCustomizationSuspended: sourceRoom.roomCustomizationSuspended,
+    themeId: sourceRoom.themeId,
+  });
   const debugEvents = useDebugEvents();
   const shouldShowDebugPanel = isDebugLogEnabled();
   const [toolsVisible, setToolsVisible] = useState(false);
   const [participantsVisible, setParticipantsVisible] = useState(false);
   const [chatVisible, setChatVisible] = useState(false);
+  const [giftVisible, setGiftVisible] = useState(false);
+  const [musicVisible, setMusicVisible] = useState(false);
+  const [rocketVisible, setRocketVisible] = useState(false);
+  const [targetVisible, setTargetVisible] = useState(false);
   const [commandPanel, setCommandPanel] = useState<
     'microphones' | 'people' | 'safety' | 'seat-offers' | 'settings' | 'ownership'
   >();
+  const roomRocket = useRoomRocketData({
+    enabled: voiceRoomFeatureFlags.supporterRankings,
+    roomId: sourceRoom.id,
+  });
+  const roomEffects = useRoomEffectsQueue({
+    entryEffectsEnabled: voiceRoomFeatureFlags.entryEffects,
+    giftGlobalEffectsEnabled: cosmeticsFeatureFlags.roomGiftGlobalEffects,
+    giftsEnabled: voiceRoomFeatureFlags.gifts,
+    rocketEnabled: voiceRoomFeatureFlags.supporterRankings && roomRocket.renderingEnabled,
+    roomEffectsPolicy: sourceRoom.effectsPolicy,
+    roomId: sourceRoom.id,
+    suspended: sourceRoom.audioLockdown === true
+      || sourceRoom.roomCustomizationSuspended === true
+      || sourceRoom.status === 'closed',
+    uid: sourceRoom.localMember?.id,
+    viewerCountryCode: sourceRoom.countryCode,
+    viewerRoomVisibility: sourceRoom.visibility,
+  });
   const [pendingSeatId, setPendingSeatId] = useState<string>();
   const [reactionIndex, setReactionIndex] = useState(-1);
+  const [gameCommandPending, setGameCommandPending] = useState(false);
   const {
     canPublishAudio,
     connectionState,
@@ -91,35 +186,66 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
     ...sourceListeners.map((participant) => participant.id),
   ], [sourceListeners, sourceRoom.listeners, sourceRoom.speakers, sourceSpeakers]);
   const activeBadges = useRepresentativeBadgeProjection(badgeUids);
+  const avatarFrames = useAvatarFrameProjection(badgeUids);
+  const equipmentCosmetics = useEquipmentCosmetics(badgeUids);
   const speakers = useMemo(
     () => sourceSpeakers.map((participant) => ({
       ...participant,
+      avatarFrameAssetUrl: avatarFrames[participant.id]?.assetUrl,
+      avatarFrameAssetId: avatarFrames[participant.id]?.canonicalAsset?.assetId,
+      avatarFrameAssetVersionId: avatarFrames[participant.id]?.canonicalAsset?.assetVersionId,
+      avatarFrameItemId: avatarFrames[participant.id]?.itemId,
       representativeBadgeActive: activeBadges[participant.id] === true,
+      equipmentCosmetics: equipmentCosmetics[participant.id],
     })),
-    [activeBadges, sourceSpeakers],
+    [activeBadges, avatarFrames, equipmentCosmetics, sourceSpeakers],
   );
   const listeners = useMemo(
     () => sourceListeners.map((participant) => ({
       ...participant,
+      avatarFrameAssetUrl: avatarFrames[participant.id]?.assetUrl,
+      avatarFrameAssetId: avatarFrames[participant.id]?.canonicalAsset?.assetId,
+      avatarFrameAssetVersionId: avatarFrames[participant.id]?.canonicalAsset?.assetVersionId,
+      avatarFrameItemId: avatarFrames[participant.id]?.itemId,
       representativeBadgeActive: activeBadges[participant.id] === true,
+      equipmentCosmetics: equipmentCosmetics[participant.id],
     })),
-    [activeBadges, sourceListeners],
+    [activeBadges, avatarFrames, equipmentCosmetics, sourceListeners],
   );
   const room = useMemo(() => ({
     ...sourceRoom,
     listeners: sourceRoom.listeners.map((member) => ({
       ...member,
+      avatarFrameAssetUrl: avatarFrames[member.id]?.assetUrl,
+      avatarFrameAssetId: avatarFrames[member.id]?.canonicalAsset?.assetId,
+      avatarFrameAssetVersionId: avatarFrames[member.id]?.canonicalAsset?.assetVersionId,
+      avatarFrameItemId: avatarFrames[member.id]?.itemId,
       representativeBadgeActive: activeBadges[member.id] === true,
+      equipmentCosmetics: equipmentCosmetics[member.id],
     })),
     localMember: sourceRoom.localMember ? {
       ...sourceRoom.localMember,
+      avatarFrameAssetUrl: avatarFrames[sourceRoom.localMember.id]?.assetUrl,
+      avatarFrameAssetId: avatarFrames[sourceRoom.localMember.id]?.canonicalAsset?.assetId,
+      avatarFrameAssetVersionId: avatarFrames[sourceRoom.localMember.id]?.canonicalAsset?.assetVersionId,
+      avatarFrameItemId: avatarFrames[sourceRoom.localMember.id]?.itemId,
       representativeBadgeActive: activeBadges[sourceRoom.localMember.id] === true,
+      equipmentCosmetics: equipmentCosmetics[sourceRoom.localMember.id],
     } : undefined,
     speakers: sourceRoom.speakers.map((member) => ({
       ...member,
+      avatarFrameAssetUrl: avatarFrames[member.id]?.assetUrl,
+      avatarFrameAssetId: avatarFrames[member.id]?.canonicalAsset?.assetId,
+      avatarFrameAssetVersionId: avatarFrames[member.id]?.canonicalAsset?.assetVersionId,
+      avatarFrameItemId: avatarFrames[member.id]?.itemId,
       representativeBadgeActive: activeBadges[member.id] === true,
+      equipmentCosmetics: equipmentCosmetics[member.id],
     })),
-  }), [activeBadges, sourceRoom]);
+  }), [activeBadges, avatarFrames, equipmentCosmetics, sourceRoom]);
+  const ownershipTransfer = useRoomOwnershipTransfer(
+    room,
+    voiceRoomFeatureFlags.ownershipTransfer,
+  );
 
   const seats = useMemo(
     () => buildRoomSeatViewModels({ room, speakers, speakingParticipantIds }),
@@ -140,11 +266,36 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
   const canManageRoom = voiceRoomFeatureFlags.commandCenter
     && (room.localMember?.authorityRole === 'owner' || room.localMember?.authorityRole === 'moderator');
   const authorityRole = room.localMember?.authorityRole;
+  const roomTarget = useRoomTargetData({
+    enabled: voiceRoomFeatureFlags.ownerTargets,
+    isOwner: authorityRole === 'owner',
+    ownerUid,
+    roomId: room.id,
+  });
+  const canControlMusic = Boolean(
+    voiceRoomFeatureFlags.sharedMusic
+    && (
+      authorityRole === 'owner'
+      || authorityRole === 'moderator'
+      || room.localMember?.privileges?.canManageMusic === true
+    ),
+  );
+  const roomMusic = useRoomMusicSession({
+    canControlMusic,
+    enabled: voiceRoomFeatureFlags.sharedMusic,
+    roomId: room.id,
+  });
+  const roomRecording = useRoomRecordingSafety({
+    enabled: voiceRoomFeatureFlags.safetyRecording,
+    roomId: room.id,
+  });
   const canModerateChat = authorityRole === 'owner' || authorityRole === 'moderator';
   const commandCenterAuthorityRole = voiceRoomFeatureFlags.commandCenter ? authorityRole : undefined;
   const commandCenterData = useRoomCommandCenterData(room.id, room.localMember?.id, canManageRoom);
+  const { session: roomGameSession } = useRoomGameSession(room.id, voiceRoomFeatureFlags.games);
   const roomChat = useRoomChat({
     avatarLabel: room.localMember?.avatarLabel || '',
+    avatarFrame: room.localMember?.id ? avatarFrames[room.localMember.id] : undefined,
     config: activeVoiceProviderConfig.liveKit,
     displayName: room.localMember?.displayName || '',
     enabled: voiceRoomFeatureFlags.chat,
@@ -163,10 +314,15 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
     ),
     [room.listeners, room.speakers],
   );
+  const giftRecipients = useMemo(
+    () => roomMembers
+      .filter((member) => member.id !== room.localMember?.id)
+      .map((member) => ({ displayName: member.displayName, uid: member.id })),
+    [room.localMember?.id, roomMembers],
+  );
   const roomSettings = useMemo(() => ({
     announcement: room.announcement ?? '',
     welcomeMessage: room.welcomeMessage ?? '',
-    themeId: room.themeId ?? 'midnight',
     chatMode: room.chatMode ?? 'everyone',
     slowModeSeconds: room.slowModeSeconds ?? 0,
     historyVisibility: room.historyVisibility ?? 'after-join',
@@ -206,6 +362,25 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
   const handleLeave = useCallback(async () => {
     debugLog('voice.screen', 'leave:start', { roomId: room.id });
     try {
+      if (
+        roomGameSession
+        && room.localMember?.id
+        && roomGameSession.playerUids.includes(room.localMember.id)
+      ) {
+        try {
+          await requestRoomGameCommand({
+            action: 'leave-room-game',
+            roomId: room.id,
+            sessionId: roomGameSession.sessionId,
+          }, activeVoiceProviderConfig.liveKit);
+        } catch (error) {
+          debugError('voice.games', 'leave-with-room:error', error, {
+            roomId: room.id,
+            sessionId: roomGameSession.sessionId,
+          });
+        }
+      }
+      await roomMusic.stopIfLocalDj();
       await stopRoomPresence(room.id);
       await leaveRoom();
       debugLog('voice.screen', 'leave:success', { roomId: room.id });
@@ -214,16 +389,64 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
     } finally {
       navigation.goBack();
     }
-  }, [leaveRoom, navigation, room.id, stopRoomPresence]);
+  }, [
+    leaveRoom,
+    navigation,
+    room.id,
+    room.localMember?.id,
+    roomGameSession,
+    roomMusic,
+    stopRoomPresence,
+  ]);
 
   useEffect(() => {
     debugLog('voice.screen', 'presence:start', { roomId: room.id });
     startRoomPresence(room.id);
     return () => {
       debugLog('voice.screen', 'presence:stop', { roomId: room.id });
-      void stopRoomPresence(room.id);
+      void stopRoomPresence(room.id).catch((error) => {
+        debugError('voice.screen', 'presence:stop:error', error, { roomId: room.id });
+      });
     };
   }, [room.id, startRoomPresence, stopRoomPresence]);
+
+  useEffect(() => {
+    if (!voiceRoomFeatureFlags.entryEffects || !isConnected) return undefined;
+    let cancelled = false;
+    const requestId = createRoomEntryEffectRequestId();
+    const announce = async () => {
+      const sessionId = getPresenceSessionId(room.id);
+      if (!sessionId || cancelled) return;
+      const retryDelays = [1_200, 1_000, 2_000];
+      for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+        await waitForEntryEffectRetry(retryDelays[attempt]);
+        if (cancelled) return;
+        try {
+          await requestRoomEntryEffectCommand({
+            requestId,
+            roomId: room.id,
+            sessionId,
+          }, activeVoiceProviderConfig.liveKit);
+          return;
+        } catch (error) {
+          const retryable = error instanceof RoomEntryEffectRequestError
+            && ['NETWORK_ERROR', 'SESSION_MISMATCH', 'TIMEOUT'].includes(error.code);
+          if (!retryable || attempt === retryDelays.length - 1) {
+            debugError('voice.effects', 'announce:error', error, {
+              attempt: attempt + 1,
+              roomId: room.id,
+              sessionId,
+            });
+            return;
+          }
+        }
+      }
+    };
+    void announce();
+    return () => {
+      cancelled = true;
+    };
+  }, [getPresenceSessionId, isConnected, room.id, voiceRoomFeatureFlags.entryEffects]);
 
   useEffect(() => {
     if (room.status === 'closed' || room.localMember?.status === 'removed') {
@@ -279,19 +502,174 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
     setParticipantsVisible(true);
   }, []);
 
-  const showGame = useCallback(() => {
-    setToolsVisible(false);
+  const openRoomGame = useCallback((session: RoomGameSession) => {
+    if (session.clientRoute === 'MiniGame' || session.gameId === 'royal-majlis') {
+      navigation.navigate('MiniGame', {
+        initialMode: 'naval',
+        roomId: room.id,
+        sessionId: session.sessionId,
+        source: 'voice-room',
+      });
+      return;
+    }
+    if (session.clientRoute === 'Carrom' || session.gameId === 'carrom-royal') {
+      navigation.navigate('Carrom', {
+        roomId: room.id,
+        sessionId: session.sessionId,
+        source: 'voice-room',
+      });
+      return;
+    }
+    if (!room.localMember?.id) {
+      Alert.alert('الألعاب', 'تعذر التحقق من عضوية اللاعب في الغرفة.');
+      return;
+    }
     navigation.navigate('DrawingGuess', {
+      displayName: room.localMember?.displayName,
       mode: 'online',
+      playerId: room.localMember?.id,
       roomId: room.id,
+      sessionId: session.sessionId,
       source: 'voice-room',
     });
-  }, [navigation, room.id]);
+  }, [navigation, room.id, room.localMember?.displayName, room.localMember?.id]);
+
+  const createRoomGameInvite = useCallback(async (gameId: RoomGameId) => {
+    if (gameCommandPending) return;
+    setGameCommandPending(true);
+    try {
+      const result = await requestRoomGameCommand({
+        action: 'create-room-game-invite',
+        gameId,
+        roomId: room.id,
+      }, activeVoiceProviderConfig.liveKit);
+      if (result.session) openRoomGame(result.session);
+    } catch (error) {
+      Alert.alert(
+        'الألعاب',
+        error instanceof RoomGameRequestError
+          ? error.message
+          : roomGameErrorMessage(undefined, 'تعذر إنشاء دعوة اللعبة.'),
+      );
+    } finally {
+      setGameCommandPending(false);
+    }
+  }, [gameCommandPending, openRoomGame, room.id]);
+
+  const showGame = useCallback(async () => {
+    setToolsVisible(false);
+    if (!voiceRoomFeatureFlags.games) {
+      Alert.alert('الألعاب', 'ألعاب الغرفة غير مفعّلة حالياً.');
+      return;
+    }
+    if (roomGameSession) {
+      Alert.alert('الألعاب', 'توجد جلسة لعبة نشطة بالفعل. استخدم بطاقة اللعبة في نشاط الغرفة.');
+      return;
+    }
+    if (gameCommandPending) return;
+    setGameCommandPending(true);
+    try {
+      const result = await requestRoomGameCommand({
+        action: 'list-room-games',
+        roomId: room.id,
+      }, activeVoiceProviderConfig.liveKit);
+      const games = result.games ?? [];
+      if (!games.length) {
+        Alert.alert('الألعاب', 'لا توجد ألعاب متاحة لهذه الغرفة حالياً.');
+        return;
+      }
+      Alert.alert(
+        'دعوة لعبة اختيارية',
+        'اختر لعبة. الألعاب المحلية تعمل على جهاز المضيف، والألعاب الجماعية تتطلب انضماماً صريحاً.',
+        [
+          ...games.map((game) => ({
+            text: game.displayName.ar,
+            onPress: () => { void createRoomGameInvite(game.gameId); },
+          })),
+          { text: 'إلغاء', style: 'cancel' as const },
+        ],
+      );
+    } catch (error) {
+      Alert.alert(
+        'الألعاب',
+        error instanceof RoomGameRequestError
+          ? error.message
+          : roomGameErrorMessage(undefined, 'تعذر تحميل ألعاب الغرفة.'),
+      );
+    } finally {
+      setGameCommandPending(false);
+    }
+  }, [
+    createRoomGameInvite,
+    gameCommandPending,
+    room.id,
+    roomGameSession,
+    voiceRoomFeatureFlags.games,
+  ]);
+
+  const openJoinedRoomGame = useCallback(() => {
+    if (!roomGameSession) return;
+    openRoomGame(roomGameSession);
+  }, [openRoomGame, roomGameSession]);
+
+  const joinRoomGameInvite = useCallback(async () => {
+    if (!roomGameSession) return;
+    if (roomGameSession.sessionMode !== 'multiplayer') return;
+    if (gameCommandPending) return;
+    setGameCommandPending(true);
+    try {
+      await requestRoomGameCommand({
+        action: 'join-room-game',
+        roomId: room.id,
+        sessionId: roomGameSession.sessionId,
+      }, activeVoiceProviderConfig.liveKit);
+      openJoinedRoomGame();
+    } catch (error) {
+      Alert.alert(
+        'الألعاب',
+        error instanceof RoomGameRequestError
+          ? error.message
+          : roomGameErrorMessage(undefined, 'تعذر الانضمام إلى اللوبي.'),
+      );
+    } finally {
+      setGameCommandPending(false);
+    }
+  }, [gameCommandPending, openJoinedRoomGame, room.id, roomGameSession]);
+
+  const endRoomGameSession = useCallback(async () => {
+    if (!roomGameSession) return;
+    if (gameCommandPending) return;
+    setGameCommandPending(true);
+    try {
+      await requestRoomGameCommand({
+        action: 'end-room-game',
+        roomId: room.id,
+        sessionId: roomGameSession.sessionId,
+      }, activeVoiceProviderConfig.liveKit);
+    } catch (error) {
+      Alert.alert(
+        'الألعاب',
+        error instanceof RoomGameRequestError
+          ? error.message
+          : roomGameErrorMessage(undefined, 'تعذر إنهاء جلسة اللعبة.'),
+      );
+    } finally {
+      setGameCommandPending(false);
+    }
+  }, [gameCommandPending, room.id, roomGameSession]);
 
   const showGift = useCallback(() => {
     setToolsVisible(false);
-    navigation.navigate('Gifts', {});
-  }, [navigation]);
+    if (!voiceRoomFeatureFlags.gifts) {
+      Alert.alert('الهدايا', 'هدايا الغرفة غير مفعّلة حالياً.');
+      return;
+    }
+    if (giftRecipients.length === 0) {
+      Alert.alert('الهدايا', 'لا يوجد مستلم متاح في الغرفة حالياً.');
+      return;
+    }
+    setGiftVisible(true);
+  }, [giftRecipients.length, voiceRoomFeatureFlags.gifts]);
 
   const showReport = useCallback(() => {
     setToolsVisible(false);
@@ -412,7 +790,13 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
         scroll={false}
         topPadding={spacing.xs}
       >
-        {roomImageUrl ? (
+        <Image
+          accessibilityIgnoresInvertColors
+          resizeMode="cover"
+          source={resolvedTheme.backgroundSource}
+          style={styles.roomBackground}
+        />
+        {roomImageUrl && room.roomImageReviewStatus === 'approved' && room.roomCustomizationSuspended !== true ? (
           <Image
             accessibilityIgnoresInvertColors
             resizeMode="cover"
@@ -427,10 +811,25 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
           onLeave={() => void handleLeave()}
           onShare={handleShare}
           ownerName={ownerName}
+          recordingActive={roomRecording.indicatorActive}
           roomId={room.id}
           title={room.title}
         />
+        <View pointerEvents="box-none" style={styles.incentiveLaunchers}>
+          <RoomRocketButton data={roomRocket} onPress={() => setRocketVisible(true)} />
+          <RoomTargetButton data={roomTarget} onPress={() => setTargetVisible(true)} />
+        </View>
 
+        {roomRecording.noticeVisible ? (
+          <View style={[styles.notice, styles.noticeWarning]}>
+            <Pressable onPress={() => { void roomRecording.acknowledgeNotice(); }} style={styles.retry}>
+              <Text style={styles.retryText}>موافق</Text>
+            </Pressable>
+            <Text style={styles.noticeText}>
+              هذه غرفة ناضجة قد تُسجَّل صوتياً لأغراض الأمان عند التفعيل. التسجيل للطاقم فقط.
+            </Text>
+          </View>
+        ) : null}
         {notice ? (
           <View
             accessibilityLiveRegion="polite"
@@ -461,10 +860,17 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
         ) : null}
 
         <VoiceRoomStage
+          cosmeticsFlags={cosmeticsFeatureFlags}
+          manifest={resolvedTheme.manifest}
           modeLabel={seatModeLabel(room.seatMode)}
           onSeatPress={(seat) => void handleSeatPress(seat)}
           pendingSeatId={pendingSeatId}
           seats={seats}
+          targetedGiftEffect={roomEffects.activeEffect?.kind === 'room-gift'
+            && roomEffects.activeEffect.giftPresentationTier === 'targeted'
+            && roomEffects.activeEffect.presentation === 'visual'
+            ? roomEffects.activeEffect
+            : undefined}
         />
 
         <View style={styles.activity}>
@@ -499,6 +905,33 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
               <Text numberOfLines={1} style={styles.eventText}>توجد لعبة مرتبطة بالغرفة الآن.</Text>
             </View>
           ) : null}
+          {voiceRoomFeatureFlags.games
+            && roomGameSession
+            && (roomGameSession.status === 'lobby' || roomGameSession.status === 'active') ? (
+            <RoomGameInviteCard
+              isPlayer={Boolean(
+                room.localMember?.id
+                && roomGameSession.playerUids.includes(room.localMember.id),
+              )}
+              onEnd={
+                room.localMember?.id
+                && (
+                  roomGameSession.hostUid === room.localMember.id
+                  || authorityRole === 'owner'
+                  || authorityRole === 'moderator'
+                )
+                  ? () => { void endRoomGameSession(); }
+                  : undefined
+              }
+              onJoin={
+                roomGameSession.sessionMode === 'multiplayer'
+                  ? () => { void joinRoomGameInvite(); }
+                  : undefined
+              }
+              onOpenGame={openJoinedRoomGame}
+              session={roomGameSession}
+            />
+          ) : null}
           {voiceRoomFeatureFlags.chat ? roomChat.messages.slice(-2).map((message) => (
             <View key={message.id} style={styles.chatPreview}>
               <Text numberOfLines={1} style={styles.chatPreviewSender}>
@@ -516,6 +949,18 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
             <Text style={styles.reactionText}>{REACTIONS[reactionIndex]}</Text>
           </View>
         ) : null}
+        {roomEffects.activeEffect
+          && !(roomEffects.activeEffect.kind === 'room-gift'
+            && roomEffects.activeEffect.giftPresentationTier === 'targeted'
+            && roomEffects.activeEffect.presentation === 'visual') ? (
+          <RoomEffectOverlay
+            effect={roomEffects.activeEffect}
+            flags={cosmeticsFeatureFlags}
+            onComplete={() => roomEffects.completeActiveEffect('completed')}
+            onError={() => roomEffects.completeActiveEffect('renderer-error')}
+            viewerMode={roomEffects.viewerMode}
+          />
+        ) : null}
 
         {shouldShowDebugPanel ? (
           <View style={styles.debugPanel}>
@@ -530,10 +975,16 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
         authorityRole={commandCenterAuthorityRole}
         hasPendingSeatOffer={!canManageRoom
           && (commandCenterData.seatInvites.length > 0 || commandCenterData.seatRequests.length > 0)}
+        musicEnabled={voiceRoomFeatureFlags.sharedMusic}
         onClose={() => setToolsVisible(false)}
         onGame={showGame}
         onGift={showGift}
         onMicrophones={() => openCommandPanel('microphones')}
+        onMusic={() => {
+          setToolsVisible(false);
+          setMusicVisible(true);
+          void roomMusic.loadCatalog();
+        }}
         onOwnership={() => openCommandPanel('ownership')}
         onParticipants={showParticipants}
         onPeople={() => openCommandPanel('people')}
@@ -550,6 +1001,38 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
           handleShare();
         }}
         visible={toolsVisible}
+      />
+      <RoomMusicSheet
+        canControl={canControlMusic}
+        catalog={roomMusic.catalog}
+        errorMessage={roomMusic.errorMessage}
+        lease={roomMusic.lease}
+        musicMuted={roomMusic.musicMuted}
+        musicVolume={roomMusic.musicVolume}
+        onClaimTrack={(trackId) => { void roomMusic.claimTrack(trackId); }}
+        onClose={() => setMusicVisible(false)}
+        onLoadCatalog={() => { void roomMusic.loadCatalog(); }}
+        onSetMuted={roomMusic.setMusicMuted}
+        onSetPlaybackState={(state) => { void roomMusic.setPlaybackState(state); }}
+        onSetVolume={roomMusic.setMusicVolume}
+        onStop={() => { void roomMusic.stopMusic(); }}
+        visible={musicVisible}
+      />
+      <RoomRocketSheet
+        cosmeticsFlags={cosmeticsFeatureFlags}
+        data={roomRocket}
+        onClose={() => setRocketVisible(false)}
+        payoutsEnabled={voiceRoomFeatureFlags.rocketRewards}
+        visible={rocketVisible}
+      />
+      <RoomTargetSheet
+        cosmeticsFlags={cosmeticsFeatureFlags}
+        data={roomTarget}
+        isOwner={authorityRole === 'owner'}
+        onClose={() => setTargetVisible(false)}
+        ownerUid={ownerUid}
+        roomId={room.id}
+        visible={targetVisible}
       />
       {canManageRoom ? (
         <RoomMicrophonesSheet
@@ -581,6 +1064,7 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
       {canManageRoom ? (
         <RoomPeopleManagementSheet
           actorRole={authorityRole === 'owner' ? 'owner' : 'moderator'}
+          cosmeticsFlags={cosmeticsFeatureFlags}
           members={roomMembers}
           onAssignModerator={(uid) => confirmMemberAction(
             'تعيين مشرف',
@@ -666,6 +1150,7 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
       />
       {canManageRoom && authorityRole === 'owner' ? (
         <RoomSettingsSheet
+          currentThemeId={room.themeId ?? 'majlis-default'}
           errorMessage={hostControls.errorMessage}
           initialSettings={roomSettings}
           mediaEnabled={voiceRoomFeatureFlags.media && room.roomCustomizationSuspended !== true}
@@ -678,35 +1163,65 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
             await hostControls.updateRoomSettings(settings);
             setCommandPanel(undefined);
           }}
+          purchasesEnabled={voiceRoomFeatureFlags.themePurchases}
+          roomId={room.id}
           saving={hostControls.isCommandPending('update-room-settings')}
+          themesEnabled={voiceRoomFeatureFlags.themes}
           visible={commandPanel === 'settings'}
         />
       ) : null}
       {canManageRoom && authorityRole === 'owner' ? (
         <RoomOwnershipSheet
-          candidates={roomMembers.filter((member) => member.authorityRole !== 'owner')}
-          errorMessage={hostControls.errorMessage}
+          candidates={voiceRoomFeatureFlags.ownershipTransfer
+            ? roomMembers.filter((member) => member.authorityRole !== 'owner')
+            : []}
+          cosmeticsFlags={cosmeticsFeatureFlags}
+          errorMessage={ownershipTransfer.errorMessage || hostControls.errorMessage}
           onClose={() => setCommandPanel(undefined)}
+          onCancelTransfer={() => {
+            void ownershipTransfer.cancel().catch(() => undefined);
+          }}
           onRemoveRoom={(reason) => confirmMemberAction(
             'حذف الغرفة',
             'ستُغلق الغرفة فوراً مع الاحتفاظ بسجل قابل للاستعادة لفريق المنصة.',
             () => hostControls.removeRoom(reason),
             true,
           )}
-          onTransfer={(member) => confirmMemberAction(
-            'نقل ملكية الغرفة',
-            `سيصبح ${member.displayName} المالك الجديد فوراً.`,
-            () => hostControls.transferOwnership(member.id),
+          onTransfer={(member, password) => confirmMemberAction(
+            'إرسال عرض ملكية الغرفة',
+            `سيصل إلى ${member.displayName} عرض صالح لمدة 15 دقيقة ولن تتغير الملكية قبل قبوله.`,
+            () => ownershipTransfer.offer(member.id, password),
             true,
           )}
+          ownershipPending={!!ownershipTransfer.pendingAction}
+          pendingTransfer={ownershipTransfer.transfer?.status === 'pending'
+            ? ownershipTransfer.transfer
+            : undefined}
           pending={isCommandPending}
           visible={commandPanel === 'ownership'}
         />
       ) : null}
+      <RoomOwnershipOfferSheet
+        errorMessage={ownershipTransfer.errorMessage}
+        fromDisplayName={ownerName}
+        onAccept={(password) => {
+          void ownershipTransfer.accept(password).catch(() => undefined);
+        }}
+        onDecline={() => {
+          void ownershipTransfer.decline().catch(() => undefined);
+        }}
+        pending={!!ownershipTransfer.pendingAction}
+        visible={
+          voiceRoomFeatureFlags.ownershipTransfer
+          && ownershipTransfer.transfer?.status === 'pending'
+          && ownershipTransfer.transfer.toUid === room.localMember?.id
+        }
+      />
       <RoomChatSheet
         canManage={canModerateChat}
         canSend={canSendChat}
         chatEnabled={voiceRoomFeatureFlags.chat}
+        cosmeticsFlags={cosmeticsFeatureFlags}
         currentUid={room.localMember?.id}
         errorMessage={roomChat.errorMessage}
         hasOlderMessages={roomChat.hasOlderMessages}
@@ -716,6 +1231,11 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
         onClose={() => setChatVisible(false)}
         onDelete={deleteChatMessage}
         onLoadOlder={() => { void roomChat.loadOlder(); }}
+        onOpenProfile={(uid) => {
+          setChatVisible(false);
+          if (uid === room.localMember?.id) navigation.navigate('MeProfile');
+          else navigation.navigate('UserProfile', { uid });
+        }}
         onPin={pinChatMessage}
         onReport={reportChatMessage}
         onRetry={(message) => { void roomChat.retryMessage(message.id).catch(() => undefined); }}
@@ -724,9 +1244,48 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
         safetyEnabled={voiceRoomFeatureFlags.safety}
         visible={chatVisible}
       />
+      <RoomGiftSheet
+        enabled={voiceRoomFeatureFlags.gifts}
+        onClose={() => setGiftVisible(false)}
+        onGiftCommitted={(effect) => {
+          roomEffects.enqueueLocalEffect({
+            ...(effect.cosmeticAsset ? {
+              assetId: effect.cosmeticAsset.assetId,
+              assetVersionId: effect.cosmeticAsset.assetVersionId,
+            } : {}),
+            animationEnabled: effect.animationEnabled,
+            audioEnabled: effect.audioEnabled,
+            comboCount: effect.comboCount,
+            comboKey: effect.comboKey,
+            comboSequence: effect.comboSequence,
+            durationMs: effect.durationMs,
+            eventId: effect.eventId,
+            expiresAtMs: effect.expiresAtMs,
+            giftPresentationTier: effect.presentationTier,
+            hapticPolicy: effect.hapticPolicy,
+            kind: 'room-gift',
+            label: `${effect.senderDisplayName} أرسل ${effect.nameAr}${effect.quantity > 1 ? ` ×${effect.quantity}` : ''} إلى ${effect.recipientDisplayName}`,
+            priority: effect.priority,
+            quantity: effect.quantity,
+            recipientDisplayName: effect.recipientDisplayName,
+            recipientUid: effect.recipientUid,
+            senderDisplayName: effect.senderDisplayName,
+            senderUid: effect.senderUid,
+          });
+        }}
+        recipients={giftRecipients}
+        roomId={room.id}
+        visible={giftVisible}
+      />
       <RoomParticipantsSheet
+        cosmeticsFlags={cosmeticsFeatureFlags}
         listeners={listeners}
         onClose={() => setParticipantsVisible(false)}
+        onChat={socialFeatureFlags.directMessages ? (participant) => {
+          if (participant.id === room.localMember?.id) return;
+          setParticipantsVisible(false);
+          navigation.navigate('DirectChat', { source: 'room', targetUid: participant.id });
+        } : undefined}
         onParticipantPress={handleParticipantPress}
         speakers={speakers}
         visible={participantsVisible}
@@ -736,6 +1295,38 @@ export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
 }
 
 const styles = StyleSheet.create({
+  unavailableRoom: {
+    alignItems: 'center',
+    flex: 1,
+    gap: spacing.md,
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  unavailableRoomTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: typography.weights.black,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  unavailableRoomText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  unavailableRoomButton: {
+    backgroundColor: colors.gold,
+    borderRadius: radius.full,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+  },
+  unavailableRoomButtonText: {
+    color: colors.background,
+    fontWeight: typography.weights.black,
+  },
   roomBackground: {
     bottom: 0,
     left: 0,
@@ -752,6 +1343,14 @@ const styles = StyleSheet.create({
     right: -110,
     top: 80,
     width: 260,
+  },
+  incentiveLaunchers: {
+    alignItems: 'flex-start',
+    gap: 7,
+    left: spacing.md,
+    position: 'absolute',
+    top: 82,
+    zIndex: 20,
   },
   notice: {
     alignItems: 'center',
@@ -898,6 +1497,39 @@ const styles = StyleSheet.create({
   reactionText: {
     fontSize: 28,
   },
+  giftEffect: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(3,2,7,0.88)',
+    borderColor: colors.borderGold,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    bottom: 118,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    position: 'absolute',
+  },
+  compactEffect: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  giftEffectText: {
+    color: colors.goldSoft,
+    fontSize: 13,
+    fontWeight: typography.weights.bold,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  entryEffectThumb: {
+    borderRadius: radius.sm,
+    height: 96,
+    marginBottom: spacing.xs,
+    resizeMode: 'cover',
+    width: 172,
+  },
+  giftEffectThumb: {
+    height: 48,
+    width: 48,
+  },
   debugPanel: {
     backgroundColor: 'rgba(0,0,0,0.72)',
     borderRadius: radius.sm,
@@ -912,3 +1544,9 @@ const styles = StyleSheet.create({
     fontSize: 8,
   },
 });
+
+function waitForEntryEffectRetry(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}

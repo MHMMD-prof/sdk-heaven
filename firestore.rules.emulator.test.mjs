@@ -43,6 +43,17 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await testEnv.clearFirestore();
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'appConfig', 'voiceRoomLaunch'), {
+      allowedRegionCodes: [],
+      allowedUids: [],
+      audienceMode: 'public',
+      minimumClientVersion: '1.0.0',
+      recordingDecision: 'rejected',
+      stageId: 10,
+      status: 'testing',
+    });
+  });
 });
 
 describe('firestore.rules auth waves', () => {
@@ -113,6 +124,23 @@ describe('firestore.rules auth waves', () => {
     await assertFails(updateDoc(profileRef, { moderationStatus: 'removed', updatedAt: now }));
   });
 
+  it('accepts bounded Wave 6 projections but rejects unrecognized cosmetic authority fields', async () => {
+    await seedPublicProfile('uid-1', {
+      equippedCosmetics: {
+        chatBubble: { assetId: 'safe-bubble', assetVersionId: 'v1-123456789abc', itemId: 'safe-bubble-item' },
+        seatEffect: { assetId: 'safe-seat', assetVersionId: 'v1-123456789abc', itemId: 'safe-seat-item' },
+      },
+    });
+    await seedPublicProfile('uid-2', { publicId: '7654321' });
+    await assertSucceeds(getDoc(doc(userDb('uid-1', 'salem@example.com'), 'publicProfiles', 'uid-2')));
+    await seedPublicProfile('uid-1', {
+      equippedCosmetics: {
+        staffBadge: { assetId: 'fake-staff', assetVersionId: 'v1-123456789abc', itemId: 'fake-staff-item' },
+      },
+    });
+    await assertFails(getDoc(doc(userDb('uid-1', 'salem@example.com'), 'publicProfiles', 'uid-2')));
+  });
+
   it('denies direct public identity and reserved social collection writes', async () => {
     const db = userDb('uid-1', 'salem@example.com');
 
@@ -136,6 +164,40 @@ describe('firestore.rules auth waves', () => {
     await assertFails(setDoc(doc(db, 'couples', 'couple-1'), { memberUids: ['uid-1', 'uid-2'] }));
     await assertFails(setDoc(doc(db, 'coupleMemberships', 'uid-1'), { partnerUid: 'uid-2' }));
     await assertFails(setDoc(doc(db, 'walletTransactions', 'tx-1'), { amount: 100 }));
+    await assertFails(setDoc(doc(db, 'dailyLoginCampaign', 'current'), { activeRevision: 1 }));
+    await assertFails(setDoc(doc(db, 'dailyLoginStates', 'uid-1'), { streakPosition: 1, uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'dailyLoginClaims', 'uid-1', 'days', 'day_2026-07-31_asia-baghdad'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'dailyLoginCommands', 'uid-1', 'requests', 'request-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'dailyLoginRateLimits', 'uid-1'), { count: 1, uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'dailyLoginAdminCommands', 'request-1'), { operation: 'publish' }));
+    await assertFails(setDoc(doc(db, 'dailyLoginFailureMetrics', '2026-07-31_RATE_LIMITED_1'), { count: 1 }));
+    await assertFails(setDoc(doc(db, 'economyRestrictions', 'uid-1'), { status: 'restricted' }));
+    await assertFails(getDoc(doc(db, 'dailyLoginStates', 'uid-1')));
+    await assertFails(getDoc(doc(db, 'dailyLoginClaims', 'uid-2', 'days', 'day_2026-07-31_asia-baghdad')));
+    await assertFails(setDoc(doc(db, 'weeklyIncentiveCycles', 'cycle-1'), { state: 'active' }));
+    await assertFails(setDoc(doc(db, 'canonicalRoomGiftFacts', 'gift-1'), { supportPoints: 100 }));
+    await assertFails(setDoc(doc(db, 'roomAttendanceEventReceipts', 'event-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'roomAttendanceSessions', 'session-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'roomAttendanceIntervals', 'interval-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'attendanceOutageWindows', 'outage-1'), { reason: 'test' }));
+    await assertFails(setDoc(doc(db, 'attendanceOutageCommands', 'request-1'), { operation: 'create' }));
+    await assertFails(setDoc(doc(db, 'attendanceDeviceEnrollments', 'uid-1'), { state: 'active' }));
+    await assertFails(setDoc(doc(db, 'payrollPlans', 'female-hosts'), { planId: 'female-hosts' }));
+    await assertFails(setDoc(doc(db, 'payrollEnrollments', 'uid-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'payrollCycles', 'cycle-1'), { state: 'active' }));
+    await assertFails(setDoc(doc(db, 'payrollCycles', 'cycle-1', 'enrollments', 'uid-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'payrollOutcomes', 'outcome-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'payrollExceptions', 'exception-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(db, 'payrollAdminCommands', 'command-1'), { uid: 'uid-1' }));
+    await assertFails(getDoc(doc(db, 'payrollEnrollments', 'uid-1')));
+    await assertFails(getDoc(doc(db, 'payrollOutcomes', 'outcome-1')));
+    await assertFails(getDoc(doc(db, 'roomAttendanceIntervals', 'interval-1')));
+    await assertFails(setDoc(doc(db, 'roomSupportPeriods', 'period-1'), { roomId: 'room-1' }));
+    await assertFails(setDoc(doc(db, 'roomSupportLeaderboardRefreshes', 'refresh-1'), { state: 'queued' }));
+    await assertFails(setDoc(doc(db, 'rewardSettlements', 'settlement-1'), { state: 'paid' }));
+    await assertFails(setDoc(doc(db, 'rewardSettlementJobs', 'settlement-1'), { state: 'eligible' }));
+    await assertFails(setDoc(doc(db, 'rewardEntitlementTransactions', 'settlement-1_item-1'), { outcome: 'granted' }));
+    await assertFails(getDoc(doc(db, 'rewardSettlements', 'settlement-1')));
     await assertFails(setDoc(doc(db, 'storeCatalog', 'royal-frame'), { itemId: 'royal-frame' }));
     await assertFails(setDoc(doc(db, 'storeCustomIds', '0000777'), { itemId: 'custom-id-0000777' }));
     await assertFails(setDoc(doc(db, 'storeOwnerships', 'uid-1', 'items', 'own-1'), { itemId: 'royal-frame' }));
@@ -162,6 +224,136 @@ describe('firestore.rules auth waves', () => {
     await assertFails(setDoc(doc(db, 'couples', 'couple-1'), { userIds: ['uid-1', 'uid-2'] }));
   });
 
+  it('keeps every Personal Chat Wave 1 path dark to users and staff', async () => {
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'directConversations', 'conversation-1'), { memberUids: ['uid-1', 'uid-2'] });
+      await setDoc(doc(db, 'directConversations', 'conversation-1', 'messages', 'message-1'), { senderUid: 'uid-1' });
+      await setDoc(doc(db, 'directConversationMembers', 'uid-1', 'items', 'conversation-1'), { peerUid: 'uid-2' });
+      await setDoc(doc(db, 'directMessageRequests', 'conversation-1'), { recipientUid: 'uid-2', senderUid: 'uid-1' });
+      await setDoc(doc(db, 'directChatRestrictions', 'uid-1'), { state: 'restricted', uid: 'uid-1' });
+      await setDoc(doc(db, 'directChatReports', 'report-1'), { reporterUid: 'uid-1', targetUid: 'uid-2' });
+      await setDoc(doc(db, 'directChatReports', 'report-1', 'evidence', 'message-1'), { messageId: 'message-1' });
+    });
+
+    const ownerDb = userDb('uid-1', 'salem@example.com');
+    const peerDb = userDb('uid-2', 'dana@example.com');
+    const staffDb = testEnv.authenticatedContext('staff-1', {
+      admin: true,
+      adminRole: 'super-moderator',
+      email: 'staff@example.com',
+      email_verified: true,
+    }).firestore();
+    for (const db of [ownerDb, peerDb, staffDb]) {
+      await assertFails(getDoc(doc(db, 'directConversations', 'conversation-1')));
+      await assertFails(getDoc(doc(db, 'directConversations', 'conversation-1', 'messages', 'message-1')));
+      await assertFails(getDoc(doc(db, 'directConversationMembers', 'uid-1', 'items', 'conversation-1')));
+      await assertFails(getDoc(doc(db, 'directMessageRequests', 'conversation-1')));
+      await assertFails(getDoc(doc(db, 'directChatRestrictions', 'uid-1')));
+      await assertFails(getDoc(doc(db, 'directChatReports', 'report-1')));
+      await assertFails(getDoc(doc(db, 'directChatReports', 'report-1', 'evidence', 'message-1')));
+    }
+    await assertFails(setDoc(doc(ownerDb, 'directConversations', 'forged'), { memberUids: ['uid-1', 'uid-2'] }));
+    await assertFails(setDoc(doc(ownerDb, 'directConversations', 'conversation-1', 'messages', 'forged-message'), { senderUid: 'uid-1' }));
+    await assertFails(setDoc(doc(ownerDb, 'directChatCommands', 'uid-1', 'requests', 'request-1'), { action: 'send-direct-message' }));
+    await assertFails(setDoc(doc(ownerDb, 'directChatRateLimits', 'uid-1'), { count: 0 }));
+    await assertFails(setDoc(doc(ownerDb, 'directChatPresence', 'conversation-1', 'members', 'uid-1'), { typing: true }));
+    await assertFails(setDoc(doc(ownerDb, 'directChatUploadAuthorizations', 'uid-1', 'uploads', 'upload-1'), { active: true }));
+    await assertFails(setDoc(doc(ownerDb, 'directChatUploads', 'upload-1'), { state: 'approved' }));
+    await assertFails(setDoc(doc(ownerDb, 'directChatRetention', 'current'), { retentionDays: 90 }));
+  });
+
+  it('exposes Personal Chat Wave 3 reads only to participants and keeps persistent writes backend-only', async () => {
+    await seedDirectChatWave3();
+    const firstDb = userDb('uid-1', 'salem@example.com');
+    const secondDb = userDb('uid-2', 'dana@example.com');
+    const outsiderDb = userDb('uid-3', 'rana@example.com');
+
+    await assertSucceeds(getDoc(doc(firstDb, 'directConversations', 'conversation-1')));
+    await assertSucceeds(getDoc(doc(secondDb, 'directConversations', 'conversation-1', 'messages', 'message-1')));
+    await assertSucceeds(getDoc(doc(firstDb, 'directConversationMembers', 'uid-1', 'items', 'conversation-1')));
+    await assertSucceeds(getDoc(doc(secondDb, 'directMessageRequests', 'conversation-1')));
+    await assertSucceeds(getDoc(doc(firstDb, 'directChatInboxSummaries', 'uid-1')));
+    await assertSucceeds(getDoc(doc(firstDb, 'directConversations', 'conversation-1', 'receipts', 'uid-2')));
+
+    await assertFails(getDoc(doc(firstDb, 'directConversationMembers', 'uid-2', 'items', 'conversation-1')));
+    await assertFails(getDoc(doc(firstDb, 'directChatInboxSummaries', 'uid-2')));
+    await assertFails(getDoc(doc(outsiderDb, 'directConversations', 'conversation-1', 'receipts', 'uid-2')));
+    await assertFails(getDoc(doc(outsiderDb, 'directConversations', 'conversation-1')));
+    await assertFails(getDoc(doc(outsiderDb, 'directConversations', 'conversation-1', 'messages', 'message-1')));
+    await assertFails(getDoc(doc(outsiderDb, 'directMessageRequests', 'conversation-1')));
+    await assertFails(updateDoc(doc(firstDb, 'directConversationMembers', 'uid-1', 'items', 'conversation-1'), { unreadCount: 0 }));
+    await assertFails(updateDoc(doc(firstDb, 'directChatInboxSummaries', 'uid-1'), { totalUnreadCount: 0 }));
+    await assertFails(setDoc(doc(firstDb, 'directConversations', 'conversation-1', 'receipts', 'uid-1'), { lastReadSequence: 1 }));
+    await assertFails(setDoc(doc(firstDb, 'directConversations', 'conversation-1', 'messages', 'forged'), { senderUid: 'uid-1' }));
+  });
+
+  it('allows bounded self presence only for accepted participants and friend-only online state', async () => {
+    await seedDirectChatWave3();
+    const firstDb = userDb('uid-1', 'salem@example.com');
+    const secondDb = userDb('uid-2', 'dana@example.com');
+    const outsiderDb = userDb('uid-3', 'rana@example.com');
+    const future = Timestamp.fromMillis(Date.now() + 60_000);
+    const tooFar = Timestamp.fromMillis(Date.now() + 5 * 60_000);
+    const typingRef = doc(firstDb, 'directChatPresence', 'conversation-1', 'typing', 'uid-1');
+    const onlineRef = doc(firstDb, 'directChatPresence', 'conversation-1', 'online', 'uid-1');
+
+    await assertSucceeds(setDoc(typingRef, directChatPresencePayload('typing', 'uid-1', true, future)));
+    await assertSucceeds(getDoc(doc(secondDb, 'directChatPresence', 'conversation-1', 'typing', 'uid-1')));
+    await assertFails(getDoc(doc(outsiderDb, 'directChatPresence', 'conversation-1', 'typing', 'uid-1')));
+    await assertFails(setDoc(
+      doc(firstDb, 'directChatPresence', 'conversation-1', 'typing', 'uid-2'),
+      directChatPresencePayload('typing', 'uid-2', true, future),
+    ));
+    await assertFails(setDoc(typingRef, directChatPresencePayload('typing', 'uid-1', true, tooFar)));
+
+    await assertSucceeds(setDoc(onlineRef, directChatPresencePayload('online', 'uid-1', 'online', future)));
+    await assertSucceeds(getDoc(doc(secondDb, 'directChatPresence', 'conversation-1', 'online', 'uid-1')));
+    await seedBlock('uid-2', 'uid-1');
+    await assertFails(getDoc(doc(secondDb, 'directChatPresence', 'conversation-1', 'typing', 'uid-1')));
+    await assertFails(getDoc(doc(secondDb, 'directChatPresence', 'conversation-1', 'online', 'uid-1')));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), 'blocks', 'uid-2', 'blocked', 'uid-1'));
+      await deleteDoc(doc(context.firestore(), 'friendships', 'uid-1_uid-2'));
+    });
+    await assertFails(getDoc(doc(secondDb, 'directChatPresence', 'conversation-1', 'online', 'uid-1')));
+    await assertFails(setDoc(onlineRef, directChatPresencePayload('online', 'uid-1', 'online', future)));
+  });
+
+  it('exposes only published room-theme manifests and keeps room entitlements backend-only', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'roomThemes', 'majlis-default'), {
+        manifestVersion: 1,
+        publicationStatus: 'published',
+        themeId: 'majlis-default',
+      });
+      await setDoc(doc(db, 'roomThemes', 'draft-theme'), {
+        manifestVersion: 1,
+        publicationStatus: 'draft',
+        themeId: 'draft-theme',
+      });
+      await setDoc(doc(db, 'rooms', 'theme-room', 'themeEntitlements', 'royal-theater'), {
+        roomId: 'theme-room',
+        state: 'active',
+        themeId: 'royal-theater',
+      });
+    });
+    const db = userDb('uid-1', 'salem@example.com');
+    await assertSucceeds(getDoc(doc(db, 'roomThemes', 'majlis-default')));
+    await assertFails(getDoc(doc(db, 'roomThemes', 'draft-theme')));
+    await assertFails(setDoc(doc(db, 'roomThemes', 'new-theme'), {
+      manifestVersion: 1,
+      publicationStatus: 'published',
+      themeId: 'new-theme',
+    }));
+    await assertFails(getDoc(doc(db, 'rooms', 'theme-room', 'themeEntitlements', 'royal-theater')));
+  });
+
   it('allows signed-in reads of social feature flags while denying client changes', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'appConfig', 'socialFeatures'), {
@@ -174,12 +366,280 @@ describe('firestore.rules auth waves', () => {
         representativeTransfers: false,
         updatedAt: now,
       });
+      await setDoc(doc(context.firestore(), 'appConfig', 'cosmeticsFeatures'), {
+        cosmetics_animated_avatar_frames: false,
+        cosmetics_asset_registry: false,
+        cosmetics_effect_audio: false,
+        cosmetics_lottie: false,
+        cosmetics_shared_renderer: false,
+        cosmetics_unified_avatar_frames: false,
+        cosmetics_video: false,
+      });
     });
     const signedInRef = doc(userDb('uid-1', 'salem@example.com'), 'appConfig', 'socialFeatures');
+    const cosmeticsRef = doc(userDb('uid-1', 'salem@example.com'), 'appConfig', 'cosmeticsFeatures');
 
     await assertSucceeds(getDoc(signedInRef));
+    await assertSucceeds(getDoc(cosmeticsRef));
     await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'appConfig', 'socialFeatures')));
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'appConfig', 'cosmeticsFeatures')));
     await assertFails(updateDoc(signedInRef, { friends: true }));
+    await assertFails(updateDoc(cosmeticsRef, { cosmetics_shared_renderer: true }));
+  });
+
+  it('enforces Wave 8 gift receipts, presence reads, and backend-only economy writes', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedProfile('uid-3', 'omar@example.com', 'Omar', 'O');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await seedPublicProfile('uid-3', { displayName: 'Omar', normalizedName: 'omar', publicId: '7654321' });
+    await seedRoom('gift-room', { availability: 'active' });
+    await seedMember('gift-room', 'uid-1', 'Salem', 'S', 'listener', false);
+    await seedMember('gift-room', 'uid-2', 'Dana', 'D', 'listener', false);
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'roomGiftReceipts', 'uid-1', 'items', 'event-1'), {
+        recipientUid: 'uid-2',
+        senderUid: 'uid-1',
+      });
+      await setDoc(doc(db, 'rooms', 'gift-room', 'giftEvents', 'event-1'), {
+        recipientUid: 'uid-2',
+        roomId: 'gift-room',
+        senderUid: 'uid-1',
+      });
+      await setDoc(doc(db, 'rooms', 'gift-room', 'giftContributions', 'uid-1'), {
+        totalSpentCoins: 100,
+        uid: 'uid-1',
+      });
+      await setDoc(doc(db, 'globalRoomEffects', 'event-global-1'), {
+        kind: 'room-gift',
+        status: 'ready',
+      });
+      await setDoc(doc(db, 'giftPresentationApprovalReceipts', 'receipt-1'), {
+        status: 'passed',
+      });
+      await setDoc(doc(db, 'entryPresentationApprovalReceipts', 'entry-receipt-1'), {
+        status: 'passed',
+      });
+    });
+
+    const senderDb = userDb('uid-1', 'salem@example.com');
+    const recipientDb = userDb('uid-2', 'dana@example.com');
+    const outsiderDb = userDb('uid-3', 'omar@example.com');
+    await assertSucceeds(getDoc(doc(senderDb, 'roomGiftReceipts', 'uid-1', 'items', 'event-1')));
+    await assertFails(getDoc(doc(recipientDb, 'roomGiftReceipts', 'uid-1', 'items', 'event-1')));
+    await assertFails(getDoc(doc(senderDb, 'rooms', 'gift-room', 'giftEvents', 'event-1')));
+    await assertFails(getDoc(doc(recipientDb, 'rooms', 'gift-room', 'giftContributions', 'uid-1')));
+    await assertFails(getDoc(doc(outsiderDb, 'rooms', 'gift-room', 'giftEvents', 'event-1')));
+    await assertSucceeds(getDoc(doc(outsiderDb, 'globalRoomEffects', 'event-global-1')));
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'globalRoomEffects', 'event-global-1')));
+    await assertFails(getDoc(doc(senderDb, 'giftPresentationApprovalReceipts', 'receipt-1')));
+    await assertFails(getDoc(doc(senderDb, 'entryPresentationApprovalReceipts', 'entry-receipt-1')));
+
+    await assertFails(setDoc(doc(senderDb, 'rooms', 'gift-room', 'giftCommandRequests', 'request-1'), { actorUid: 'uid-1' }));
+    await assertFails(setDoc(doc(senderDb, 'rooms', 'gift-room', 'giftQuotes', 'quote-1'), { senderUid: 'uid-1' }));
+    await assertFails(setDoc(doc(senderDb, 'rooms', 'gift-room', 'giftEvents', 'event-2'), { senderUid: 'uid-1' }));
+    await assertFails(setDoc(doc(senderDb, 'rooms', 'gift-room', 'giftContributions', 'uid-1'), { totalSpentCoins: 1 }));
+    await assertFails(setDoc(doc(senderDb, 'rooms', 'gift-room', 'giftRateLimits', 'uid-1'), { count: 1 }));
+    await assertFails(setDoc(doc(senderDb, 'rooms', 'gift-room', 'giftCombos', 'combo-1'), { comboCount: 1 }));
+    await assertFails(setDoc(doc(senderDb, 'globalRoomEffects', 'event-global-2'), { kind: 'room-gift', status: 'ready' }));
+    await assertFails(setDoc(doc(senderDb, 'platformEconomyAccounts', 'room-gifts'), { balanceCoins: 1 }));
+    await assertFails(setDoc(doc(senderDb, 'platformEconomyTransactions', 'tx-1'), { amount: 1 }));
+    await assertFails(getDoc(doc(senderDb, 'platformEconomyAccounts', 'room-gifts')));
+    await assertFails(getDoc(doc(senderDb, 'roomGiftCommissionPolicyVersions', 'v_00000001')));
+  });
+
+  it('exposes only compact support leaderboards to active members while rankings are enabled', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await seedRoom('support-room', { visibility: 'public' });
+    await seedMember('support-room', 'uid-1', 'Salem', 'S', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_supporter_rankings: true,
+      });
+      await setDoc(doc(db, 'appConfig', 'roomRocketPublic'), {
+        renderingEnabled: false,
+        revision: 1,
+        schemaVersion: 1,
+      });
+      await setDoc(doc(db, 'rooms', 'support-room', 'supportLeaderboards', 'day_2026-07-06_asia-baghdad'), {
+        entries: [],
+        periodId: 'day_2026-07-06_asia-baghdad',
+        roomId: 'support-room',
+      });
+      await setDoc(doc(db, 'rooms', 'support-room', 'supportPeriods', 'day_2026-07-06_asia-baghdad', 'supporters', 'uid-1'), {
+        eligibleSpendCoins: 100,
+        uid: 'uid-1',
+      });
+    });
+    const memberDb = userDb('uid-1', 'salem@example.com');
+    const outsiderDb = userDb('uid-2', 'dana@example.com');
+    const leaderboardRef = doc(memberDb, 'rooms', 'support-room', 'supportLeaderboards', 'day_2026-07-06_asia-baghdad');
+
+    await assertSucceeds(getDoc(leaderboardRef));
+    await assertFails(getDoc(doc(outsiderDb, 'rooms', 'support-room', 'supportLeaderboards', 'day_2026-07-06_asia-baghdad')));
+    await assertFails(getDoc(doc(memberDb, 'rooms', 'support-room', 'supportPeriods', 'day_2026-07-06_asia-baghdad', 'supporters', 'uid-1')));
+    await assertFails(setDoc(leaderboardRef, { entries: [] }));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_supporter_rankings: false,
+      });
+    });
+    await assertFails(getDoc(leaderboardRef));
+  });
+
+  it('exposes room Rocket cycle results only to active members while keeping campaign internals private', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await seedRoom('rocket-room', { visibility: 'public' });
+    await seedMember('rocket-room', 'uid-1', 'Salem', 'S', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_supporter_rankings: true,
+      });
+      await setDoc(doc(db, 'rooms', 'rocket-room', 'rocketCycles', 'weekly_2026-07-06_asia-baghdad'), {
+        cycleId: 'weekly_2026-07-06_asia-baghdad',
+        roomId: 'rocket-room',
+        state: 'settled',
+      });
+      await setDoc(doc(db, 'roomRocketCampaign', 'current'), { revision: 1 });
+      await setDoc(doc(db, 'roomRocketPublicVersions', 'v1'), {
+        effectiveFromCycleId: 'weekly_2026-07-06_asia-baghdad',
+        revision: 1,
+        schemaVersion: 1,
+      });
+      await setDoc(doc(db, 'roomRocketProjectionReceipts', 'receipt-1'), { roomId: 'rocket-room' });
+      await setDoc(doc(db, 'roomRocketRewardNotifications', 'notification-1'), { state: 'queued' });
+      await setDoc(doc(db, 'weeklyIncentiveHolds', 'uid-1'), { active: true });
+    });
+    const memberDb = userDb('uid-1', 'salem@example.com');
+    const outsiderDb = userDb('uid-2', 'dana@example.com');
+    const cycleRef = doc(memberDb, 'rooms', 'rocket-room', 'rocketCycles', 'weekly_2026-07-06_asia-baghdad');
+    await assertSucceeds(getDoc(cycleRef));
+    await assertFails(getDoc(doc(outsiderDb, 'rooms', 'rocket-room', 'rocketCycles', 'weekly_2026-07-06_asia-baghdad')));
+    await assertFails(setDoc(cycleRef, { state: 'settled' }));
+    await assertFails(getDoc(doc(memberDb, 'roomRocketCampaign', 'current')));
+    await assertFails(getDoc(doc(memberDb, 'roomRocketProjectionReceipts', 'receipt-1')));
+    await assertFails(getDoc(doc(memberDb, 'roomRocketRewardNotifications', 'notification-1')));
+    await assertFails(getDoc(doc(memberDb, 'weeklyIncentiveHolds', 'uid-1')));
+    await assertSucceeds(getDoc(doc(memberDb, 'roomRocketPublicVersions', 'v1')));
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'roomRocketPublicVersions', 'v1')));
+    await assertFails(setDoc(doc(memberDb, 'roomRocketPublicVersions', 'forged'), { revision: 2 }));
+    await assertSucceeds(getDoc(doc(memberDb, 'appConfig', 'roomRocketPublic')));
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'appConfig', 'roomRocketPublic')));
+  });
+
+  it('keeps Room Target finance, roster, projection, and settlement state backend-only', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { publicId: '7654321' });
+    await seedRoom('target-room', { visibility: 'public' });
+    await seedMember('target-room', 'uid-1', 'Salem', 'S', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'roomTargetCampaign', 'current'), { revision: 1 });
+      await setDoc(doc(db, 'roomTargetPublicVersions', 'v1'), {
+        effectiveFromCycleId: 'weekly_2026-07-06_asia-baghdad',
+        revision: 1,
+        schemaVersion: 1,
+      });
+      await setDoc(doc(db, 'roomTargetProjectionReceipts', 'receipt-1'), { roomId: 'target-room' });
+      await setDoc(doc(db, 'roomTargetRosterNotifications', 'notification-1'), { state: 'queued' });
+      await setDoc(doc(db, 'weeklyIncentiveRiskAssessments', 'assessment-1'), { reviewState: 'pending' });
+      await setDoc(doc(db, 'weeklyIncentiveIntegrityAlerts', 'alert-1'), { state: 'open' });
+      await setDoc(doc(db, 'incentiveReconciliationReports', 'report-1'), { balanced: false });
+      await setDoc(doc(db, 'roomGiftIntegrityEvents', 'integrity-1'), { cycleId: 'weekly_2026-07-06_asia-baghdad', uid: 'uid-1' });
+      await setDoc(doc(db, 'roomTargetRosterChurn', 'churn-1'), { changeCount: 4 });
+      await setDoc(doc(db, 'roomTargetCommandRequests', 'uid-1', 'requests', 'request-1'), { roomId: 'target-room' });
+      await setDoc(doc(db, 'rooms', 'target-room', 'targetRosterDrafts', 'weekly_2026-07-06_asia-baghdad'), {
+        ownerUidAtPreparation: 'uid-1',
+      });
+      await setDoc(doc(db, 'rooms', 'target-room', 'targetCycles', 'weekly_2026-07-06_asia-baghdad'), {
+        cycleId: 'weekly_2026-07-06_asia-baghdad',
+        riskSnapshot: { marginCoins: 100 },
+        roomId: 'target-room',
+      });
+      await setDoc(doc(db, 'rooms', 'target-room', 'targetCycles', 'weekly_2026-07-06_asia-baghdad', 'members', 'uid-1'), {
+        eligibleSpendCoins: 100,
+        uid: 'uid-1',
+      });
+      await setDoc(doc(db, 'rooms', 'target-room', 'targetPublicCycles', 'weekly_2026-07-06_asia-baghdad'), {
+        cycleId: 'weekly_2026-07-06_asia-baghdad',
+        roomId: 'target-room',
+        roster: [],
+      });
+      await setDoc(doc(db, 'rooms', 'target-room', 'targetRosterPreviews', 'weekly_2026-07-13_asia-baghdad'), {
+        cycleId: 'weekly_2026-07-13_asia-baghdad',
+        ownerUid: 'uid-1',
+        roomId: 'target-room',
+        roster: [],
+      });
+      await setDoc(doc(db, 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_owner_targets: true,
+      }, { merge: true });
+    });
+    const db = userDb('uid-1', 'salem@example.com');
+    const outsiderDb = userDb('uid-2', 'dana@example.com');
+    await assertSucceeds(getDoc(doc(db, 'roomTargetPublicVersions', 'v1')));
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'roomTargetPublicVersions', 'v1')));
+    await assertFails(getDoc(doc(db, 'roomTargetCampaign', 'current')));
+    await assertFails(getDoc(doc(db, 'roomTargetProjectionReceipts', 'receipt-1')));
+    await assertFails(getDoc(doc(db, 'roomTargetRosterNotifications', 'notification-1')));
+    await assertFails(getDoc(doc(db, 'weeklyIncentiveRiskAssessments', 'assessment-1')));
+    await assertFails(getDoc(doc(db, 'weeklyIncentiveIntegrityAlerts', 'alert-1')));
+    await assertFails(getDoc(doc(db, 'incentiveReconciliationReports', 'report-1')));
+    await assertFails(getDoc(doc(db, 'roomGiftIntegrityEvents', 'integrity-1')));
+    await assertFails(getDoc(doc(db, 'roomTargetRosterChurn', 'churn-1')));
+    await assertFails(setDoc(doc(db, 'weeklyIncentiveRiskAssessments', 'forged'), { reviewState: 'approved' }));
+    await assertFails(getDoc(doc(db, 'roomTargetCommandRequests', 'uid-1', 'requests', 'request-1')));
+    await assertFails(getDoc(doc(db, 'rooms', 'target-room', 'targetRosterDrafts', 'weekly_2026-07-06_asia-baghdad')));
+    await assertFails(getDoc(doc(db, 'rooms', 'target-room', 'targetCycles', 'weekly_2026-07-06_asia-baghdad')));
+    await assertFails(getDoc(doc(db, 'rooms', 'target-room', 'targetCycles', 'weekly_2026-07-06_asia-baghdad', 'members', 'uid-1')));
+    await assertSucceeds(getDoc(doc(db, 'rooms', 'target-room', 'targetPublicCycles', 'weekly_2026-07-06_asia-baghdad')));
+    await assertSucceeds(getDoc(doc(db, 'rooms', 'target-room', 'targetRosterPreviews', 'weekly_2026-07-13_asia-baghdad')));
+    await assertFails(getDoc(doc(outsiderDb, 'rooms', 'target-room', 'targetPublicCycles', 'weekly_2026-07-06_asia-baghdad')));
+    await assertFails(getDoc(doc(outsiderDb, 'rooms', 'target-room', 'targetRosterPreviews', 'weekly_2026-07-13_asia-baghdad')));
+    await assertFails(setDoc(doc(db, 'roomTargetPublicVersions', 'forged'), { revision: 2 }));
+  });
+
+  it('allows active room members to read Wave 9 effects but keeps all effect writes backend-only', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedProfile('uid-3', 'omar@example.com', 'Omar', 'O');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await seedPublicProfile('uid-3', { displayName: 'Omar', normalizedName: 'omar', publicId: '7654321' });
+    await seedRoom('effects-room', { availability: 'active' });
+    await seedMember('effects-room', 'uid-1', 'Salem', 'S', 'listener', false);
+    await seedMember('effects-room', 'uid-2', 'Dana', 'D', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'rooms', 'effects-room', 'events', 'entry-1'), {
+        createdAt: now,
+        kind: 'room-entry',
+        roomId: 'effects-room',
+        status: 'ready',
+      });
+    });
+
+    const memberDb = userDb('uid-1', 'salem@example.com');
+    const outsiderDb = userDb('uid-3', 'omar@example.com');
+    await assertSucceeds(getDoc(doc(memberDb, 'rooms', 'effects-room', 'events', 'entry-1')));
+    await assertFails(getDoc(doc(outsiderDb, 'rooms', 'effects-room', 'events', 'entry-1')));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'events', 'entry-2'), { status: 'ready' }));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'entryEffectRequests', 'request-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'entryEffectClaims', 'claim-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'entryEffectRateLimits', 'uid-1'), { count: 1 }));
   });
 
   it('allows an unverified signed-in owner to create their onboarding profile', async () => {
@@ -303,6 +763,76 @@ describe('firestore.rules auth waves', () => {
     const db = userDb('uid-1', 'salem@example.com');
 
     await assertFails(createRoomAndHost(db, 'uid-1', 'room-invalid', 'US'));
+  });
+
+  it('enforces the new-joins freeze in rules while allowing only a live reconnect', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedRoom('frozen-room', { visibility: 'public' });
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_new_joins: false,
+      });
+    });
+    const ownerDb = userDb('uid-1', 'salem@example.com');
+    const memberDb = userDb('uid-2', 'dana@example.com');
+
+    await assertFails(createRoomAndHost(ownerDb, 'uid-1', 'blocked-room'));
+    await assertFails(setDoc(
+      doc(memberDb, 'rooms', 'frozen-room', 'members', 'uid-2'),
+      memberPayload('uid-2', 'Dana', 'D', 'listener', false),
+    ));
+
+    await seedMember('frozen-room', 'uid-2', 'Dana', 'D', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'rooms', 'frozen-room', 'presence', 'uid-2'), {
+        uid: 'uid-2',
+        status: 'reconnecting',
+        leaseExpiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+      });
+    });
+    await assertSucceeds(updateDoc(
+      doc(memberDb, 'rooms', 'frozen-room', 'members', 'uid-2'),
+      { displayName: 'Dana', avatarLabel: 'D', updatedAt: now },
+    ));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', 'frozen-room', 'presence', 'uid-2'), {
+        status: 'stale',
+      });
+    });
+    await assertFails(updateDoc(
+      doc(memberDb, 'rooms', 'frozen-room', 'members', 'uid-2'),
+      { displayName: 'Dana', avatarLabel: 'D', updatedAt: now },
+    ));
+  });
+
+  it('enforces the Wave 15 allowlist for room discovery, creation, and joining', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedRoom('launch-room', { visibility: 'public' });
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appConfig', 'voiceRoomLaunch'), {
+        allowedRegionCodes: [],
+        allowedUids: ['uid-1'],
+        audienceMode: 'allowlist',
+        minimumClientVersion: '1.0.0',
+        recordingDecision: 'rejected',
+        stageId: 8,
+        status: 'testing',
+      });
+    });
+    const allowedDb = userDb('uid-1', 'salem@example.com');
+    const deniedDb = userDb('uid-2', 'dana@example.com');
+
+    await assertSucceeds(getDoc(doc(allowedDb, 'rooms', 'launch-room')));
+    await assertFails(getDoc(doc(deniedDb, 'rooms', 'launch-room')));
+    await assertSucceeds(createRoomAndHost(allowedDb, 'uid-1', 'allowed-launch-room'));
+    await assertFails(createRoomAndHost(deniedDb, 'uid-2', 'denied-launch-room'));
+    await assertFails(setDoc(
+      doc(deniedDb, 'rooms', 'launch-room', 'members', 'uid-2'),
+      memberPayload('uid-2', 'Dana', 'D', 'listener', false),
+    ));
   });
 
   it('accepts a strict v2 room while denying forged ownership and authority', async () => {
@@ -452,6 +982,66 @@ describe('firestore.rules auth waves', () => {
         createdAt: now,
       }),
     );
+  });
+
+  it('exposes ownership offers only to the owner and selected recipient', async () => {
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await seedPublicProfile('uid-3', { displayName: 'Omar', normalizedName: 'omar', publicId: '3456789' });
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'rooms', 'room-v2', 'ownershipTransfers', 'transfer-1'), {
+        createdAt: now,
+        expiresAt: now,
+        fromOwnershipRevision: 1,
+        fromUid: 'uid-1',
+        id: 'transfer-1',
+        roomId: 'room-v2',
+        status: 'pending',
+        toUid: 'uid-2',
+        updatedAt: now,
+      });
+      await setDoc(doc(db, 'roomOwnershipNotifications', 'uid-2', 'items', 'notice-1'), {
+        actorUid: 'uid-1',
+        createdAt: now,
+        kind: 'room-ownership-offered',
+        readAt: null,
+        recipientUid: 'uid-2',
+        roomId: 'room-v2',
+        transferId: 'transfer-1',
+      });
+    });
+
+    await assertSucceeds(getDoc(doc(
+      userDb('uid-1', 'salem@example.com'),
+      'rooms',
+      'room-v2',
+      'ownershipTransfers',
+      'transfer-1',
+    )));
+    await assertSucceeds(getDoc(doc(
+      userDb('uid-2', 'dana@example.com'),
+      'rooms',
+      'room-v2',
+      'ownershipTransfers',
+      'transfer-1',
+    )));
+    await assertFails(getDoc(doc(
+      userDb('uid-3', 'omar@example.com'),
+      'rooms',
+      'room-v2',
+      'ownershipTransfers',
+      'transfer-1',
+    )));
+    const recipientDb = userDb('uid-2', 'dana@example.com');
+    const noticeRef = doc(recipientDb, 'roomOwnershipNotifications', 'uid-2', 'items', 'notice-1');
+    await assertSucceeds(getDoc(noticeRef));
+    await assertSucceeds(updateDoc(noticeRef, { readAt: now }));
+    await assertFails(updateDoc(noticeRef, { kind: 'forged' }));
+    await assertFails(setDoc(
+      doc(recipientDb, 'rooms', 'room-v2', 'ownershipTransfers', 'forged'),
+      { fromUid: 'uid-2', roomId: 'room-v2', status: 'pending', toUid: 'uid-3' },
+    ));
   });
 
   it('allows only owner and moderators to read bans and moderation history', async () => {
@@ -667,6 +1257,218 @@ describe('firestore.rules auth waves', () => {
     await assertFails(deleteDoc(doc(ownerDb, 'blocks', 'uid-1', 'blocked', 'uid-2')));
     await assertFails(setDoc(doc(ownerDb, 'roomSafetyRateLimits', 'uid-1'), { reportCount: 0 }));
   });
+
+  it('gates room game sessions to active members and denies all operational writes', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { publicId: '8765432' });
+    await seedRoom('game-room', {
+      activeGameSessionId: 'rgs_session_000000000001',
+      currentGameId: 'drawing-guess',
+    });
+    await seedMember('game-room', 'uid-1', 'Salem', 'S', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'appConfig', 'voiceRoomFeatures'), { voice_room_games: true });
+      await setDoc(doc(db, 'rooms', 'game-room', 'gameSessions', 'rgs_session_000000000001'), {
+        expiresAt: Timestamp.fromMillis(now.toMillis() + 60_000),
+        playerUids: ['uid-1'],
+        roomId: 'game-room',
+        sessionId: 'rgs_session_000000000001',
+        status: 'active',
+      });
+      await setDoc(doc(db, 'rooms', 'game-room', 'gameCommandRequests', 'request-1'), {
+        actorUid: 'uid-1',
+      });
+      await setDoc(doc(db, 'roomGameRateLimits', 'uid-1'), { count: 1, uid: 'uid-1' });
+    });
+
+    const memberDb = userDb('uid-1', 'salem@example.com');
+    const outsiderDb = userDb('uid-2', 'dana@example.com');
+    const sessionRef = doc(memberDb, 'rooms', 'game-room', 'gameSessions', 'rgs_session_000000000001');
+    await assertSucceeds(getDoc(sessionRef));
+    await assertFails(getDoc(doc(
+      outsiderDb,
+      'rooms',
+      'game-room',
+      'gameSessions',
+      'rgs_session_000000000001',
+    )));
+    await assertFails(updateDoc(sessionRef, { status: 'ended' }));
+    await assertFails(setDoc(doc(
+      memberDb,
+      'rooms',
+      'game-room',
+      'gameCommandRequests',
+      'forged',
+    ), { actorUid: 'uid-1' }));
+    await assertFails(getDoc(doc(memberDb, 'roomGameRateLimits', 'uid-1')));
+    await assertFails(setDoc(doc(memberDb, 'roomGameRateLimits', 'uid-1'), { count: 0 }));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_games: false,
+      });
+    });
+    await assertFails(getDoc(sessionRef));
+  });
+
+  it('gates room music leases behind the feature flag and denies operational writes', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { publicId: '8765432' });
+    await seedRoom('music-room', {
+      activeDjUid: 'uid-1',
+      activeMusicLeaseId: 'rml_lease_000000000001',
+    });
+    await seedMember('music-room', 'uid-1', 'Salem', 'S', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_shared_music: true,
+      });
+      await setDoc(doc(db, 'rooms', 'music-room', 'musicLeases', 'rml_lease_000000000001'), {
+        djUid: 'uid-1',
+        expiresAt: Timestamp.fromMillis(now.toMillis() + 45_000),
+        leaseId: 'rml_lease_000000000001',
+        roomId: 'music-room',
+        status: 'active',
+      });
+      await setDoc(doc(db, 'rooms', 'music-room', 'musicCommandRequests', 'request-1'), {
+        actorUid: 'uid-1',
+      });
+      await setDoc(doc(db, 'roomMusicRateLimits', 'uid-1'), {
+        count: 1,
+        uid: 'uid-1',
+      });
+    });
+
+    const memberDb = userDb('uid-1', 'salem@example.com');
+    const outsiderDb = userDb('uid-2', 'dana@example.com');
+    const leaseRef = doc(
+      memberDb,
+      'rooms',
+      'music-room',
+      'musicLeases',
+      'rml_lease_000000000001',
+    );
+    await assertSucceeds(getDoc(leaseRef));
+    await assertFails(getDoc(doc(
+      outsiderDb,
+      'rooms',
+      'music-room',
+      'musicLeases',
+      'rml_lease_000000000001',
+    )));
+    await assertFails(updateDoc(leaseRef, { status: 'stopped' }));
+    await assertFails(setDoc(doc(
+      memberDb,
+      'rooms',
+      'music-room',
+      'musicCommandRequests',
+      'forged',
+    ), { actorUid: 'uid-1' }));
+    await assertFails(getDoc(doc(memberDb, 'roomMusicRateLimits', 'uid-1')));
+    await assertFails(setDoc(doc(memberDb, 'roomMusicRateLimits', 'uid-1'), { count: 0 }));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appConfig', 'voiceRoomFeatures'), {
+        voice_room_shared_music: false,
+      });
+    });
+    await assertFails(getDoc(leaseRef));
+  });
+
+  describe('canonical cosmetic registry', () => {
+    it('exposes only the exact published asset summary and version', async () => {
+      await seedPublicProfile('uid-1', { publicId: '1234567' });
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'cosmeticAssets/gold-frame'), {
+          assetId: 'gold-frame',
+          publicationStatus: 'published',
+          publishedVersionId: 'v1-aaaaaaaaaaaa',
+          renderingEnabled: true,
+          schemaVersion: 1,
+        });
+        await setDoc(
+          doc(context.firestore(), 'cosmeticAssets/gold-frame/versions/v1-aaaaaaaaaaaa'),
+          {
+            assetId: 'gold-frame',
+            assetVersionId: 'v1-aaaaaaaaaaaa',
+            schemaVersion: 1,
+          },
+        );
+        await setDoc(
+          doc(context.firestore(), 'cosmeticAssets/gold-frame/versions/v2-bbbbbbbbbbbb'),
+          {
+            assetId: 'gold-frame',
+            assetVersionId: 'v2-bbbbbbbbbbbb',
+            schemaVersion: 1,
+          },
+        );
+      });
+      const db = userDb('uid-1', 'salem@example.com');
+      await assertSucceeds(getDoc(doc(db, 'cosmeticAssets/gold-frame')));
+      await assertSucceeds(getDoc(
+        doc(db, 'cosmeticAssets/gold-frame/versions/v1-aaaaaaaaaaaa'),
+      ));
+      await assertFails(getDoc(
+        doc(db, 'cosmeticAssets/gold-frame/versions/v2-bbbbbbbbbbbb'),
+      ));
+      await assertFails(getDoc(
+        doc(testEnv.unauthenticatedContext().firestore(), 'cosmeticAssets/gold-frame'),
+      ));
+    });
+
+    it('denies client approval, receipt, publication, and registry writes', async () => {
+      await seedPublicProfile('uid-1', { publicId: '1234567' });
+      const db = userDb('uid-1', 'salem@example.com');
+      await assertFails(setDoc(doc(db, 'cosmeticAssets/forged-frame'), {
+        assetId: 'forged-frame',
+        publicationStatus: 'published',
+        publishedVersionId: 'v1-aaaaaaaaaaaa',
+        renderingEnabled: true,
+        schemaVersion: 1,
+      }));
+      await assertFails(setDoc(
+        doc(db, 'cosmeticAssets/forged-frame/versions/v1-aaaaaaaaaaaa'),
+        { assetId: 'forged-frame', assetVersionId: 'v1-aaaaaaaaaaaa', schemaVersion: 1 },
+      ));
+      await assertFails(setDoc(doc(db, 'cosmeticAssetApprovals/forged'), {
+        decision: 'approved',
+      }));
+      await assertFails(setDoc(doc(db, 'cosmeticAssetValidationReceipts/forged'), {
+        status: 'passed',
+      }));
+      await assertFails(setDoc(doc(db, 'entryPresentationApprovalReceipts/forged'), {
+        status: 'passed',
+      }));
+      await assertFails(setDoc(doc(db, 'cosmeticUploadAuthorizations/uid-1'), {
+        active: true,
+      }));
+    });
+
+    it('keeps submission metadata private to its owner and server', async () => {
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'cosmeticSubmissions/submission-1'), {
+          ownerUid: 'uid-1',
+          status: 'pending',
+        });
+      });
+      await assertSucceeds(getDoc(
+        doc(userDb('uid-1', 'salem@example.com'), 'cosmeticSubmissions/submission-1'),
+      ));
+      await assertFails(getDoc(
+        doc(userDb('uid-2', 'dana@example.com'), 'cosmeticSubmissions/submission-1'),
+      ));
+      await assertFails(setDoc(
+        doc(userDb('uid-1', 'salem@example.com'), 'cosmeticSubmissions/forged'),
+        { ownerUid: 'uid-1', status: 'approved' },
+      ));
+    });
+  });
 });
 
 function userDb(uid, email, extraToken = {}) {
@@ -675,6 +1477,77 @@ function userDb(uid, email, extraToken = {}) {
     email_verified: true,
     ...extraToken,
   }).firestore();
+}
+
+async function seedDirectChatWave3() {
+  await seedPublicProfile('uid-1', { publicId: '1234567' });
+  await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+  await seedPublicProfile('uid-3', { displayName: 'Rana', normalizedName: 'rana', publicId: '7654321' });
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, 'appConfig', 'socialFeatures'), { directMessages: true });
+    await setDoc(doc(db, 'friendships', 'uid-1_uid-2'), {
+      friendshipId: 'uid-1_uid-2',
+      userIds: ['uid-1', 'uid-2'],
+    });
+    await setDoc(doc(db, 'directConversations', 'conversation-1'), {
+      conversationId: 'conversation-1',
+      friendshipId: 'uid-1_uid-2',
+      lifecycleState: 'active',
+      memberUids: ['uid-1', 'uid-2'],
+      requestState: 'accepted',
+      updatedAt: now,
+    });
+    await setDoc(doc(db, 'directConversations', 'conversation-1', 'messages', 'message-1'), {
+      conversationId: 'conversation-1',
+      createdAt: now,
+      id: 'message-1',
+      kind: 'text',
+      senderUid: 'uid-1',
+      sequence: 1,
+      text: 'hello',
+      visibilityState: 'visible',
+    });
+    await setDoc(doc(db, 'directConversations', 'conversation-1', 'receipts', 'uid-2'), {
+      conversationId: 'conversation-1',
+      lastReadSequence: 1,
+      uid: 'uid-2',
+      updatedAt: now,
+    });
+    for (const [ownerUid, peerUid] of [['uid-1', 'uid-2'], ['uid-2', 'uid-1']]) {
+      await setDoc(doc(db, 'directConversationMembers', ownerUid, 'items', 'conversation-1'), {
+        archived: false,
+        conversationId: 'conversation-1',
+        ownerUid,
+        peerUid,
+        unreadCount: ownerUid === 'uid-2' ? 1 : 0,
+        updatedAt: now,
+      });
+      await setDoc(doc(db, 'directChatInboxSummaries', ownerUid), {
+        totalUnreadCount: ownerUid === 'uid-2' ? 1 : 0,
+        uid: ownerUid,
+        updatedAt: now,
+      });
+    }
+    await setDoc(doc(db, 'directMessageRequests', 'conversation-1'), {
+      conversationId: 'conversation-1',
+      memberUids: ['uid-1', 'uid-2'],
+      recipientUid: 'uid-2',
+      senderUid: 'uid-1',
+      status: 'accepted',
+    });
+  });
+}
+
+function directChatPresencePayload(kind, uid, value, expiresAt) {
+  return {
+    conversationId: 'conversation-1',
+    expiresAt,
+    kind,
+    uid,
+    updatedAt: Timestamp.fromMillis(Date.now()),
+    value,
+  };
 }
 
 async function seedProfile(uid, email, displayName, avatarLabel) {

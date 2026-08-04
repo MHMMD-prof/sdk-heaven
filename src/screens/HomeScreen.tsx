@@ -31,6 +31,10 @@ import { radius, spacing, typography } from '../theme';
 import { RoomCountryCode, VoiceRoom, VoiceRoomType } from '../types/voice';
 import { normalizeInviteCode } from '../voice/roomProfile';
 import { useVoiceRooms } from '../voice/useVoiceRooms';
+import { useAvatarFrameProjection } from '../social/useAvatarFrameProjection';
+import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import { AvatarFrameLayer } from '../components/AvatarPresentation';
+import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
 
 const bannerArtwork = require('../../assets/home/home-banner.jpg') as ImageSourcePropType;
 const voiceRoyalArtwork = require('../../assets/home/room-voice-royal-v3.jpg') as ImageSourcePropType;
@@ -76,15 +80,18 @@ const featureCards: ReadonlyArray<{
 
 type HomeScreenProps = {
   bottomNavigation: ReactNode;
+  dailyLoginEntry?: ReactNode;
   onOpenProfile: () => void;
   onOpenVoiceRoom: (roomId: string) => void;
 };
 
 export function HomeScreen({
   bottomNavigation,
+  dailyLoginEntry,
   onOpenProfile,
   onOpenVoiceRoom,
 }: HomeScreenProps) {
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const countryRailRef = useRef<ScrollView>(null);
   const {
     createPrivateRoom,
@@ -123,6 +130,11 @@ export function HomeScreen({
       }).slice(0, 40),
     [country, mode, quickFilter, rooms, searchQuery, visitedRooms],
   );
+  const visibleMemberUids = useMemo(
+    () => visibleRooms.flatMap((room) => [...room.speakers, ...room.listeners].slice(0, 3).map((member) => member.id)),
+    [visibleRooms],
+  );
+  const avatarFrames = useAvatarFrameProjection(visibleMemberUids);
 
   const resetDiscovery = () => {
     setMode('activity');
@@ -316,6 +328,8 @@ export function HomeScreen({
           </ImageBackground>
         </Pressable>
 
+        {dailyLoginEntry}
+
         <View style={styles.featureRow}>
           {featureCards.map((card) => {
             const isSelected = quickFilter === card.filter;
@@ -392,6 +406,8 @@ export function HomeScreen({
           <View style={styles.roomGrid}>
             {visibleRooms.map((room) => (
               <RoomCard
+                avatarFrames={avatarFrames}
+                cosmeticsFlags={cosmeticsFlags}
                 isPending={pendingRoomId === room.id}
                 key={room.id}
                 onPress={() => void handleOpenRoom(room)}
@@ -496,12 +512,14 @@ function CountryButton({ accessibilityLabel, children, isSelected, onPress }: Co
 }
 
 type RoomCardProps = {
+  avatarFrames: Record<string, AvatarFrameProjection>;
+  cosmeticsFlags: CosmeticsFeatureFlags;
   isPending: boolean;
   onPress: () => void;
   room: VoiceRoom;
 };
 
-function RoomCard({ isPending, onPress, room }: RoomCardProps) {
+function RoomCard({ avatarFrames, cosmeticsFlags, isPending, onPress, room }: RoomCardProps) {
   const hostName = getVoiceRoomHostName(room) || 'المضيف';
   const roomCountry = getRoomCountry(room.countryCode);
   const artSeed = `${room.id}:${room.countryCode ?? 'all'}`;
@@ -546,6 +564,7 @@ function RoomCard({ isPending, onPress, room }: RoomCardProps) {
                 {previewMembers.map((member, index) => (
                   <View key={member.id} style={[styles.miniAvatar, index > 0 && styles.miniAvatarOverlap]}>
                     <Text style={styles.miniAvatarText}>{member.avatarLabel}</Text>
+                    <AvatarFrameLayer flags={cosmeticsFlags} frame={avatarFrames[member.id]} />
                   </View>
                 ))}
               </View>

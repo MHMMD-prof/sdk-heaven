@@ -136,6 +136,8 @@
 
 ## Wave 6 - Reversal, receipts, and operational controls
 
+**Status: implementation complete locally (2026-07-24); deployment and physical acceptance remain pending.** The backend now supports an idempotent, admin-authorized full reversal within the fixed 24-hour window, with atomic shared-wallet compensation, immutable original records, compensating ledger entries, two reversal receipts, two notifications, audit evidence, and security signals. The representative portal adds safe public-reference lookup and session-bound opaque pagination with currency, date, and status filters. See `docs/REPRESENTATIVE_WEBVIEW_WAVE6_OPERATIONS.md`. The production feature remains disabled, and no Wave 6 component was deployed.
+
 ### Work
 
 - Add an admin-authorized full reversal command linked to the original transfer.
@@ -150,6 +152,8 @@
 - Tests cover reversal expiry, insufficient recipient balance, double reversal, currency mismatch, concurrent spend/reversal, audit completeness, and both-user notifications.
 
 ## Wave 7 - Admin dashboard source and final rollout
+
+**Status: implementation complete locally (2026-07-24); production deployment and smoke testing remain pending.** The local dashboard source now covers the feature flag, global and per-representative limits, privilege/currency assignment, PIN reset-required, receipt inspection, eligible reversal, and representative audit/security history with reasons, confirmations, idempotency, and stale-record protection. A separately tested server-credential kill switch can disable the feature without a dashboard deployment. See `docs/REPRESENTATIVE_WEBVIEW_WAVE7_ROLLOUT.md`. The feature remains disabled. Codex did not deploy the admin dashboard, its function, or any Wave 7 component.
 
 ### Work
 

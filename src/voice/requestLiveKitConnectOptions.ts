@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+
 import { VoiceRoom } from '../types/voice';
 import { debugError, debugLog } from '../utils/debugLog';
 import { VoiceConnectOptions, VoiceProviderConfig } from './types';
@@ -37,7 +39,10 @@ export async function requestLiveKitConnectOptions(
         'Content-Type': 'application/json',
       },
       signal: controller.signal,
-      body: JSON.stringify({ roomId: room.id }),
+      body: JSON.stringify({
+        clientVersion: Constants.expoConfig?.version || '1.0.0',
+        roomId: room.id,
+      }),
     });
   } catch (error) {
     if (isAbortError(error)) {
@@ -82,6 +87,9 @@ export async function requestLiveKitConnectOptions(
     token: payload.token,
     canPublishAudio: payload.canPublishAudio === true,
     metadata: {
+      ...(config.roomAttendanceCommandEndpoint
+        ? { attendanceCommandEndpoint: config.roomAttendanceCommandEndpoint }
+        : {}),
       source: 'livekit',
     },
   };

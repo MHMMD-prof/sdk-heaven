@@ -7,6 +7,7 @@ import { ScreenContainer } from '../../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../../theme';
 import { RootStackParamList } from '../../types/navigation';
 import { useDrawingGuessController } from '../controller/useDrawingGuessController';
+import { useLeaveRoomGameOnExit } from '../../voice/useLeaveRoomGameOnExit';
 import { DrawingGuessCanvasStage } from './DrawingGuessCanvasStage';
 import { DrawingGuessConnectionBanner } from './DrawingGuessConnectionBanner';
 import { DrawingGuessGuessPanel } from './DrawingGuessGuessPanel';
@@ -23,6 +24,7 @@ import {
 type DrawingGuessScreenProps = NativeStackScreenProps<RootStackParamList, 'DrawingGuess'>;
 
 export function DrawingGuessScreen({ navigation, route }: DrawingGuessScreenProps) {
+  useLeaveRoomGameOnExit(route.params ?? {});
   const controller = useDrawingGuessController(route.params, () => navigation.goBack());
   const { actions, viewModel } = controller;
   const [localStatus, setLocalStatus] = useState('');

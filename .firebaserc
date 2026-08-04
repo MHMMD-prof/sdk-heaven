@@ -1,5 +1,17 @@
 {
   "projects": {
     "default": "yallgame-ebd19"
+  },
+  "targets": {
+    "yallgame-ebd19": {
+      "hosting": {
+        "admin": [
+          "yallgame-ebd19"
+        ],
+        "representative": [
+          "yallgame-representative"
+        ]
+      }
+    }
   }
 }

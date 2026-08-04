@@ -27,6 +27,11 @@ import type {
 } from '../social/types';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RoomCountryCode } from '../types/voice';
+import type { PayrollProgress } from '../payroll/requestPayrollProgress';
+import { AvatarFrameLayer } from './AvatarPresentation';
+import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import { EquipmentCosmeticAsset } from './EquipmentCosmeticAsset';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -48,6 +53,7 @@ type MeProfilePageProps = {
   onOpenWallet?: () => void;
   onRetry: () => void;
   profile?: PublicUserProfile;
+  payrollProgress?: PayrollProgress | null;
   status: PublicProfileLoadStatus;
 };
 
@@ -75,8 +81,10 @@ export function MeProfilePage({
   onOpenWallet,
   onRetry,
   profile,
+  payrollProgress,
   status,
 }: MeProfilePageProps) {
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const { width } = useWindowDimensions();
   const compact = width < 390;
   const [editorVisible, setEditorVisible] = useState(false);
@@ -133,12 +141,7 @@ export function MeProfilePage({
       label: 'اكتشاف المستخدمين',
       onPress: onOpenDiscovery,
     }] : []),
-    ...(onOpenRepresentativeTransfer ? [{
-      icon: { ios: 'arrow.left.arrow.right.circle.fill', android: 'currency_exchange', web: 'currency_exchange' } as SymbolName,
-      label: 'إعادة شحن الوكيل',
-      onPress: onOpenRepresentativeTransfer,
-    }] : []),
-  ], [onOpenCouples, onOpenDiscovery, onOpenRepresentativeTransfer]);
+  ], [onOpenCouples, onOpenDiscovery]);
 
   return (
     <ScreenContainer
@@ -191,6 +194,13 @@ export function MeProfilePage({
                   start={{ x: 0.95, y: 0 }}
                   style={styles.profileCard}
                 >
+                  <EquipmentCosmeticAsset
+                    category="profile-skin"
+                    enabled={cosmeticsFlags.profileSkins}
+                    flags={cosmeticsFlags}
+                    projection={profile.equippedCosmetics?.profileSkin}
+                    style={styles.profileSkin}
+                  />
                   <LinearGradient
                     colors={['rgba(255,224,143,0.13)', 'rgba(255,224,143,0.025)', 'transparent']}
                     end={{ x: 0.15, y: 1 }}
@@ -202,6 +212,7 @@ export function MeProfilePage({
                   <View style={[styles.identityRow, compact && styles.identityRowCompact]}>
                     <View style={styles.identityCopy}>
                       <View style={styles.nameRow}>
+                        <EquipmentCosmeticAsset category="nameplate" enabled={cosmeticsFlags.nameplates} flags={cosmeticsFlags} projection={profile.equippedCosmetics?.nameplate} style={styles.nameplate} />
                         {country ? <Image accessibilityLabel={country.label} source={country.flag} style={styles.flag} /> : null}
                         <Text
                           ellipsizeMode="tail"
@@ -211,6 +222,7 @@ export function MeProfilePage({
                         >
                           {profile.displayName || fallbackDisplayName}
                         </Text>
+                        <EquipmentCosmeticAsset category="cosmetic-badge" enabled={cosmeticsFlags.cosmeticBadges} flags={cosmeticsFlags} projection={profile.equippedCosmetics?.cosmeticBadge} style={styles.cosmeticBadge} />
                       </View>
                       <RepresentativeBadge
                         active={profile.representativeBadgeActive}
@@ -250,9 +262,13 @@ export function MeProfilePage({
                   avatarLabel={fallbackAvatarLabel}
                   avatarUrl={profile.avatarModerationStatus === 'clear' ? profile.avatarUrl : ''}
                   compact={compact}
+                  flags={cosmeticsFlags}
+                  frame={profile.equippedAvatarFrame}
                 />
               </View>
             </View>
+
+            {payrollProgress ? <PayrollProgressCard payroll={payrollProgress} /> : null}
 
             <Text style={styles.sectionLabel}>الوصول السريع</Text>
             <View style={styles.quickGrid}>
@@ -271,6 +287,17 @@ export function MeProfilePage({
                 );
               })}
             </View>
+
+            {onOpenRepresentativeTransfer ? (
+              <View style={styles.settingsCard}>
+                <SettingsRow
+                  icon={{ ios: 'arrow.left.arrow.right.circle.fill', android: 'currency_exchange', web: 'currency_exchange' } as SymbolName}
+                  label="إعادة شحن الوكيل"
+                  last
+                  onPress={onOpenRepresentativeTransfer}
+                />
+              </View>
+            ) : null}
 
             <View style={styles.settingsCard}>
               <SettingsRow
@@ -339,7 +366,13 @@ function HeaderAction({ accessibilityLabel, disabled = false, icon, onPress }: {
   );
 }
 
-function Avatar({ avatarLabel, avatarUrl, compact }: { avatarLabel: string; avatarUrl: string; compact: boolean }) {
+function Avatar({ avatarLabel, avatarUrl, compact, flags, frame }: {
+  avatarLabel: string;
+  avatarUrl: string;
+  compact: boolean;
+  flags: CosmeticsFeatureFlags;
+  frame?: AvatarFrameProjection;
+}) {
   const size = compact ? 108 : 124;
   return (
     <View style={[styles.avatarFrame, { height: size, width: size }]}>
@@ -359,6 +392,7 @@ function Avatar({ avatarLabel, avatarUrl, compact }: { avatarLabel: string; avat
       <View style={[styles.avatarSideJewel, styles.avatarSideJewelLeft]} />
       <View style={[styles.avatarSideJewel, styles.avatarSideJewelRight]} />
       <View style={styles.avatarJewel} />
+      <AvatarFrameLayer flags={flags} frame={frame} />
     </View>
   );
 }
@@ -372,6 +406,39 @@ function BalancePill({ icon, tint, value }: {
     <LinearGradient colors={['rgba(35,9,11,0.94)', 'rgba(8,3,3,0.9)']} style={styles.balancePill}>
       <SymbolView name={icon} size={20} tintColor={tint} />
       <Text maxFontSizeMultiplier={1.15} style={styles.balanceValue}>{formatNumber(value || 0)}</Text>
+    </LinearGradient>
+  );
+}
+
+function PayrollProgressCard({ payroll }: { payroll: PayrollProgress }) {
+  const completeDays = payroll.progress.daily.filter((day) => day.met).length;
+  const requiredDays = payroll.progress.daily.length;
+  return (
+    <LinearGradient
+      colors={['rgba(91,13,23,0.96)', 'rgba(24,6,8,0.98)']}
+      style={styles.payrollCard}
+    >
+      <View style={styles.payrollTitleRow}>
+        <View>
+          <Text style={styles.payrollEyebrow}>الراتب الأسبوعي</Text>
+          <Text style={styles.payrollTitle}>{payroll.plan.name.ar}</Text>
+        </View>
+        <View style={styles.payrollAmount}>
+          <Text style={styles.payrollAmountValue}>{formatNumber(payroll.progress.amount)}</Text>
+          <Text style={styles.payrollAmountUnit}>{payroll.progress.currency === 'diamonds' ? 'ماس' : 'كوينز'}</Text>
+        </View>
+      </View>
+      <View style={styles.payrollDays}>
+        {payroll.progress.daily.map((day) => (
+          <View key={day.dayId} style={[styles.payrollDay, day.met && styles.payrollDayMet]}>
+            <Text style={styles.payrollDayLabel}>{day.weekday}</Text>
+            <Text style={styles.payrollDayMinutes}>{day.qualifiedMinutes}/{day.requiredMinutes}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={styles.payrollSummary}>
+        {completeDays}/{requiredDays} أيام مكتملة · {payrollStatusLabel(payroll.progress.result)} · يتوقف الاحتساب بعد خمس دقائق كتم متواصل
+      </Text>
     </LinearGradient>
   );
 }
@@ -585,6 +652,20 @@ function formatNumber(value: number) {
   }
 }
 
+function payrollStatusLabel(result: string) {
+  return ({
+    eligible: 'مؤهل مبدئياً',
+    paid: 'تم الدفع',
+    'missed-day': 'يوم مفقود',
+    'insufficient-time': 'وقت غير كافٍ',
+    suspended: 'موقوف',
+    'profile-ineligible': 'الملف غير مؤهل',
+    'device-conflict': 'مراجعة الجهاز مطلوبة',
+    held: 'الدفع محجوز للمراجعة',
+    failed: 'تعذرت التسوية',
+  } as Record<string, string>)[result] || 'قيد التقييم';
+}
+
 function formatMemberYear(value: unknown) {
   if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
     return String((value.toDate() as Date).getFullYear());
@@ -596,6 +677,9 @@ function formatMemberYear(value: unknown) {
 }
 
 const styles = StyleSheet.create({
+  profileSkin: { bottom: 0, left: 0, opacity: 0.55, position: 'absolute', right: 0, top: 0 },
+  nameplate: { height: 44, left: -12, position: 'absolute', right: -12, top: -8 },
+  cosmeticBadge: { height: 24, width: 24, zIndex: 2 },
   page: { alignSelf: 'center', maxWidth: 720, minHeight: '100%', paddingHorizontal: spacing.lg, width: '100%' },
   header: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 52 },
   headerTitle: { color: '#FFF1CC', fontSize: 20, fontWeight: typography.weights.black, writingDirection: 'rtl' },
@@ -642,6 +726,19 @@ const styles = StyleSheet.create({
   statValue: { color: '#FFF1CC', fontSize: 16, fontWeight: typography.weights.black },
   statLabel: { color: '#C8BCA8', fontSize: 10, fontWeight: typography.weights.semibold, textAlign: 'center', writingDirection: 'rtl' },
   statDivider: { alignSelf: 'center', backgroundColor: 'rgba(226,183,91,0.18)', height: 54, width: 1 },
+  payrollCard: { borderColor: 'rgba(226,183,91,0.48)', borderRadius: 22, borderWidth: 1, gap: spacing.md, overflow: 'hidden', padding: spacing.lg },
+  payrollTitleRow: { alignItems: 'center', flexDirection: 'row-reverse', justifyContent: 'space-between' },
+  payrollEyebrow: { color: '#DDB761', fontSize: 11, fontWeight: typography.weights.black, textAlign: 'right', writingDirection: 'rtl' },
+  payrollTitle: { color: '#FFF1CC', fontSize: 18, fontWeight: typography.weights.black, marginTop: 3, textAlign: 'right', writingDirection: 'rtl' },
+  payrollAmount: { alignItems: 'center', backgroundColor: 'rgba(8,3,3,0.56)', borderColor: 'rgba(226,183,91,0.32)', borderRadius: radius.lg, borderWidth: 1, minWidth: 82, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  payrollAmountValue: { color: '#FFF1CC', fontSize: 18, fontWeight: typography.weights.black },
+  payrollAmountUnit: { color: '#DDB761', fontSize: 10, fontWeight: typography.weights.bold, writingDirection: 'rtl' },
+  payrollDays: { flexDirection: 'row-reverse', gap: 5, justifyContent: 'space-between' },
+  payrollDay: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.32)', borderColor: 'rgba(226,183,91,0.2)', borderRadius: 10, borderWidth: 1, flex: 1, gap: 2, minHeight: 48, paddingVertical: 6 },
+  payrollDayMet: { backgroundColor: 'rgba(33,116,69,0.24)', borderColor: 'rgba(94,210,133,0.58)' },
+  payrollDayLabel: { color: '#E4C879', fontSize: 11, fontWeight: typography.weights.black },
+  payrollDayMinutes: { color: '#D6CCBB', fontSize: 9 },
+  payrollSummary: { color: '#C8BCA8', fontSize: 11, textAlign: 'right', writingDirection: 'rtl' },
   sectionLabel: { color: '#DDB761', fontSize: 15, fontWeight: typography.weights.black, marginBottom: -spacing.xs, textAlign: 'right', writingDirection: 'rtl' },
   quickGrid: { backgroundColor: 'rgba(13,7,7,0.96)', borderColor: 'rgba(216,168,78,0.42)', borderRadius: 23, borderWidth: 1, flexDirection: 'row-reverse', flexWrap: 'wrap', overflow: 'hidden' },
   quickAction: { alignItems: 'center', gap: spacing.xs, justifyContent: 'center', minHeight: 92, paddingHorizontal: spacing.xs, width: '33.3333%' },

@@ -14,7 +14,7 @@ async function main() {
     admin.auth().getUser(options.actorUid),
     admin.auth().getUser(options.targetUid),
   ]);
-  if (actor.customClaims?.admin !== true || (actor.customClaims?.adminRole && actor.customClaims.adminRole !== 'owner')) {
+  if (actor.customClaims?.admin !== true || actor.customClaims?.adminRole !== 'owner') {
     throw new Error('The actor must be a platform owner.');
   }
   if (target.customClaims?.admin !== true || target.customClaims?.adminRole !== 'super-moderator') {
@@ -35,9 +35,18 @@ async function main() {
 
   const db = admin.firestore();
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
-  const requestId = `super_scope_${target.uid}_${Date.now()}`;
+  const requestId = options.requestId
+    || `super_scope_${target.uid}_${Date.now()}`;
+  const profileRef = db.doc(`adminProfiles/${target.uid}`);
+  const existing = await profileRef.get();
+  const before = existing.exists
+    ? {
+      regionCodes: Array.isArray(existing.data()?.regionCodes) ? existing.data().regionCodes : [],
+      status: existing.data()?.status || 'missing',
+    }
+    : { regionCodes: [], status: 'missing' };
   const batch = db.batch();
-  batch.set(db.doc(`adminProfiles/${target.uid}`), {
+  batch.set(profileRef, {
     regionCodes: options.regionCodes,
     role: 'super-moderator',
     status: result.status,
@@ -50,8 +59,11 @@ async function main() {
     actorEmail: actor.email || '',
     actorUid: actor.uid,
     after: { regionCodes: options.regionCodes, status: result.status },
+    before,
     createdAt: timestamp,
     kind: 'administrator-security',
+    note: options.reason,
+    requestId,
     source: 'operator-cli',
     status: 'completed',
     targetUid: target.uid,
@@ -66,11 +78,15 @@ function parseOptions(args) {
     .map((argument) => argument.slice(2).split(/=(.*)/s, 2)));
   const regionCodes = [...new Set(String(values.regions || '').split(',').map((value) => value.trim().toUpperCase()).filter(Boolean))];
   if (!values['actor-uid'] || !values['target-uid']) throw new Error('--actor-uid and --target-uid are required.');
+  const reason = String(values.reason || 'Assign Super Moderator region scope').trim();
+  if (reason.length < 3) throw new Error('--reason must contain at least 3 characters.');
   if (regionCodes.some((code) => !ROOM_COUNTRY_CODES.includes(code))) throw new Error('--regions contains an unsupported country code.');
   return {
     actorUid: values['actor-uid'],
     dryRun: !args.includes('--apply'),
     regionCodes,
+    reason,
+    requestId: String(values['request-id'] || '').trim(),
     targetUid: values['target-uid'],
   };
 }

@@ -1,3 +1,5 @@
+const { readPublicAvatarFrameProjection } = require('./avatarFrameProjectionCore');
+
 const ROOM_CHAT_ACTIONS = Object.freeze([
   'send-message',
   'delete-message',
@@ -102,16 +104,17 @@ function validateRoomChatRequest(command) {
   return { ok: true, value: command };
 }
 
-function resolveRoomChatAuthority({ decodedToken = {}, membership, operatorProfile, room }) {
+function resolveRoomChatAuthority({ decodedToken = {}, featureFlags, membership, operatorProfile, room }) {
   if (
     decodedToken.admin === true
-    && (decodedToken.adminRole === 'owner' || !decodedToken.adminRole)
+    && decodedToken.adminRole === 'owner'
   ) {
     return { authority: 'platform-owner', canManage: true };
   }
   if (
     decodedToken.admin === true
     && decodedToken.adminRole === 'super-moderator'
+    && featureFlags?.voice_room_super_moderation === true
     && operatorProfile?.role === 'super-moderator'
     && operatorProfile?.status === 'active'
   ) {
@@ -176,6 +179,7 @@ function resolveSendMessage({
     value: {
       nextRate: rateResult.value,
       senderAvatarLabel: typeof publicProfile.avatarLabel === 'string' ? publicProfile.avatarLabel : '',
+      senderAvatarFrame: readPublicAvatarFrameProjection(publicProfile),
       senderDisplayName: typeof publicProfile.displayName === 'string'
         ? publicProfile.displayName.slice(0, 32)
         : '',

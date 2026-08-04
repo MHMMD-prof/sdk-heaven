@@ -26,14 +26,17 @@ import {
   RoomKeywordFilterMode,
   RoomSeatDocument,
   RoomSeatMode,
-  RoomThemeId,
 } from '../../voice/roomV2Contract';
 import { RoomSheet } from './VoiceRoomSheets';
 import { RepresentativeBadge } from '../RepresentativeBadge';
+import { AvatarFrameLayer } from '../AvatarPresentation';
+import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
+import { RoomThemePicker } from './RoomThemePicker';
 
 type PendingCheck = (action: string, targetUid?: string, seatId?: string) => boolean;
 
 export function RoomSettingsSheet({
+  currentThemeId,
   errorMessage,
   initialSettings,
   mediaEnabled,
@@ -43,9 +46,13 @@ export function RoomSettingsSheet({
   onClose,
   onSelectRoomImage,
   onSave,
+  purchasesEnabled,
+  roomId,
   saving,
+  themesEnabled,
   visible,
 }: {
+  currentThemeId: string;
   errorMessage?: string;
   initialSettings: Required<RoomSettingsPatch>;
   mediaEnabled: boolean;
@@ -55,7 +62,10 @@ export function RoomSettingsSheet({
   onClose: () => void;
   onSelectRoomImage: () => Promise<void>;
   onSave: (settings: RoomSettingsPatch) => Promise<void>;
+  purchasesEnabled: boolean;
+  roomId: string;
   saving: boolean;
+  themesEnabled: boolean;
   visible: boolean;
 }) {
   const [settings, setSettings] = useState(initialSettings);
@@ -111,16 +121,12 @@ export function RoomSettingsSheet({
           textAlign="right"
           value={settings.welcomeMessage}
         />
-        <ChoiceGroup
-          label="مظهر الغرفة"
-          onChange={(value) => update('themeId', value as RoomThemeId)}
-          options={[
-            ['midnight', 'ليلي'],
-            ['royal', 'ملكي'],
-            ['ocean', 'بحري'],
-            ['emerald', 'زمردي'],
-          ]}
-          value={settings.themeId}
+        <RoomThemePicker
+          currentThemeId={currentThemeId}
+          enabled={themesEnabled}
+          purchasesEnabled={purchasesEnabled}
+          roomId={roomId}
+          visible={visible}
         />
         <ChoiceGroup
           label="من يمكنه الدردشة"
@@ -341,6 +347,7 @@ export function RoomMicrophonesSheet({
 
 export function RoomPeopleManagementSheet({
   actorRole,
+  cosmeticsFlags,
   members,
   onAssignModerator,
   onBan,
@@ -354,6 +361,7 @@ export function RoomPeopleManagementSheet({
   visible,
 }: {
   actorRole: 'owner' | 'moderator';
+  cosmeticsFlags: CosmeticsFeatureFlags;
   members: VoiceRoomMember[];
   onAssignModerator: (uid: string) => void;
   onBan: (uid: string) => void;
@@ -381,7 +389,7 @@ export function RoomPeopleManagementSheet({
           return (
             <View key={member.id} style={styles.personCard}>
               <View style={styles.personHeader}>
-                <View style={styles.avatar}><Text style={styles.avatarText}>{member.avatarLabel}</Text></View>
+                <View style={styles.avatar}><Text style={styles.avatarText}>{member.avatarLabel}</Text><MemberAvatarFrame flags={cosmeticsFlags} member={member} /></View>
                 <View style={styles.personCopy}>
                   <View style={styles.nameWithBadge}>
                     <Text numberOfLines={1} style={styles.personName}>{member.displayName}</Text>
@@ -574,47 +582,86 @@ export function RoomSeatOffersSheet({
 
 export function RoomOwnershipSheet({
   candidates,
+  cosmeticsFlags,
   errorMessage,
   onClose,
+  onCancelTransfer,
   onRemoveRoom,
   onTransfer,
+  ownershipPending,
+  pendingTransfer,
   pending,
   visible,
 }: {
   candidates: VoiceRoomMember[];
+  cosmeticsFlags: CosmeticsFeatureFlags;
   errorMessage?: string;
   onClose: () => void;
+  onCancelTransfer: () => void;
   onRemoveRoom: (reason: string) => void;
-  onTransfer: (member: VoiceRoomMember) => void;
+  onTransfer: (member: VoiceRoomMember, password: string) => void;
+  ownershipPending: boolean;
+  pendingTransfer?: { expiresAtMs: number; toUid: string };
   pending: PendingCheck;
   visible: boolean;
 }) {
   const [reason, setReason] = useState('');
+  const [password, setPassword] = useState('');
 
   useEffect(() => {
-    if (visible) setReason('');
+    if (visible) {
+      setReason('');
+      setPassword('');
+    }
   }, [visible]);
 
   return (
     <RoomSheet onClose={onClose} title="الملكية وحذف الغرفة" visible={visible}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.groupLabel}>نقل الملكية</Text>
-        <Text style={styles.helperText}>النقل فوري ويحوّل المالك الحالي إلى عضو عادي. اختر عضواً نشطاً فقط.</Text>
-        {candidates.map((member) => (
-          <View key={member.id} style={styles.transferRow}>
-            <View style={styles.avatar}><Text style={styles.avatarText}>{member.avatarLabel}</Text></View>
-            <View style={styles.transferIdentity}>
-              <Text numberOfLines={1} style={styles.transferName}>{member.displayName}</Text>
-              <RepresentativeBadge active={member.representativeBadgeActive} />
-            </View>
+        <Text style={styles.helperText}>يُرسل عرض صالح لمدة 15 دقيقة. لا تتغير الملكية إلا بعد قبول المستلم، وبعدها يصبح المالك السابق مشرفاً.</Text>
+        {pendingTransfer ? (
+          <View style={styles.offerCard}>
+            <Text style={styles.offerTitle}>يوجد عرض نقل ملكية معلّق</Text>
+            <Text style={styles.helperText}>
+              {`المستلم: ${candidates.find((member) => member.id === pendingTransfer.toUid)?.displayName || pendingTransfer.toUid}`}
+            </Text>
             <CompactButton
-              disabled={pending('transfer-ownership', member.id)}
-              label="نقل"
-              onPress={() => onTransfer(member)}
+              danger
+              disabled={ownershipPending}
+              label="إلغاء العرض"
+              onPress={onCancelTransfer}
             />
           </View>
-        ))}
-        {!candidates.length ? <Text style={styles.emptyText}>لا يوجد عضو نشط مؤهل لنقل الملكية إليه.</Text> : null}
+        ) : (
+          <>
+            <TextInput
+              accessibilityLabel="كلمة المرور لتأكيد نقل الملكية"
+              onChangeText={setPassword}
+              placeholder="كلمة المرور للتأكيد"
+              placeholderTextColor={colors.textSubtle}
+              secureTextEntry
+              style={styles.input}
+              textAlign="right"
+              value={password}
+            />
+            {candidates.map((member) => (
+              <View key={member.id} style={styles.transferRow}>
+                <View style={styles.avatar}><Text style={styles.avatarText}>{member.avatarLabel}</Text><MemberAvatarFrame flags={cosmeticsFlags} member={member} /></View>
+                <View style={styles.transferIdentity}>
+                  <Text numberOfLines={1} style={styles.transferName}>{member.displayName}</Text>
+                  <RepresentativeBadge active={member.representativeBadgeActive} />
+                </View>
+                <CompactButton
+                  disabled={!password || ownershipPending}
+                  label="إرسال عرض"
+                  onPress={() => onTransfer(member, password)}
+                />
+              </View>
+            ))}
+            {!candidates.length ? <Text style={styles.emptyText}>لا يوجد عضو نشط مؤهل لنقل الملكية إليه.</Text> : null}
+          </>
+        )}
         <View style={styles.dangerZone}>
           <Text style={styles.dangerTitle}>حذف الغرفة</Text>
           <Text style={styles.helperText}>الحذف قابل للاستعادة بواسطة فريق المنصة ولا يمسح سجل السلامة فوراً.</Text>
@@ -637,6 +684,54 @@ export function RoomOwnershipSheet({
           />
         </View>
       </ScrollView>
+    </RoomSheet>
+  );
+}
+
+export function RoomOwnershipOfferSheet({
+  errorMessage,
+  fromDisplayName,
+  onAccept,
+  onDecline,
+  pending,
+  visible,
+}: {
+  errorMessage?: string;
+  fromDisplayName: string;
+  onAccept: (password: string) => void;
+  onDecline: () => void;
+  pending: boolean;
+  visible: boolean;
+}) {
+  const [password, setPassword] = useState('');
+  useEffect(() => {
+    if (visible) setPassword('');
+  }, [visible]);
+  return (
+    <RoomSheet onClose={() => undefined} title="عرض ملكية الغرفة" visible={visible}>
+      <View style={styles.scrollContent}>
+        <View style={styles.offerCard}>
+          <Text style={styles.offerTitle}>{`${fromDisplayName} يعرض عليك ملكية هذه الغرفة`}</Text>
+          <Text style={styles.helperText}>
+            القبول يجعلك المالك فوراً ويحوّل المالك السابق إلى مشرف. العرض ينتهي تلقائياً بعد 15 دقيقة.
+          </Text>
+          <TextInput
+            accessibilityLabel="كلمة المرور لقبول ملكية الغرفة"
+            onChangeText={setPassword}
+            placeholder="كلمة المرور للقبول"
+            placeholderTextColor={colors.textSubtle}
+            secureTextEntry
+            style={styles.input}
+            textAlign="right"
+            value={password}
+          />
+          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+          <View style={styles.actionRow}>
+            <CompactButton disabled={pending} label="رفض" onPress={onDecline} />
+            <CompactButton disabled={!password || pending} label="قبول" onPress={() => onAccept(password)} />
+          </View>
+        </View>
+      </View>
     </RoomSheet>
   );
 }
@@ -716,6 +811,15 @@ function PrimaryButton({
       <Text style={styles.primaryButtonText}>{label}</Text>
     </Pressable>
   );
+}
+
+function MemberAvatarFrame({ flags, member }: { flags: CosmeticsFeatureFlags; member: VoiceRoomMember }) {
+  const frame = member.avatarFrameAssetUrl && member.avatarFrameItemId ? {
+    assetUrl: member.avatarFrameAssetUrl,
+    itemId: member.avatarFrameItemId,
+    ...(member.avatarFrameAssetId && member.avatarFrameAssetVersionId ? { canonicalAsset: { assetId: member.avatarFrameAssetId, assetVersionId: member.avatarFrameAssetVersionId } } : {}),
+  } : undefined;
+  return <AvatarFrameLayer flags={flags} frame={frame} renderLegacyWhenUnifiedDisabled />;
 }
 
 function CompactButton({

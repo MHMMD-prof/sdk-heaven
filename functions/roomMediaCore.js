@@ -1,6 +1,7 @@
 const {
   isActiveMembership,
   isCompleteProfile,
+  isRecentAuth,
   resolveMemberAuthority,
   resolveStaffRoomAuthority,
   roomCommandError,
@@ -103,6 +104,18 @@ function resolveRoomMediaCommand({
   if (staff.denied) return roomCommandError('REGION_SCOPE_DENIED', 403, staff.error);
   if (staff.authority !== 'super-moderator' && staff.authority !== 'platform-owner') {
     return roomCommandError('FORBIDDEN', 403, 'Platform operations authority is required.');
+  }
+  if (
+    staff.authority === 'super-moderator'
+    && featureFlags?.voice_room_super_moderation !== true
+  ) {
+    return roomCommandError('FEATURE_DISABLED', 503, 'Super Moderator emergency controls are not enabled.');
+  }
+  if (
+    ['remove-room-image', 'restore-room-customization'].includes(command.action)
+    && !isRecentAuth(decodedToken, Date.now())
+  ) {
+    return roomCommandError('FRESH_AUTH_REQUIRED', 401, 'Fresh authentication is required for this action.');
   }
   if (
     ['reject-room-image', 'remove-room-image'].includes(command.action)

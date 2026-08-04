@@ -26,6 +26,8 @@ export class LiveKitVoiceClient implements VoiceClient {
   private connectionState: VoiceConnectionState = 'idle';
   private connectAttemptId = 0;
   private audioSessionActive = false;
+  private attendanceCommandEndpoint = '';
+  private connectedRoomId = '';
 
   async connect(options: VoiceConnectOptions): Promise<void> {
     if (!options.serverUrl) {
@@ -41,6 +43,8 @@ export class LiveKitVoiceClient implements VoiceClient {
       attemptId,
     });
     this.connectAttemptId = attemptId;
+    this.attendanceCommandEndpoint = options.metadata?.attendanceCommandEndpoint ?? '';
+    this.connectedRoomId = options.roomId;
     const previousRoom = this.room;
     this.teardownRoom();
     previousRoom?.disconnect();
@@ -110,6 +114,8 @@ export class LiveKitVoiceClient implements VoiceClient {
     const room = this.room;
 
     this.teardownRoom();
+    this.attendanceCommandEndpoint = '';
+    this.connectedRoomId = '';
 
     if (room) {
       debugLog('voice.livekit', 'disconnect:room', {});
@@ -128,12 +134,14 @@ export class LiveKitVoiceClient implements VoiceClient {
     this.assertConnectedRoom();
     await this.room?.localParticipant.setMicrophoneEnabled(false);
     this.syncParticipants();
+    void this.signalAuthoritativeMicrophoneCheck('muted');
   }
 
   async unmuteMic(): Promise<void> {
     this.assertConnectedRoom();
     await this.room?.localParticipant.setMicrophoneEnabled(true);
     this.syncParticipants();
+    void this.signalAuthoritativeMicrophoneCheck('unmuted');
   }
 
   async setSpeakerEnabled(enabled: boolean): Promise<void> {
@@ -265,6 +273,38 @@ export class LiveKitVoiceClient implements VoiceClient {
   private assertConnectedRoom() {
     if (!this.room || this.connectionState !== 'connected') {
       throw new Error('Voice room is not connected.');
+    }
+  }
+
+  private async signalAuthoritativeMicrophoneCheck(state: 'muted' | 'unmuted') {
+    if (!this.attendanceCommandEndpoint || !this.connectedRoomId) return;
+    try {
+      const { getCurrentFirebaseIdToken } = await import('../auth/getCurrentFirebaseIdToken');
+      const idToken = await getCurrentFirebaseIdToken();
+      const requestId = `att_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+      const response = await fetch(this.attendanceCommandEndpoint, {
+        body: JSON.stringify({
+          action: 'verify-microphone-state',
+          requestId,
+          roomId: this.connectedRoomId,
+          state,
+        }),
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      });
+      if (!response.ok) {
+        debugLog('voice.attendance', 'verification:deferred-to-poll', {
+          roomId: this.connectedRoomId,
+          status: response.status,
+        });
+      }
+    } catch (error) {
+      debugError('voice.attendance', 'verification:deferred-to-poll', error, {
+        roomId: this.connectedRoomId,
+      });
     }
   }
 

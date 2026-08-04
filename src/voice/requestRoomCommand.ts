@@ -5,7 +5,6 @@ import {
   RoomEffectsPolicy,
   RoomHistoryVisibility,
   RoomKeywordFilterMode,
-  RoomThemeId,
 } from './roomV2Contract';
 
 export type RoomCommandAction =
@@ -60,7 +59,6 @@ export type RoomCommandRequest = {
 export type RoomSettingsPatch = {
   announcement?: string;
   welcomeMessage?: string;
-  themeId?: RoomThemeId;
   chatMode?: RoomChatMode;
   slowModeSeconds?: 0 | 5 | 10 | 30 | 60;
   historyVisibility?: RoomHistoryVisibility;
@@ -70,7 +68,13 @@ export type RoomSettingsPatch = {
 
 export type RoomCommandResult = {
   action: RoomCommandAction;
-  liveKitSyncStatus: 'not-required' | 'pending' | 'synced' | 'synced-offline';
+  liveKitSyncStatus:
+    | 'not-required'
+    | 'pending'
+    | 'leased'
+    | 'synced'
+    | 'synced-offline'
+    | 'dead-letter';
   requestId: string;
   revision: number;
   roomId: string;

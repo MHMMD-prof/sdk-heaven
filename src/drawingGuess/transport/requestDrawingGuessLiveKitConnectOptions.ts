@@ -12,8 +12,11 @@ export type DrawingGuessLiveKitConnectOptions = DrawingGuessConnectOptions & {
 };
 
 type DrawingGuessLiveKitTokenResponse = {
+  gameSessionId?: string;
+  participantId?: string;
   serverUrl?: string;
   token?: string;
+  transportRoomId?: string;
 };
 
 const tokenRequestTimeoutMs = 10000;
@@ -43,6 +46,7 @@ export async function requestDrawingGuessLiveKitConnectOptions(
       body: JSON.stringify({
         roomId: options.roomId,
         canPublishAudio: false,
+        ...(options.sessionId ? { gameSessionId: options.sessionId } : {}),
       }),
     });
   } catch (error) {
@@ -63,6 +67,16 @@ export async function requestDrawingGuessLiveKitConnectOptions(
 
   if (!payload.serverUrl || !payload.token) {
     throw new Error('Drawing Guess token response must include serverUrl and token.');
+  }
+  if (
+    options.sessionId
+    && (
+      payload.gameSessionId !== options.sessionId
+      || payload.participantId !== options.playerId
+      || !payload.transportRoomId
+    )
+  ) {
+    throw new Error('Drawing Guess game transport identity did not match the joined session.');
   }
 
   return {

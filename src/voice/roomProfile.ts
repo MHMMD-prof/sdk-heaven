@@ -34,6 +34,7 @@ import {
   RoomThemeId,
   SupportedRoomSchemaVersion,
 } from './roomV2Contract';
+import { DEFAULT_ROOM_THEME_ID, normalizePersistedRoomThemeId } from './roomThemeContract';
 
 export type RoomStatus = 'active' | 'closed';
 export type RoomMemberStatus = 'active' | 'removed';
@@ -57,6 +58,9 @@ export type RoomDocument = {
   speakerCount: number;
   revision: number;
   ownershipRevision: number;
+  pendingOwnershipTransferId?: string;
+  pendingOwnershipTransferExpiresAtMs?: number;
+  ownershipTransferCooldownUntilMs?: number;
   moderatorCount: number;
   audioLockdown: boolean;
   availability: RoomAvailability;
@@ -166,7 +170,7 @@ export function createRoomDocument(
     seatMode: 'open',
     announcement: '',
     welcomeMessage: '',
-    themeId: 'midnight',
+    themeId: DEFAULT_ROOM_THEME_ID,
     chatMode: 'everyone',
     slowModeSeconds: 0,
     historyVisibility: 'after-join',
@@ -235,7 +239,14 @@ export function mapRoomDocumentResult(data: unknown, id?: string): RoomDocumentM
     return { status: 'invalid' };
   }
 
-  const candidate = data as Partial<Record<keyof RoomDocument | 'createdAt' | 'updatedAt', unknown>>;
+  const candidate = data as Partial<Record<
+    keyof RoomDocument
+    | 'createdAt'
+    | 'pendingOwnershipTransferExpiresAt'
+    | 'ownershipTransferCooldownUntil'
+    | 'updatedAt',
+    unknown
+  >>;
   const rawSchemaVersion = candidate.schemaVersion;
   if (
     typeof rawSchemaVersion === 'number' &&
@@ -279,7 +290,9 @@ export function mapRoomDocumentResult(data: unknown, id?: string): RoomDocumentM
   const speakerCount = schemaVersion === ROOM_SCHEMA_VERSION ? candidate.speakerCount ?? 0 : 0;
   const announcement = schemaVersion === ROOM_SCHEMA_VERSION ? candidate.announcement ?? '' : '';
   const welcomeMessage = schemaVersion === ROOM_SCHEMA_VERSION ? candidate.welcomeMessage ?? '' : '';
-  const themeId = schemaVersion === ROOM_SCHEMA_VERSION ? candidate.themeId ?? 'midnight' : 'midnight';
+  const themeId = normalizePersistedRoomThemeId(
+    schemaVersion === ROOM_SCHEMA_VERSION ? candidate.themeId : DEFAULT_ROOM_THEME_ID,
+  );
   const chatMode = schemaVersion === ROOM_SCHEMA_VERSION ? candidate.chatMode ?? 'everyone' : 'everyone';
   const slowModeSeconds = schemaVersion === ROOM_SCHEMA_VERSION ? candidate.slowModeSeconds ?? 0 : 0;
   const historyVisibility = schemaVersion === ROOM_SCHEMA_VERSION ? candidate.historyVisibility ?? 'after-join' : 'after-join';
@@ -355,6 +368,11 @@ export function mapRoomDocumentResult(data: unknown, id?: string): RoomDocumentM
     speakerCount,
     revision,
     ownershipRevision,
+    pendingOwnershipTransferId: typeof candidate.pendingOwnershipTransferId === 'string'
+      ? candidate.pendingOwnershipTransferId
+      : undefined,
+    pendingOwnershipTransferExpiresAtMs: timestampToMillis(candidate.pendingOwnershipTransferExpiresAt),
+    ownershipTransferCooldownUntilMs: timestampToMillis(candidate.ownershipTransferCooldownUntil),
     moderatorCount,
     audioLockdown,
     availability,
@@ -470,6 +488,9 @@ export function mapRoomDocumentToVoiceRoom(room: RoomDocument, members: RoomMemb
     schemaVersion: room.schemaVersion,
     revision: room.revision,
     ownershipRevision: room.ownershipRevision,
+    pendingOwnershipTransferId: room.pendingOwnershipTransferId,
+    pendingOwnershipTransferExpiresAtMs: room.pendingOwnershipTransferExpiresAtMs,
+    ownershipTransferCooldownUntilMs: room.ownershipTransferCooldownUntilMs,
     moderatorCount: room.moderatorCount,
     audioLockdown: room.audioLockdown,
     seatTargetCount: room.seatTargetCount,

@@ -1,4 +1,4 @@
-export type AdminRouteKey = 'overview' | 'users' | 'rooms' | 'reports' | 'store' | 'audit' | 'settings';
+export type AdminRouteKey = 'overview' | 'users' | 'rooms' | 'reports' | 'store' | 'cosmetics' | 'incentives' | 'representatives' | 'audit' | 'settings';
 
 export type DashboardRoute = {
   detail: string;
@@ -57,6 +57,24 @@ export const adminRoutes: readonly DashboardRoute[] = [
     title: 'إدارة المتجر',
   },
   {
+    detail: 'إصدارات ثابتة، فحص موثوق، موافقات، نشر، ورجوع آمن.',
+    key: 'cosmetics',
+    label: 'أصول التجميل',
+    navigation: 'primary',
+    path: '/cosmetics',
+    subtitle: 'سلطة أصول الموجة الأولى',
+    title: 'سجل أصول التجميل',
+  },
+  {
+    detail: 'لا توجد عمليات وكلاء محمّلة.',
+    key: 'representatives',
+    label: 'عمليات الوكلاء',
+    navigation: 'primary',
+    path: '/representatives',
+    subtitle: 'التحويلات والحدود والاسترجاع',
+    title: 'عمليات الوكلاء',
+  },
+  {
     detail: 'لا توجد أحداث تدقيق محمّلة.',
     key: 'audit',
     label: 'سجل التدقيق',
@@ -73,6 +91,15 @@ export const adminRoutes: readonly DashboardRoute[] = [
     path: '/settings',
     subtitle: 'التفضيلات والأمان',
     title: 'الإعدادات',
+  },
+  {
+    detail: 'إعداد أهداف ومكافآت الغرف الأسبوعية.',
+    key: 'incentives',
+    label: 'حوافز الغرف',
+    navigation: 'primary',
+    path: '/incentives',
+    subtitle: 'الأهداف والمكافآت الأسبوعية',
+    title: 'حوافز الغرف',
   },
 ] as const;
 

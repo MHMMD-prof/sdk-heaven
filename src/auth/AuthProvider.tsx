@@ -1,5 +1,5 @@
 import type { User } from '@firebase/auth';
-import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AccountDeletionRequestInput, createAccountDeletionRequestPayload } from './accountLifecycle';
 import { createProfilePayload, isCompleteProfile, mapUserProfileDocument, validateProfileInput } from './profile';
@@ -28,11 +28,21 @@ type AuthProviderProps = {
 };
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const previousMediaCacheUid = useRef('');
   const [authRevision, setAuthRevision] = useState(0);
   const [initializing, setInitializing] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileStatus, setProfileStatus] = useState<ProfileStatus>('missing');
   const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const previousUid = previousMediaCacheUid.current;
+    const nextUid = user?.uid || '';
+    if (previousUid && previousUid !== nextUid) {
+      void import('../personalChat/directChatMedia').then(({ clearProtectedDirectChatMedia }) => clearProtectedDirectChatMedia(previousUid)).catch(() => undefined);
+    }
+    previousMediaCacheUid.current = nextUid;
+  }, [user?.uid]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;

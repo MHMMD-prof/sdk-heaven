@@ -1,8 +1,14 @@
 const admin = require('firebase-admin');
 const { HttpsError, onCall, onRequest } = require('firebase-functions/v2/https');
+const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret, defineString } = require('firebase-functions/params');
-const { AccessToken, RoomServiceClient, TrackSource } = require('livekit-server-sdk');
+const {
+  AccessToken,
+  RoomServiceClient,
+  TrackSource,
+  WebhookReceiver,
+} = require('livekit-server-sdk');
 
 const {
   createAdminOverviewPayload,
@@ -14,6 +20,7 @@ const {
   filterAdminSpecialIdRows,
   filterAdminStoreRows,
   filterAdminUserRows,
+  filterRowsByOperatorScope,
   mapAdminAuditEventDocument,
   mapAdminReportDocument,
   mapAdminRoomDocument,
@@ -26,6 +33,7 @@ const {
   normalizeAdminAuditLookup,
   normalizeAdminClientError,
   normalizeAdminFeatureFlagUpdate,
+  normalizeRoomGiftPolicyUpdate,
   normalizeAdministratorAction,
   normalizeAdminSettingsUpdate,
   normalizeAdminCoupleDissolve,
@@ -44,7 +52,12 @@ const {
   normalizeAdminEconomyQuery,
   normalizeAdminEconomyExport,
   normalizeAdminStoreItemLookup,
+  assertAdminTargetHierarchy,
+  assertFreshAdminAuth,
+  assertRoomInOperatorScope,
+  assertUserInOperatorScope,
   resolveAdminDashboardRequest,
+  resolveOperatorRegionScope,
 } = require('./adminDashboardCore');
 const {
   MAX_ECONOMY_EXPORT_ROWS,
@@ -74,12 +87,43 @@ const {
 } = require('./adminUserHistoryCore');
 const { ADMIN_ROLES, createAdminClaims, getAdminPermissions, resolveAdminRole } = require('./adminClaimsCore');
 const { executeAdminStoreCatalogUpsert } = require('./adminStoreService');
+const {
+  normalizeAdminRoomThemeLookup,
+  normalizeAdminRoomThemeMutation,
+} = require('./adminRoomThemeCore');
+const { getAdminRoomTheme, mutateAdminRoomTheme } = require('./adminRoomThemeService');
+const {
+  normalizeAdminCosmeticsAssetMutation,
+  normalizeAdminCosmeticsAssetQuery,
+} = require('./adminCosmeticsAssetCore');
+const {
+  cleanupExpiredCosmeticSubmissions,
+  getAdminCosmeticsAssets,
+  mutateAdminCosmeticsAsset,
+} = require('./adminCosmeticsAssetService');
+const { normalizeAdminRoomRocketMutation } = require('./adminRoomRocketCore');
+const {
+  getAdminRoomRocketCampaign,
+  mutateAdminRoomRocketCampaign,
+} = require('./adminRoomRocketService');
 const { normalizeAdminStoreCatalogInput } = require('./storeCore');
-const { extractBearerToken, isValidRoomId, resolveTokenRequest } = require('./livekitTokenCore');
+const {
+  extractBearerToken,
+  isValidRoomId,
+  resolveGameTransportTokenRequest,
+  resolveTokenRequest,
+} = require('./livekitTokenCore');
 const { executeAdminWalletAdjustment, executeAdminWalletCredit } = require('./adminWalletService');
 const { normalizeRoomCommandBody } = require('./roomCommandCore');
 const { normalizeRoomChatBody } = require('./roomChatCore');
+const { normalizeDirectChatCommand } = require('./directChatCore');
 const { normalizeRoomMediaCommandBody } = require('./roomMediaCore');
+const { normalizeRoomOwnershipBody } = require('./roomOwnershipCore');
+const { normalizeRoomGiftBody } = require('./roomGiftCore');
+const { inspectApprovedGiftPresentation } = require('./roomGiftPresentationCore');
+const { normalizeRoomEntryEffectBody } = require('./roomEntryEffectCore');
+const { normalizeRoomGameBody } = require('./roomGameCore');
+const { normalizeRoomMusicBody } = require('./roomMusicCore');
 const { isValidRoomSeatCommandAction } = require('./roomSeatCore');
 const {
   executeRoomCommand,
@@ -87,7 +131,76 @@ const {
   synchronizeRoomCommandLiveKit,
 } = require('./roomCommandService');
 const { cleanupOrphanedRoomMedia, executeRoomMediaCommand } = require('./roomMediaService');
+const { finalizeRemovedRooms } = require('./roomLifecycleService');
+const {
+  executeRoomOwnershipCommand,
+  expireRoomOwnershipTransfers,
+} = require('./roomOwnershipService');
+const { executeRoomGiftCommand } = require('./roomGiftService');
+const { resolveRoomGiftPolicy, updateRoomGiftPolicy } = require('./roomGiftPolicyService');
+const {
+  processRoomSupportLeaderboardRefreshes,
+  projectCommittedRoomGift,
+  reconcileRoomGiftProjectionBatch,
+  reconcileRoomSupportPeriodsBatch,
+} = require('./roomSupportProjectionService');
+const {
+  processRoomRocketCycles,
+  processRoomRocketRewardNotifications,
+  projectRoomRocketGiftFact,
+} = require('./roomRocketService');
+const {
+  prepareNextRoomTargetRoster,
+  searchRoomTargetRosterUsers,
+  processRoomTargetCycles,
+  processRoomTargetCycleStarts,
+  processRoomTargetRosterNotifications,
+  projectRoomTargetGiftFact,
+} = require('./roomTargetService');
+const {
+  normalizeAdminRoomTargetMemberHold,
+  normalizeAdminRoomTargetMutation,
+} = require('./adminRoomTargetCore');
+const {
+  getAdminRoomTargetCampaign,
+  mutateAdminRoomTargetCampaign,
+  mutateAdminRoomTargetMemberHold,
+} = require('./adminRoomTargetService');
+const {
+  cleanupExpiredRoomEntryEffectRecords,
+  executeRoomEntryEffectCommand,
+} = require('./roomEntryEffectService');
+const {
+  cleanupExpiredRoomGameRecords,
+  executeRoomGameCommand,
+  expireRoomGameSessions,
+} = require('./roomGameService');
+const {
+  applyRoomMusicLiveKit,
+  cleanupExpiredRoomMusicRecords,
+  executeRoomMusicCommand,
+  expireRoomMusicLeases,
+} = require('./roomMusicService');
+const {
+  cleanupExpiredRoomEvidence,
+  cleanupUnreportedRecordingSegments,
+} = require('./roomRecordingService');
 const { cleanupExpiredRoomChatMessages, executeRoomChatCommand } = require('./roomChatService');
+const {
+  cleanupDirectChatCommands,
+  executeDirectChatCommand,
+  expirePendingDirectMessageRequests,
+} = require('./directChatService');
+const { cleanupDirectChatUploads } = require('./directChatMediaService');
+const { createGoogleVisionSafetyAdapter } = require('./directChatMediaSafetyAdapter');
+const {
+  cleanupVoiceRoomHardeningArtifacts,
+  consumeVoiceRoomHttpRateLimit,
+} = require('./voiceRoomHardeningService');
+const {
+  evaluateVoiceRoomLaunchAccess,
+  summarizeLaunchReadiness,
+} = require('./voiceRoomLaunchCore');
 const {
   executeRoomSeatCommand,
   expireRoomSeatOffers,
@@ -95,6 +208,48 @@ const {
   recoverExpiredRoomSeats,
   recoverStaleRoomPresence,
 } = require('./roomSeatService');
+const {
+  normalizeAttendanceOutageMutation,
+  normalizeLiveKitWebhookEvent,
+} = require('./roomAttendanceCore');
+const {
+  getAttendanceShadowReport,
+  ingestLiveKitAttendanceEvent,
+  ingestSeatMembershipChange,
+  mutateAttendanceOutageWindow,
+  reconcileLiveKitAttendance,
+  verifyAndIngestMicrophoneHint,
+} = require('./roomAttendanceService');
+const { normalizePayrollAdminMutation } = require('./payrollCore');
+const {
+  getAdminPayroll,
+  getPayrollProgress,
+  mutateAdminPayroll,
+  processPayrollCycles,
+} = require('./payrollService');
+const { processWeeklyIncentiveSettlementBatch } = require('./weeklyIncentiveService');
+const {
+  getAdminWeeklyIncentiveIntegrity,
+  mutateAdminWeeklyIncentiveIntegrity,
+  processWeeklyIncentiveReconciliationBatch,
+  processWeeklyIncentiveRetention,
+} = require('./weeklyIncentiveIntegrityService');
+const { normalizeDailyLoginCommandBody } = require('./dailyLoginCore');
+const {
+  claimDailyLoginReward,
+  getDailyLoginStatus,
+  recordDailyLoginClaimFailure,
+} = require('./dailyLoginService');
+const { normalizeAdminDailyLoginMutation } = require('./adminDailyLoginCore');
+const {
+  activateScheduledDailyLoginCampaign,
+  getAdminDailyLoginCampaign,
+  mutateAdminDailyLoginCampaign,
+} = require('./adminDailyLoginService');
+const {
+  normalizeAdminWeeklyIncentiveIntegrityMutation,
+  normalizeAdminWeeklyIncentiveReconciliation,
+} = require('./adminWeeklyIncentiveIntegrityCore');
 const { discoverUsers } = require('./socialDiscoveryService');
 const { getCoupleOverview, getCoupleStatus, mutateCouple } = require('./socialCouplesService');
 const { normalizeAdminGiftCatalogInput } = require('./socialGiftsCore');
@@ -115,6 +270,7 @@ const {
   getFriendshipStatus,
   mutateFriendship,
 } = require('./socialFriendsService');
+const { mutateUserBlock } = require('./socialBlocksService');
 const {
   isTimestampLike,
   isValidPublicId,
@@ -127,6 +283,10 @@ const { mergeSocialFeatureFlags } = require('./socialProfileCore');
 const { getProfileReadiness, provisionPublicProfile } = require('./socialProfileService');
 const { getWalletStore, purchaseSpecialId } = require('./socialWalletService');
 const { equipStoreItem, expireStoreOwnerships, getMyStoreItems, getStoreCatalog, giftStoreItem, purchaseStoreItem } = require('./storeService');
+const { clearSuspendedAvatarFrameProjection, reconcileAvatarFrameProjections } = require('./avatarFrameProjectionService');
+const { clearSuspendedEquipmentCosmetics, reconcileEquipmentCosmeticProjections } = require('./equipmentCosmeticsService');
+const { normalizeRoomThemeBody } = require('./roomThemeCore');
+const { executeRoomThemeCommand, expireRoomThemeEntitlements } = require('./roomThemeService');
 const {
   executeAdminRepresentativeUpdate,
   getRepresentativeStatus,
@@ -137,6 +297,19 @@ const {
   normalizeAdminRepresentativeInput,
   normalizeAdminRepresentativeReversalInput,
 } = require('./representativeCore');
+const {
+  normalizeAdminRepresentativeOverrideInput,
+  normalizeAdminRepresentativePinResetInput,
+  normalizeAdminRepresentativePolicyInput,
+  normalizeRepresentativeOperationsQuery,
+  mapRepresentativeOverrideLimits,
+} = require('./representativeAdminCore');
+const {
+  executeRepresentativeOverrideUpdate,
+  executeRepresentativePinReset,
+  executeRepresentativePolicyUpdate,
+  resolveRepresentativeOperations,
+} = require('./representativeAdminService');
 const { normalizeRepresentativePortalOrigin, normalizeRepresentativePortalRequest } = require('./representativePortalCore');
 const {
   createRepresentativePortalTicket,
@@ -156,6 +329,7 @@ const {
 } = require('./socialWalletCore');
 
 admin.initializeApp();
+const directChatMediaSafetyAdapter = createGoogleVisionSafetyAdapter({ credential: admin.app().options.credential });
 
 const liveKitUrl = defineSecret('LIVEKIT_URL');
 const liveKitApiKey = defineSecret('LIVEKIT_API_KEY');
@@ -190,6 +364,64 @@ exports.expireStoreOwnerships = onSchedule(
   },
 );
 
+exports.reconcileAvatarFrameProjections = onSchedule(
+  { region: 'us-central1', schedule: 'every 30 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await reconcileAvatarFrameProjections({
+      clock: { nowMillis: () => Date.now() },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.reconcileAvatarFrameProjections] complete', result);
+  },
+);
+
+exports.reconcileEquipmentCosmeticProjections = onSchedule(
+  { region: 'us-central1', schedule: 'every 30 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await reconcileEquipmentCosmeticProjections({
+      clock: { nowMillis: () => Date.now() },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.reconcileEquipmentCosmeticProjections] complete', result);
+  },
+);
+
+exports.clearSuspendedAvatarFrameProjection = onDocumentWritten(
+  { document: 'publicProfiles/{uid}', region: 'us-central1' },
+  async (event) => {
+    const beforeStatus = event.data?.before.data()?.moderationStatus;
+    const afterStatus = event.data?.after.data()?.moderationStatus;
+    if (beforeStatus === afterStatus || afterStatus === 'active') return;
+    await clearSuspendedAvatarFrameProjection({
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      uid: event.params.uid,
+    });
+    await clearSuspendedEquipmentCosmetics({
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      uid: event.params.uid,
+    });
+  },
+);
+
+exports.expireRoomThemeEntitlements = onSchedule(
+  { region: 'us-central1', schedule: 'every 30 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await expireRoomThemeEntitlements({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.expireRoomThemeEntitlements] complete', result);
+  },
+);
+
 exports.projectRepresentativeBadge = onSchedule(
   { region: 'us-central1', schedule: 'every 5 minutes', timeZone: 'Asia/Baghdad' },
   async () => {
@@ -198,6 +430,220 @@ exports.projectRepresentativeBadge = onSchedule(
       fieldValue: admin.firestore.FieldValue,
     });
     console.info('[functions.projectRepresentativeBadge] complete', result);
+  },
+);
+
+exports.projectRoomGiftSupport = onDocumentCreated(
+  {
+    document: 'rooms/{roomId}/giftEvents/{eventId}',
+    region: 'us-central1',
+    retry: true,
+  },
+  async (event) => {
+    if (!event.data) return;
+    const result = await projectCommittedRoomGift({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      event: event.data.data(),
+      fieldValue: admin.firestore.FieldValue,
+      roomId: event.params.roomId,
+    });
+    const rocket = result.fact
+      ? await projectRoomRocketGiftFact({
+          clock: {
+            nowMillis: () => Date.now(),
+            timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+          },
+          db: admin.firestore(),
+          fact: result.fact,
+          fieldValue: admin.firestore.FieldValue,
+        })
+      : { skipped: true };
+    const target = result.fact
+      ? await projectRoomTargetGiftFact({
+          clock: {
+            nowMillis: () => Date.now(),
+            timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+          },
+          db: admin.firestore(),
+          fact: result.fact,
+          fieldValue: admin.firestore.FieldValue,
+        })
+      : { skipped: true };
+    console.info('[functions.projectRoomGiftSupport] complete', {
+      eventId: event.params.eventId,
+      replayed: result.replayed === true,
+      rocketReplayed: rocket.replayed === true,
+      skipped: result.skipped === true,
+      targetExcluded: target.excluded === true,
+      targetReplayed: target.replayed === true,
+    });
+    if (result.errorCode) throw new Error(`Room support projection failed: ${result.errorCode}`);
+    if (rocket.errorCode) throw new Error(`Room Rocket projection failed: ${rocket.errorCode}`);
+    if (target.errorCode) throw new Error(`Room Target projection failed: ${target.errorCode}`);
+  },
+);
+
+exports.processRoomRocketCycles = onSchedule(
+  { region: 'us-central1', schedule: 'every 10 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await processRoomRocketCycles({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.processRoomRocketCycles] complete', result);
+  },
+);
+
+exports.processRoomRocketRewardNotifications = onSchedule(
+  { region: 'us-central1', schedule: 'every 10 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const db = admin.firestore();
+    const result = await processRoomRocketRewardNotifications({
+      db,
+      deliver: (input) => deliverSocialNotification({
+        ...input,
+        db,
+        fieldValue: admin.firestore.FieldValue,
+      }),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.processRoomRocketRewardNotifications] complete', result);
+  },
+);
+
+exports.startRoomTargetCycles = onSchedule(
+  { region: 'us-central1', schedule: 'every 10 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await processRoomTargetCycleStarts({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.startRoomTargetCycles] complete', result);
+  },
+);
+
+exports.processRoomTargetCycles = onSchedule(
+  { region: 'us-central1', schedule: 'every 10 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await processRoomTargetCycles({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.processRoomTargetCycles] complete', result);
+  },
+);
+
+exports.processRoomTargetRosterNotifications = onSchedule(
+  { region: 'us-central1', schedule: 'every 10 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const db = admin.firestore();
+    const result = await processRoomTargetRosterNotifications({
+      db,
+      deliver: (input) => deliverSocialNotification({
+        ...input,
+        db,
+        fieldValue: admin.firestore.FieldValue,
+      }),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.processRoomTargetRosterNotifications] complete', result);
+  },
+);
+
+exports.refreshRoomSupportLeaderboards = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 1 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await processRoomSupportLeaderboardRefreshes({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.refreshRoomSupportLeaderboards] complete', result);
+  },
+);
+
+exports.reconcileRoomSupportProjections = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 10 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const db = admin.firestore();
+    const eventCursorRef = db.doc('appRuntime/roomSupportGiftReconciler');
+    const periodCursorRef = db.doc('appRuntime/roomSupportPeriodReconciler');
+    const [eventCursor, periodCursor] = await Promise.all([eventCursorRef.get(), periodCursorRef.get()]);
+    const dependencies = {
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db,
+      fieldValue: admin.firestore.FieldValue,
+    };
+    const gifts = await reconcileRoomGiftProjectionBatch({
+      ...dependencies,
+      cursor: eventCursor.data()?.cursor || '',
+      documentIdField: admin.firestore.FieldPath.documentId(),
+      projectFact: async (fact) => {
+        const [rocket, target] = await Promise.all([
+          projectRoomRocketGiftFact({ ...dependencies, fact }),
+          projectRoomTargetGiftFact({ ...dependencies, fact }),
+        ]);
+        return {
+          ...(rocket.errorCode ? { errorCode: `ROCKET_${rocket.errorCode}` } : {}),
+          ...(target.errorCode ? { errorCode: `TARGET_${target.errorCode}` } : {}),
+        };
+      },
+    });
+    const periods = await reconcileRoomSupportPeriodsBatch({
+      ...dependencies,
+      cursor: periodCursor.data()?.cursor || '',
+    });
+    await Promise.all([
+      eventCursorRef.set({
+        cursor: gifts.nextCursor,
+        lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+        projected: gifts.projected,
+        replayed: gifts.replayed,
+        scanned: gifts.scanned,
+        skipped: gifts.results.filter((result) => result.skipped === true).length,
+      }, { merge: true }),
+      periodCursorRef.set({
+        cursor: periods.nextCursor,
+        lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+        repaired: periods.reports.filter((report) => report.repaired === true).length,
+        scanned: periods.scanned,
+        unbalanced: periods.reports.filter((report) => report.balanced === false).length,
+      }, { merge: true }),
+    ]);
+    console.info('[functions.reconcileRoomSupportProjections] complete', {
+      giftProjection: { projected: gifts.projected, replayed: gifts.replayed, scanned: gifts.scanned },
+      periodProjection: { scanned: periods.scanned },
+    });
   },
 );
 
@@ -426,6 +872,19 @@ exports.socialCommand = onCall(
         }
 
         await deliverSocialNotificationSafely(command.value);
+        return { ok: true, result: mutation.result };
+      }
+
+      if (['block-user', 'unblock-user'].includes(command.value.action)) {
+        const mutation = await mutateUserBlock({
+          action: command.value.action,
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (mutation.errorCode) throwSocialCommandError(mutation.errorCode);
         return { ok: true, result: mutation.result };
       }
 
@@ -685,6 +1144,505 @@ function sendRepresentativePortalError(response, code) {
   response.status(error.status).json({ ok: false, error: { code: errors[code] ? code : 'INTERNAL', messageAr: error.messageAr } });
 }
 
+async function resolveVoiceRoomHttpLaunchAccess(db, decodedToken, request) {
+  try {
+    const [launchSnapshot, publicProfileSnapshot] = await Promise.all([
+      db.doc('appConfig/voiceRoomLaunch').get(),
+      db.doc(`publicProfiles/${decodedToken.uid}`).get(),
+    ]);
+    const headerVersion = request.headers['x-client-version'];
+    const clientVersion = typeof request.body?.clientVersion === 'string'
+      ? request.body.clientVersion.trim()
+      : typeof headerVersion === 'string'
+        ? headerVersion.trim()
+        : '';
+    return evaluateVoiceRoomLaunchAccess({
+      clientVersion,
+      countryCode: publicProfileSnapshot.exists ? publicProfileSnapshot.data()?.countryCode : '',
+      decodedToken,
+      policy: launchSnapshot.exists ? launchSnapshot.data() : undefined,
+      requireClientVersion: Boolean(clientVersion),
+    });
+  } catch (error) {
+    console.error('[functions.voiceRoomLaunch] access:error', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      uid: decodedToken?.uid || '',
+    });
+    return {
+      code: 'LAUNCH_POLICY_UNAVAILABLE',
+      error: 'Voice-room launch policy is temporarily unavailable.',
+      ok: false,
+      status: 503,
+    };
+  }
+}
+
+function sendVoiceRoomLaunchDenial(response, access) {
+  if (access.ok) return true;
+  response.status(access.status).json({ code: access.code, error: access.error });
+  return false;
+}
+
+exports.livekitAttendanceWebhook = onRequest(
+  {
+    invoker: 'public',
+    region: 'us-central1',
+    secrets: [liveKitApiKey, liveKitApiSecret],
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).send('Use POST.');
+      return;
+    }
+    try {
+      const receiver = new WebhookReceiver(liveKitApiKey.value(), liveKitApiSecret.value());
+      const rawBody = Buffer.isBuffer(request.rawBody)
+        ? request.rawBody.toString('utf8')
+        : '';
+      if (!rawBody) {
+        response.status(400).send('Raw webhook body is required.');
+        return;
+      }
+      const webhook = await receiver.receive(rawBody, request.headers.authorization);
+      const normalized = normalizeLiveKitWebhookEvent(webhook);
+      if (!normalized.ok) {
+        response.status(normalized.code === 'UNSUPPORTED_EVENT' ? 202 : 400).json({
+          accepted: normalized.code === 'UNSUPPORTED_EVENT',
+          code: normalized.code,
+        });
+        return;
+      }
+      const result = await ingestLiveKitAttendanceEvent({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        event: normalized.value,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (result.errorCode) throw new Error(result.errorCode);
+      response.status(200).json({ accepted: true, replayed: result.replayed === true });
+    } catch (error) {
+      const unauthorized = /authorization|token|signature|sha256|jwt/i.test(
+        error instanceof Error ? error.message : String(error),
+      );
+      console.error('[functions.livekitAttendanceWebhook] rejected', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      response.status(unauthorized ? 401 : 500).json({
+        error: unauthorized ? 'Webhook signature is invalid.' : 'Attendance webhook processing failed.',
+      });
+    }
+  },
+);
+
+exports.projectRoomAttendanceSeatState = onDocumentWritten(
+  {
+    document: 'rooms/{roomId}/members/{uid}',
+    region: 'us-central1',
+    retry: true,
+  },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (
+      before?.seatId === after?.seatId
+      && before?.status === after?.status
+      && before?.canPublishAudio === after?.canPublishAudio
+    ) return;
+    const result = await ingestSeatMembershipChange({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      eventId: event.id,
+      fieldValue: admin.firestore.FieldValue,
+      roomId: event.params.roomId,
+      uid: event.params.uid,
+    });
+    console.info('[functions.projectRoomAttendanceSeatState] complete', result);
+  },
+);
+
+exports.reconcileLiveKitAttendance = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 1 minutes',
+    secrets: [liveKitUrl, liveKitApiKey, liveKitApiSecret],
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const runtimeRef = admin.firestore().doc('appRuntime/liveKitAttendanceReconciler');
+    const result = await reconcileLiveKitAttendance({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      roomService: new RoomServiceClient(
+        liveKitUrl.value(),
+        liveKitApiKey.value(),
+        liveKitApiSecret.value(),
+      ),
+    });
+    console.info('[functions.reconcileLiveKitAttendance] complete', {
+      processed: result.processed,
+      scanned: result.scanned,
+    });
+    await runtimeRef.set({
+      lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      processed: result.processed || 0,
+      scanned: result.scanned || 0,
+      status: 'ok',
+    }, { merge: true });
+  },
+);
+
+exports.processPayrollCycles = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await processPayrollCycles({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      limit: 100,
+    });
+    console.info('[functions.processPayrollCycles] complete', result);
+  },
+);
+
+exports.processWeeklyIncentiveSettlements = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 5 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const runtimeRef = admin.firestore().doc('appRuntime/weeklyIncentiveSettlementWorker');
+    const result = await processWeeklyIncentiveSettlementBatch({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      options: {
+        dryRun: false,
+        leaseMillis: 5 * 60 * 1000,
+        limit: 100,
+        workerId: `scheduled-${process.env.K_REVISION || 'local'}`,
+      },
+    });
+    console.info('[functions.processWeeklyIncentiveSettlements] complete', {
+      processed: result.processed,
+      scanned: result.scanned,
+    });
+    await runtimeRef.set({
+      failed: result.failed || 0,
+      held: result.held || 0,
+      lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      processed: result.processed || 0,
+      scanned: result.scanned || 0,
+      status: (result.failed || 0) > 0 ? 'degraded' : 'ok',
+    }, { merge: true });
+  },
+);
+
+exports.monitorWeeklyIncentiveIntegrity = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 15 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const db = admin.firestore();
+    const runtimeRef = db.doc('appRuntime/weeklyIncentiveIntegrityMonitor');
+    const previous = await runtimeRef.get();
+    const result = await processWeeklyIncentiveReconciliationBatch({
+      apply: true,
+      db,
+      documentIdField: admin.firestore.FieldPath.documentId(),
+      fieldValue: admin.firestore.FieldValue,
+      giftCursor: previous.data()?.giftCursor || '',
+      limit: 100,
+      settlementCursor: previous.data()?.settlementCursor || '',
+    });
+    await runtimeRef.set({
+      balanced: result.summary.balanced,
+      giftCursor: result.nextGiftCursor,
+      lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      scanned: result.summary.scanned,
+      settlementCursor: result.nextSettlementCursor,
+      status: result.summary.unbalanced > 0 ? 'degraded' : 'ok',
+      unbalanced: result.summary.unbalanced,
+    }, { merge: true });
+    console.info('[functions.monitorWeeklyIncentiveIntegrity] complete', result.summary);
+  },
+);
+
+exports.enforceWeeklyIncentiveRetention = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 24 hours',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await processWeeklyIncentiveRetention({
+      actorUid: 'system:weekly-incentive-retention',
+      apply: true,
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      limit: 100,
+    });
+    console.info('[functions.enforceWeeklyIncentiveRetention] complete', {
+      deleted: result.deleted,
+    });
+  },
+);
+
+exports.roomAttendanceCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+    secrets: [liveKitUrl, liveKitApiKey, liveKitApiSecret],
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch {
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+    const action = typeof request.body?.action === 'string' ? request.body.action.trim() : '';
+    const roomId = typeof request.body?.roomId === 'string' ? request.body.roomId.trim() : '';
+    const requestId = typeof request.body?.requestId === 'string' ? request.body.requestId.trim() : '';
+    if (
+      action !== 'verify-microphone-state'
+      || !isValidRoomId(roomId)
+      || !/^[A-Za-z0-9_-]{12,100}$/.test(requestId)
+    ) {
+      response.status(400).json({ error: 'A valid attendance command is required.' });
+      return;
+    }
+    try {
+      const rateLimit = await consumeVoiceRoomHttpRateLimit({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        fieldValue: admin.firestore.FieldValue,
+        requestId,
+        surface: 'room-attendance',
+        uid: decodedToken.uid,
+      });
+      if (!rateLimit.ok) {
+        response.status(rateLimit.status).json({ code: rateLimit.code, error: rateLimit.error });
+        return;
+      }
+      const result = await verifyAndIngestMicrophoneHint({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        fieldValue: admin.firestore.FieldValue,
+        requestId,
+        roomId,
+        roomService: new RoomServiceClient(
+          liveKitUrl.value(),
+          liveKitApiKey.value(),
+          liveKitApiSecret.value(),
+        ),
+        uid: decodedToken.uid,
+      });
+      if (result.errorCode === 'PARTICIPANT_NOT_FOUND') {
+        response.status(409).json({ error: 'The LiveKit participant is not connected.' });
+        return;
+      }
+      if (result.errorCode) throw new Error(result.errorCode);
+      response.json({ ok: true, reportOnly: true, verified: !result.skipped });
+    } catch (error) {
+      console.error('[functions.roomAttendanceCommand] failed', error);
+      response.status(500).json({ error: 'Microphone state verification failed.' });
+    }
+  },
+);
+
+exports.payrollProgress = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    response.set('Cache-Control', 'no-store, max-age=0');
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch {
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+    try {
+      const result = await getPayrollProgress({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        uid: decodedToken.uid,
+      });
+      if (result.errorCode) {
+        response.status(result.errorCode === 'PLAN_NOT_FOUND' ? 409 : 500).json({ error: result.errorCode });
+        return;
+      }
+      response.json({ ok: true, payroll: result });
+    } catch (error) {
+      console.error('[functions.payrollProgress] failed', error);
+      response.status(500).json({ error: 'Payroll progress could not be loaded.' });
+    }
+  },
+);
+
+exports.activateDailyLoginCampaign = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 5 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await activateScheduledDailyLoginCampaign({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.activateDailyLoginCampaign] complete', result);
+  },
+);
+
+exports.dailyLoginCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    response.set('Cache-Control', 'no-store, max-age=0');
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch {
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+    const command = normalizeDailyLoginCommandBody(request.body);
+    if (!command.ok) {
+      response.status(400).json({ code: command.code, error: 'The daily reward request is invalid.' });
+      return;
+    }
+    const dependencies = {
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      input: request.body,
+      uid: decodedToken.uid,
+    };
+    try {
+      const result = command.value.action === 'get-daily-login-status'
+        ? await getDailyLoginStatus(dependencies)
+        : await claimDailyLoginReward({
+          ...dependencies,
+          fieldValue: admin.firestore.FieldValue,
+        });
+      if (result.ok === false) {
+        if (command.value.action === 'claim-daily-login-reward') {
+          try {
+            await recordDailyLoginClaimFailure({
+              clock: dependencies.clock,
+              code: result.code,
+              db: dependencies.db,
+              fieldValue: admin.firestore.FieldValue,
+              uid: decodedToken.uid,
+            });
+          } catch (metricError) {
+            console.warn('[functions.dailyLoginCommand] failure-metric:error', {
+              code: result.code,
+              errorMessage: metricError instanceof Error ? metricError.message : String(metricError),
+            });
+          }
+        }
+        response.status(result.status).json({
+          code: result.code,
+          ...(result.details ? { details: result.details } : {}),
+          error: result.error,
+        });
+        return;
+      }
+      response.json({
+        ok: true,
+        replayed: result.replayed === true,
+        result: result.result,
+      });
+    } catch (error) {
+      console.error('[functions.dailyLoginCommand] request:error', {
+        action: command.value.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        uid: decodedToken.uid,
+      });
+      response.status(500).json({ code: 'DAILY_LOGIN_FAILED', error: 'The daily reward command failed.' });
+    }
+  },
+);
+
 exports.livekitToken = onRequest(
   {
     cors: true,
@@ -708,7 +1666,7 @@ exports.livekitToken = onRequest(
     let decodedToken;
 
     try {
-      decodedToken = await admin.auth().verifyIdToken(idToken);
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
     } catch (error) {
       console.error('Invalid Firebase ID token:', error);
       response.status(401).json({ error: 'Authentication is invalid.' });
@@ -717,8 +1675,18 @@ exports.livekitToken = onRequest(
 
     try {
       const requestedRoomId = typeof request.body?.roomId === 'string' ? request.body.roomId.trim() : '';
+      const requestedGameSessionId = typeof request.body?.gameSessionId === 'string'
+        ? request.body.gameSessionId.trim()
+        : '';
       if (!isValidRoomId(requestedRoomId)) {
         response.status(400).json({ error: 'roomId is required.' });
+        return;
+      }
+      if (
+        requestedGameSessionId
+        && !/^[A-Za-z0-9][A-Za-z0-9_-]{15,95}$/.test(requestedGameSessionId)
+      ) {
+        response.status(400).json({ error: 'A valid gameSessionId is required.' });
         return;
       }
       const db = admin.firestore();
@@ -728,17 +1696,49 @@ exports.livekitToken = onRequest(
         emailVerified: decodedToken.email_verified === true,
         requestedRoomId,
         requestedCanPublishAudio: request.body?.canPublishAudio,
+        requestedGameSessionId,
       });
-      const [profileSnapshot, publicProfileSnapshot, restrictionSnapshot, roomSnapshot, membershipSnapshot, banSnapshot] = await Promise.all([
+      const [
+        profileSnapshot,
+        publicProfileSnapshot,
+        restrictionSnapshot,
+        roomSnapshot,
+        membershipSnapshot,
+        banSnapshot,
+        gameSessionSnapshot,
+        featureSnapshot,
+        launchSnapshot,
+      ] = await Promise.all([
         db.doc(`users/${decodedToken.uid}`).get(),
         db.doc(`publicProfiles/${decodedToken.uid}`).get(),
         db.doc(`adminUserRestrictions/${decodedToken.uid}`).get(),
         requestedRoomId ? db.doc(`rooms/${requestedRoomId}`).get() : Promise.resolve(undefined),
         requestedRoomId ? db.doc(`rooms/${requestedRoomId}/members/${decodedToken.uid}`).get() : Promise.resolve(undefined),
         requestedRoomId ? db.doc(`rooms/${requestedRoomId}/bans/${decodedToken.uid}`).get() : Promise.resolve(undefined),
+        requestedRoomId && requestedGameSessionId
+          ? db.doc(`rooms/${requestedRoomId}/gameSessions/${requestedGameSessionId}`).get()
+          : Promise.resolve(undefined),
+        requestedGameSessionId
+          ? db.doc('appConfig/voiceRoomFeatures').get()
+          : Promise.resolve(undefined),
+        db.doc('appConfig/voiceRoomLaunch').get(),
       ]);
       if (!publicProfileSnapshot.exists || publicProfileSnapshot.data()?.moderationStatus !== 'active') {
         response.status(403).json({ error: 'This account is not allowed to join voice rooms.' });
+        return;
+      }
+      const launchAccess = evaluateVoiceRoomLaunchAccess({
+        clientVersion: typeof request.body?.clientVersion === 'string' ? request.body.clientVersion.trim() : '',
+        countryCode: publicProfileSnapshot.data()?.countryCode,
+        decodedToken,
+        policy: launchSnapshot.exists ? launchSnapshot.data() : undefined,
+        requireClientVersion: true,
+      });
+      if (!launchAccess.ok) {
+        response.status(launchAccess.status).json({
+          code: launchAccess.code,
+          error: launchAccess.error,
+        });
         return;
       }
       const membership = membershipSnapshot?.exists ? membershipSnapshot.data() : undefined;
@@ -748,15 +1748,26 @@ exports.livekitToken = onRequest(
       const seatSnapshot = seatId
         ? await db.doc(`rooms/${requestedRoomId}/seats/${seatId}`).get()
         : undefined;
-      const tokenRequest = resolveTokenRequest({
-        ban: banSnapshot?.exists ? banSnapshot.data() : undefined,
-        body: request.body,
-        decodedToken,
-        membership,
-        profile: profileSnapshot.exists ? profileSnapshot.data() : undefined,
-        room: roomSnapshot?.exists ? roomSnapshot.data() : undefined,
-        seat: seatSnapshot?.exists ? seatSnapshot.data() : undefined,
-      });
+      const tokenRequest = requestedGameSessionId
+        ? resolveGameTransportTokenRequest({
+            ban: banSnapshot?.exists ? banSnapshot.data() : undefined,
+            body: request.body,
+            decodedToken,
+            featureFlags: featureSnapshot?.exists ? featureSnapshot.data() : undefined,
+            gameSession: gameSessionSnapshot?.exists ? gameSessionSnapshot.data() : undefined,
+            membership,
+            profile: profileSnapshot.exists ? profileSnapshot.data() : undefined,
+            room: roomSnapshot?.exists ? roomSnapshot.data() : undefined,
+          })
+        : resolveTokenRequest({
+            ban: banSnapshot?.exists ? banSnapshot.data() : undefined,
+            body: request.body,
+            decodedToken,
+            membership,
+            profile: profileSnapshot.exists ? profileSnapshot.data() : undefined,
+            room: roomSnapshot?.exists ? roomSnapshot.data() : undefined,
+            seat: seatSnapshot?.exists ? seatSnapshot.data() : undefined,
+          });
 
       if (!tokenRequest.ok) {
         console.info('[functions.livekitToken] request:denied', {
@@ -784,6 +1795,9 @@ exports.livekitToken = onRequest(
         role,
         roomId,
         seatId: resolvedSeatId,
+        gameSessionId,
+        sourceRoomId,
+        transport,
       } = tokenRequest.value;
       const mutedUntil = restrictionSnapshot.exists ? restrictionSnapshot.data()?.mutedUntil : undefined;
       const isMuted = mutedUntil && typeof mutedUntil.toMillis === 'function' && mutedUntil.toMillis() > Date.now();
@@ -799,6 +1813,7 @@ exports.livekitToken = onRequest(
           role,
           seatId: resolvedSeatId,
           uid: participantId,
+          ...(gameSessionId ? { gameSessionId, sourceRoomId, transport } : {}),
         }),
       });
 
@@ -821,6 +1836,8 @@ exports.livekitToken = onRequest(
         serverUrl: liveKitUrl.value(),
         token: await token.toJwt(),
         canPublishAudio: canPublish,
+        participantId,
+        ...(gameSessionId ? { gameSessionId, transportRoomId: roomId } : {}),
       });
     } catch (error) {
       console.error('[functions.livekitToken] request:error', {
@@ -856,16 +1873,38 @@ exports.roomCommand = onRequest(
     let decodedToken;
 
     try {
-      decodedToken = await admin.auth().verifyIdToken(idToken);
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
     } catch (error) {
       console.error('Invalid Firebase ID token:', error);
       response.status(401).json({ error: 'Authentication is invalid.' });
       return;
     }
 
+    const roomCommandLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomCommandLaunchAccess)) return;
     const commandBody = normalizeRoomCommandBody(request.body);
     try {
       const db = admin.firestore();
+      const httpRateLimit = await consumeVoiceRoomHttpRateLimit({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db,
+        fieldValue: admin.firestore.FieldValue,
+        requestId: commandBody.requestId,
+        surface: 'room-command',
+        uid: decodedToken.uid,
+      });
+      if (!httpRateLimit.ok) {
+        response.status(httpRateLimit.status).json({
+          code: httpRateLimit.code,
+          error: httpRateLimit.error,
+          ...(httpRateLimit.details ? { details: httpRateLimit.details } : {}),
+        });
+        return;
+      }
       const result = isValidRoomSeatCommandAction(commandBody.action)
         ? await executeRoomSeatCommand({
           body: request.body,
@@ -950,6 +1989,125 @@ exports.roomCommand = onRequest(
   },
 );
 
+exports.roomThemeCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomThemeCommand] invalid-token', error);
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+    const command = normalizeRoomThemeBody(request.body);
+    try {
+      const result = await executeRoomThemeCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      response.json({ ok: true, replayed: result.replayed === true, result: result.result });
+    } catch (error) {
+      console.error('[functions.roomThemeCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken.uid,
+      });
+      response.status(500).json({ code: 'ROOM_THEME_FAILED', error: 'Failed to execute room-theme command.' });
+    }
+  },
+);
+
+exports.roomTargetCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomTargetCommand] invalid-token', error);
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+    try {
+      const result = request.body?.action === 'search-roster-users'
+        ? await searchRoomTargetRosterUsers({
+            db: admin.firestore(),
+            decodedToken,
+            discoverUsers,
+            input: request.body,
+          })
+        : await prepareNextRoomTargetRoster({
+            clock: {
+              nowMillis: () => Date.now(),
+              timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+            },
+            db: admin.firestore(),
+            decodedToken,
+            fieldValue: admin.firestore.FieldValue,
+            input: request.body,
+          });
+      if (!result.ok) {
+        response.status(result.status || 400).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      response.json({ ok: true, replayed: result.replayed === true, result: result.result });
+    } catch (error) {
+      console.error('[functions.roomTargetCommand] request:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: request.body?.roomId,
+        uid: decodedToken.uid,
+      });
+      response.status(500).json({ code: 'ROOM_TARGET_FAILED', error: 'Failed to update the Room Target roster.' });
+    }
+  },
+);
+
 exports.roomMediaCommand = onRequest(
   {
     cors: true,
@@ -969,7 +2127,7 @@ exports.roomMediaCommand = onRequest(
 
     let decodedToken;
     try {
-      decodedToken = await admin.auth().verifyIdToken(idToken);
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
     } catch (error) {
       console.error('[functions.roomMediaCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -978,6 +2136,9 @@ exports.roomMediaCommand = onRequest(
       return;
     }
 
+    const roomMediaLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomMediaLaunchAccess)) return;
     const command = normalizeRoomMediaCommandBody(request.body);
     try {
       const result = await executeRoomMediaCommand({
@@ -1025,6 +2186,72 @@ exports.roomMediaCommand = onRequest(
   },
 );
 
+exports.directChatCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ code: 'AUTH_REQUIRED', error: 'Authentication is required.' });
+      return;
+    }
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.directChatCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ code: 'AUTH_REQUIRED', error: 'Authentication is invalid.' });
+      return;
+    }
+    const normalized = normalizeDirectChatCommand(request.body, decodedToken.uid);
+    try {
+      const result = await executeDirectChatCommand({
+        body: request.body,
+        bucket: admin.storage().bucket(),
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        safetyAdapter: directChatMediaSafetyAdapter,
+      });
+      if (!result.ok) {
+        console.info('[functions.directChatCommand] request:denied', {
+          action: normalized.ok ? normalized.value.action : 'invalid',
+          code: result.code,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({ code: result.code, error: result.error, messageAr: result.messageAr });
+        return;
+      }
+      console.info('[functions.directChatCommand] request:success', {
+        action: result.result.action,
+        replayed: result.replayed === true,
+        requestId: result.result.requestId,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.directChatCommand] request:error', {
+        action: normalized.ok ? normalized.value.action : 'invalid',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        uid: decodedToken.uid,
+      });
+      response.status(500).json({ code: 'INTERNAL', error: 'The personal chat request failed.' });
+    }
+  },
+);
+
 exports.roomChatCommand = onRequest(
   {
     cors: true,
@@ -1044,7 +2271,7 @@ exports.roomChatCommand = onRequest(
 
     let decodedToken;
     try {
-      decodedToken = await admin.auth().verifyIdToken(idToken);
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
     } catch (error) {
       console.error('[functions.roomChatCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -1053,6 +2280,9 @@ exports.roomChatCommand = onRequest(
       return;
     }
 
+    const roomChatLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomChatLaunchAccess)) return;
     const command = normalizeRoomChatBody(request.body);
     try {
       const result = await executeRoomChatCommand({
@@ -1101,6 +2331,500 @@ exports.roomChatCommand = onRequest(
   },
 );
 
+exports.roomOwnershipCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomOwnershipCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const roomOwnershipLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomOwnershipLaunchAccess)) return;
+    const command = normalizeRoomOwnershipBody(request.body);
+    try {
+      const result = await executeRoomOwnershipCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomOwnershipCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          roomId: command.roomId,
+          transferId: command.transferId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      console.info('[functions.roomOwnershipCommand] request:success', {
+        action: result.result.action,
+        replayed: result.replayed,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        status: result.result.status,
+        transferId: result.result.transferId,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomOwnershipCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken?.uid,
+      });
+      response.status(500).json({
+        code: 'ROOM_OWNERSHIP_FAILED',
+        error: 'Failed to execute room ownership command.',
+      });
+    }
+  },
+);
+
+exports.roomGiftCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomGiftCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const roomGiftLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomGiftLaunchAccess)) return;
+    const command = normalizeRoomGiftBody(request.body);
+    try {
+      const db = admin.firestore();
+      const httpRateLimit = await consumeVoiceRoomHttpRateLimit({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db,
+        fieldValue: admin.firestore.FieldValue,
+        requestId: command.requestId,
+        surface: 'room-gift',
+        uid: decodedToken.uid,
+      });
+      if (!httpRateLimit.ok) {
+        response.status(httpRateLimit.status).json({
+          code: httpRateLimit.code,
+          error: httpRateLimit.error,
+          ...(httpRateLimit.details ? { details: httpRateLimit.details } : {}),
+        });
+        return;
+      }
+      const result = await executeRoomGiftCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db,
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomGiftCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          giftId: command.giftId,
+          roomId: command.roomId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      console.info('[functions.roomGiftCommand] request:success', {
+        action: result.result.action,
+        eventId: result.result.eventId,
+        replayed: result.replayed,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomGiftCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken?.uid,
+      });
+      response.status(500).json({
+        code: 'ROOM_GIFT_FAILED',
+        error: 'Failed to execute room gift command.',
+      });
+    }
+  },
+);
+
+exports.roomEntryEffectCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomEntryEffectCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const roomEntryEffectLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomEntryEffectLaunchAccess)) return;
+    const command = normalizeRoomEntryEffectBody(request.body);
+    try {
+      const result = await executeRoomEntryEffectCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomEntryEffectCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          roomId: command.roomId,
+          sessionId: command.sessionId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      console.info('[functions.roomEntryEffectCommand] request:success', {
+        action: result.result.action,
+        announced: result.result.announced,
+        eventId: result.result.eventId,
+        replayed: result.replayed,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        skipped: result.result.skipped,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomEntryEffectCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken?.uid,
+      });
+      response.status(500).json({
+        code: 'ROOM_ENTRY_EFFECT_FAILED',
+        error: 'Failed to execute room entry-effect command.',
+      });
+    }
+  },
+);
+
+exports.roomGameCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomGameCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const roomGameLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomGameLaunchAccess)) return;
+    const command = normalizeRoomGameBody(request.body);
+    try {
+      const result = await executeRoomGameCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomGameCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          gameId: command.gameId,
+          roomId: command.roomId,
+          sessionId: command.sessionId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      console.info('[functions.roomGameCommand] request:success', {
+        action: result.result.action,
+        gameId: result.result.session?.gameId || command.gameId,
+        replayed: result.replayed,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        sessionId: result.result.sessionId,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomGameCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken?.uid,
+      });
+      response.status(500).json({
+        code: 'ROOM_GAME_FAILED',
+        error: 'Failed to execute room game command.',
+      });
+    }
+  },
+);
+
+exports.roomMusicCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+    secrets: [liveKitUrl, liveKitApiKey, liveKitApiSecret],
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomMusicCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const roomMusicLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomMusicLaunchAccess)) return;
+    const command = normalizeRoomMusicBody(request.body);
+    try {
+      const result = await executeRoomMusicCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomMusicCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          leaseId: command.leaseId,
+          roomId: command.roomId,
+          trackId: command.trackId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+
+      let liveKitSyncStatus = 'not-required';
+      if (result.liveKit && result.liveKit.type !== 'none') {
+        try {
+          const roomService = new RoomServiceClient(
+            liveKitUrl.value(),
+            liveKitApiKey.value(),
+            liveKitApiSecret.value(),
+          );
+          const sync = await applyRoomMusicLiveKit(roomService, command.roomId, result.liveKit);
+          liveKitSyncStatus = sync.status;
+        } catch (error) {
+          liveKitSyncStatus = 'failed';
+          console.error('[functions.roomMusicCommand] livekit-sync:failed', {
+            errorMessage: error instanceof Error ? error.message : String(error),
+            roomId: command.roomId,
+            uid: decodedToken.uid,
+          });
+        }
+      }
+
+      console.info('[functions.roomMusicCommand] request:success', {
+        action: result.result.action,
+        leaseId: result.result.leaseId || command.leaseId,
+        liveKitSyncStatus,
+        replayed: result.replayed,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        uid: decodedToken.uid,
+      });
+      response.json({ ...result, liveKitSyncStatus });
+    } catch (error) {
+      console.error('[functions.roomMusicCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken?.uid,
+      });
+      response.status(500).json({
+        code: 'ROOM_MUSIC_FAILED',
+        error: 'Failed to execute room music command.',
+      });
+    }
+  },
+);
+
+exports.roomRecordingCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
+      console.error('[functions.roomRecordingCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    response.status(410).json({
+      code: 'RECORDING_REJECTED',
+      error: 'Room recording was rejected and is unavailable.',
+    });
+  },
+);
+
 exports.retryRoomLiveKitSync = onSchedule(
   {
     region: 'us-central1',
@@ -1133,6 +2857,28 @@ exports.cleanupRoomMediaUploads = onSchedule(
   },
 );
 
+exports.cleanupCosmeticSubmissions = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 24 hours',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - 90 * 24 * 60 * 60 * 1000,
+    );
+    const purged = await cleanupExpiredCosmeticSubmissions({
+      bucket: admin.storage().bucket(),
+      cutoff,
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.cleanupCosmeticSubmissions] complete', {
+      purged: purged.length,
+    });
+  },
+);
+
 exports.cleanupRoomChatMessages = onSchedule(
   {
     region: roomChatRegion,
@@ -1148,6 +2894,188 @@ exports.cleanupRoomChatMessages = onSchedule(
       db: admin.firestore(),
     });
     console.info('[functions.cleanupRoomChatMessages] complete', result);
+  },
+);
+
+exports.expireDirectMessageRequests = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await expirePendingDirectMessageRequests({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    console.info('[functions.expireDirectMessageRequests] complete', result);
+  },
+);
+
+exports.cleanupDirectChatCommands = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 24 hours',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await cleanupDirectChatCommands({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    console.info('[functions.cleanupDirectChatCommands] complete', result);
+  },
+);
+
+exports.cleanupDirectChatUploads = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await cleanupDirectChatUploads({
+      bucket: admin.storage().bucket(),
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    console.info('[functions.cleanupDirectChatUploads] complete', result);
+  },
+);
+
+exports.cleanupRoomEntryEffects = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await cleanupExpiredRoomEntryEffectRecords({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    console.info('[functions.cleanupRoomEntryEffects] complete', result);
+  },
+);
+
+exports.cleanupRoomGames = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 5 minutes',
+    timeoutSeconds: 120,
+  },
+  async () => {
+    const db = admin.firestore();
+    const expired = await expireRoomGameSessions({ db });
+    const cleaned = await cleanupExpiredRoomGameRecords({ db });
+    console.info('[functions.cleanupRoomGames] complete', { cleaned, expired });
+  },
+);
+
+exports.cleanupRoomMusic = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 1 minutes',
+    timeoutSeconds: 120,
+  },
+  async () => {
+    const db = admin.firestore();
+    const expired = await expireRoomMusicLeases({ db });
+    const cleaned = await cleanupExpiredRoomMusicRecords({ db });
+    console.info('[functions.cleanupRoomMusic] complete', { cleaned, expired });
+  },
+);
+
+exports.cleanupRoomRecordingEvidence = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const evidence = await cleanupExpiredRoomEvidence({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    const segments = await cleanupUnreportedRecordingSegments({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    console.info('[functions.cleanupRoomRecordingEvidence] complete', { evidence, segments });
+  },
+);
+
+exports.cleanupVoiceRoomHardening = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await cleanupVoiceRoomHardeningArtifacts({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    console.info('[functions.cleanupVoiceRoomHardening] complete', result);
+  },
+);
+
+exports.expireRoomOwnershipOffers = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 5 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await expireRoomOwnershipTransfers({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.expireRoomOwnershipOffers] complete', result);
+  },
+);
+
+exports.finalizeRemovedRooms = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 24 hours',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await finalizeRemovedRooms({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.finalizeRemovedRooms] complete', result);
   },
 );
 
@@ -1188,6 +3116,7 @@ exports.adminDashboard = onRequest(
     cors: true,
     invoker: 'public',
     region: 'us-central1',
+    secrets: [liveKitUrl, liveKitApiKey, liveKitApiSecret],
   },
   async (request, response) => {
     const requestStartedAt = Date.now();
@@ -1241,9 +3170,58 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    const dashboardDb = admin.firestore();
+    let operatorScope = {
+      ok: true,
+      regionCodes: null,
+      role: dashboardRequest.value.role,
+    };
+    if (dashboardRequest.value.role === 'super-moderator') {
+      const [operatorProfileSnapshot, featureFlagsSnapshot] = await Promise.all([
+        dashboardDb.doc(`adminProfiles/${decodedToken.uid}`).get(),
+        dashboardDb.doc('appConfig/voiceRoomFeatures').get(),
+      ]);
+      if (featureFlagsSnapshot.data()?.voice_room_super_moderation !== true) {
+        response.status(503).json({
+          code: 'FEATURE_DISABLED',
+          error: 'Super Moderator operations are not enabled.',
+        });
+        return;
+      }
+      operatorScope = resolveOperatorRegionScope(
+        decodedToken,
+        operatorProfileSnapshot.exists ? operatorProfileSnapshot.data() : undefined,
+      );
+      if (!operatorScope.ok) {
+        response.status(operatorScope.status).json({ error: operatorScope.error });
+        return;
+      }
+    }
+
+    if (dashboardRequest.value.action === 'voice-room-launch-status') {
+      try {
+        const [featureSnapshot, launchSnapshot] = await Promise.all([
+          dashboardDb.doc('appConfig/voiceRoomFeatures').get(),
+          dashboardDb.doc('appConfig/voiceRoomLaunch').get(),
+        ]);
+        response.json({
+          action: dashboardRequest.value.action,
+          ok: true,
+          readiness: summarizeLaunchReadiness(
+            featureSnapshot.exists ? featureSnapshot.data() : {},
+            { policy: launchSnapshot.exists ? launchSnapshot.data() : {} },
+          ),
+        });
+      } catch (error) {
+        console.error('Failed to resolve voice-room launch status:', error);
+        response.status(500).json({ error: 'Failed to resolve voice-room launch status.' });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'overview') {
       try {
-        const overview = await resolveAdminOverview(admin.firestore());
+        const overview = await resolveAdminOverview(dashboardDb, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1258,7 +3236,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'audit-events') {
       try {
-        const auditPage = await resolveAdminAuditEvents(admin.firestore(), request.body);
+        const auditPage = await resolveAdminAuditEvents(dashboardDb, request.body, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1274,7 +3252,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'audit-summary') {
       try {
-        response.json({ ok: true, action: dashboardRequest.value.action, summary: await resolveAdminAuditSummary(admin.firestore()) });
+        response.json({ ok: true, action: dashboardRequest.value.action, summary: await resolveAdminAuditSummary(dashboardDb, operatorScope) });
       } catch (error) {
         console.error('Failed to resolve audit summary:', error);
         response.status(500).json({ error: 'Failed to resolve audit summary.' });
@@ -1286,7 +3264,7 @@ exports.adminDashboard = onRequest(
       const lookup = normalizeAdminAuditLookup(request.body);
       if (!lookup.ok) { response.status(lookup.status).json({ error: lookup.error }); return; }
       try {
-        response.json({ ok: true, action: dashboardRequest.value.action, detail: await resolveAdminAuditDetail(admin.firestore(), lookup.value.eventId) });
+        response.json({ ok: true, action: dashboardRequest.value.action, detail: await resolveAdminAuditDetail(dashboardDb, lookup.value.eventId, operatorScope) });
       } catch (error) {
         const status = error?.status || 500;
         response.status(status).json({ error: status >= 500 ? 'Failed to resolve audit detail.' : error.message });
@@ -1296,7 +3274,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'audit-export') {
       try {
-        response.json({ ok: true, action: dashboardRequest.value.action, export: await resolveAdminAuditExport(admin.firestore(), request.body) });
+        response.json({ ok: true, action: dashboardRequest.value.action, export: await resolveAdminAuditExport(dashboardDb, request.body, operatorScope) });
       } catch (error) {
         console.error('Failed to export audit events:', error);
         response.status(500).json({ error: 'Failed to export audit events.' });
@@ -1368,9 +3346,36 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'room-gift-policy-update') {
+      const policyUpdate = normalizeRoomGiftPolicyUpdate(request.body);
+      if (!policyUpdate.ok) {
+        response.status(policyUpdate.status).json({ error: policyUpdate.error });
+        return;
+      }
+      try {
+        const result = await updateRoomGiftPolicy({
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: policyUpdate.value,
+        });
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          eventId: result.eventId,
+        });
+      } catch (error) {
+        const status = error?.status || 500;
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to update the room gift commission.' : error.message,
+        });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'users') {
       try {
-        const userPage = await resolveAdminUsers(admin.firestore(), request.body);
+        const userPage = await resolveAdminUsers(dashboardDb, request.body, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1386,7 +3391,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'user-summary') {
       try {
-        const summary = await resolveAdminUserSummary(admin.firestore());
+        const summary = await resolveAdminUserSummary(dashboardDb, operatorScope);
         response.json({ ok: true, action: dashboardRequest.value.action, summary });
       } catch (error) {
         console.error('Failed to resolve admin user summary:', error);
@@ -1399,7 +3404,12 @@ exports.adminDashboard = onRequest(
       const lookup = normalizeAdminUserLookup(request.body);
       if (!lookup.ok) { response.status(lookup.status).json({ error: lookup.error }); return; }
       try {
-        const detail = await resolveAdminUserDetail(admin.firestore(), admin.auth(), lookup.value.targetUid);
+        const detail = await resolveAdminUserDetail(dashboardDb, admin.auth(), lookup.value.targetUid);
+        const scopeCheck = assertUserInOperatorScope(operatorScope, detail.profile);
+        if (!scopeCheck.ok) {
+          response.status(scopeCheck.status).json({ error: scopeCheck.error, code: scopeCheck.code });
+          return;
+        }
         response.json({ ok: true, action: dashboardRequest.value.action, detail });
       } catch (error) {
         const status = error && Number.isInteger(error.status) ? error.status : 500;
@@ -1413,7 +3423,8 @@ exports.adminDashboard = onRequest(
       const historyQuery = normalizeAdminUserHistoryQuery(request.body);
       if (!historyQuery.ok) { response.status(historyQuery.status).json({ error: historyQuery.error }); return; }
       try {
-        const page = await resolveAdminUserHistoryPage(admin.firestore(), historyQuery.value);
+        await assertUserTargetAccess(dashboardDb, operatorScope, historyQuery.value.targetUid);
+        const page = await resolveAdminUserHistoryPage(dashboardDb, historyQuery.value);
         response.json({ ok: true, action: dashboardRequest.value.action, items: page.items, pageInfo: page.pageInfo, section: historyQuery.value.section });
       } catch (error) {
         const status = error && Number.isInteger(error.status) ? error.status : 500;
@@ -1427,7 +3438,7 @@ exports.adminDashboard = onRequest(
       const userAction = normalizeAdminUserAction(request.body);
       if (!userAction.ok) { response.status(userAction.status).json({ error: userAction.error }); return; }
       try {
-        const eventId = await executeAdminUserAction(admin.firestore(), admin.auth(), decodedToken, userAction.value);
+        const eventId = await executeAdminUserAction(dashboardDb, admin.auth(), decodedToken, userAction.value, operatorScope);
         response.json({ ok: true, action: dashboardRequest.value.action, eventId });
       } catch (error) {
         const status = error && Number.isInteger(error.status) ? error.status : 500;
@@ -1439,7 +3450,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'rooms') {
       try {
-        const roomPage = await resolveAdminRooms(admin.firestore(), request.body);
+        const roomPage = await resolveAdminRooms(dashboardDb, request.body, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1455,7 +3466,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'room-summary') {
       try {
-        const summary = await resolveAdminRoomSummary(admin.firestore());
+        const summary = await resolveAdminRoomSummary(dashboardDb, operatorScope);
         response.json({ ok: true, action: dashboardRequest.value.action, summary });
       } catch (error) {
         console.error('Failed to resolve admin room summary:', error);
@@ -1468,7 +3479,12 @@ exports.adminDashboard = onRequest(
       const lookup = normalizeAdminRoomLookup(request.body);
       if (!lookup.ok) { response.status(lookup.status).json({ error: lookup.error }); return; }
       try {
-        const detail = await resolveAdminRoomDetail(admin.firestore(), lookup.value.roomId);
+        const detail = await resolveAdminRoomDetail(dashboardDb, lookup.value.roomId);
+        const scopeCheck = assertRoomInOperatorScope(operatorScope, detail.room);
+        if (!scopeCheck.ok) {
+          response.status(scopeCheck.status).json({ error: scopeCheck.error, code: scopeCheck.code });
+          return;
+        }
         response.json({ ok: true, action: dashboardRequest.value.action, detail });
       } catch (error) {
         const status = error && Number.isInteger(error.status) ? error.status : 500;
@@ -1480,7 +3496,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'reports') {
       try {
-        const reportPage = await resolveAdminReports(admin.firestore(), request.body);
+        const reportPage = await resolveAdminReports(dashboardDb, request.body, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1496,7 +3512,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'report-summary') {
       try {
-        const summary = await resolveAdminReportSummary(admin.firestore());
+        const summary = await resolveAdminReportSummary(dashboardDb, operatorScope);
         response.json({ ok: true, action: dashboardRequest.value.action, summary });
       } catch (error) {
         console.error('Failed to resolve admin report summary:', error);
@@ -1512,7 +3528,7 @@ exports.adminDashboard = onRequest(
         return;
       }
       try {
-        const detail = await resolveAdminReportDetail(admin.firestore(), reportLookup.value.reportId);
+        const detail = await resolveAdminReportDetail(dashboardDb, reportLookup.value.reportId, operatorScope, decodedToken);
         response.json({ ok: true, action: dashboardRequest.value.action, detail });
       } catch (error) {
         const status = error && Number.isInteger(error.status) ? error.status : 500;
@@ -1524,7 +3540,7 @@ exports.adminDashboard = onRequest(
 
     if (dashboardRequest.value.action === 'administrators') {
       try {
-        const administrators = await resolveAdminAdministrators(admin.auth());
+        const administrators = await resolveAdminAdministrators(admin.auth(), admin.firestore());
         response.json({ ok: true, action: dashboardRequest.value.action, administrators });
       } catch (error) {
         console.error('Failed to resolve administrators:', error);
@@ -1642,6 +3658,433 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'cosmetic-assets') {
+      const query = normalizeAdminCosmeticsAssetQuery(request.body);
+      if (!query.ok) {
+        response.status(query.status).json({ error: query.error });
+        return;
+      }
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          registry: await getAdminCosmeticsAssets({
+            db: admin.firestore(),
+            input: query.value,
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to load cosmetics asset registry:', error);
+        response.status(500).json({ error: 'Failed to load cosmetics asset registry.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'cosmetic-assets-mutate') {
+      const mutation = normalizeAdminCosmeticsAssetMutation(request.body);
+      if (!mutation.ok) {
+        response.status(mutation.status).json({ error: mutation.error });
+        return;
+      }
+      try {
+        const result = await mutateAdminCosmeticsAsset({
+          bucket: admin.storage().bucket(),
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to mutate cosmetics asset:', error);
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to mutate cosmetics asset.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'room-theme') {
+      const lookup = normalizeAdminRoomThemeLookup(request.body);
+      if (!lookup.ok) {
+        response.status(lookup.status).json({ error: lookup.error });
+        return;
+      }
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          theme: await getAdminRoomTheme({ db: admin.firestore(), themeId: lookup.value.themeId }),
+        });
+      } catch (error) {
+        console.error('Failed to load room theme:', error);
+        response.status(500).json({ error: 'Failed to load room theme.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'room-theme-mutate') {
+      const mutation = normalizeAdminRoomThemeMutation(request.body);
+      if (!mutation.ok) {
+        response.status(mutation.status).json({ error: mutation.error });
+        return;
+      }
+      try {
+        const result = await mutateAdminRoomTheme({
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to mutate room theme:', error);
+        response.status(status).json({ error: status >= 500 ? 'Failed to mutate room theme.' : error.message });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'daily-login-campaign') {
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          dailyLoginCampaign: await getAdminDailyLoginCampaign({
+            clock: { nowMillis: () => Date.now() },
+            db: admin.firestore(),
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to load Daily Login campaign:', error);
+        response.status(500).json({ error: 'Failed to load Daily Login campaign.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'daily-login-campaign-mutate') {
+      const mutation = normalizeAdminDailyLoginMutation(request.body);
+      if (!mutation.ok) {
+        response.status(mutation.status).json({ error: mutation.error });
+        return;
+      }
+      try {
+        const result = await mutateAdminDailyLoginCampaign({
+          clock: {
+            nowMillis: () => Date.now(),
+            timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+          },
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to mutate Daily Login campaign:', error);
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to mutate Daily Login campaign.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'rocket-campaign') {
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          rocketCampaign: await getAdminRoomRocketCampaign({ db: admin.firestore() }),
+        });
+      } catch (error) {
+        console.error('Failed to load Rocket campaign:', error);
+        response.status(500).json({ error: 'Failed to load Rocket campaign.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'weekly-incentive-integrity') {
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          integrity: await getAdminWeeklyIncentiveIntegrity({
+            clock: { nowMillis: () => Date.now() },
+            db: admin.firestore(),
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to load weekly incentive integrity:', error);
+        response.status(500).json({ error: 'Failed to load incentive integrity.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'weekly-incentive-integrity-mutate') {
+      const mutation = normalizeAdminWeeklyIncentiveIntegrityMutation(request.body);
+      if (!mutation.ok) {
+        response.status(mutation.status).json({ error: mutation.error });
+        return;
+      }
+      try {
+        const result = await mutateAdminWeeklyIncentiveIntegrity({
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to review incentive integrity:', error);
+        response.status(status).json({ error: status >= 500 ? 'Failed to review incentive integrity.' : error.message });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'weekly-incentive-reconcile') {
+      const reconciliation = normalizeAdminWeeklyIncentiveReconciliation(request.body);
+      if (!reconciliation.ok) {
+        response.status(reconciliation.status).json({ error: reconciliation.error });
+        return;
+      }
+      try {
+        const result = await processWeeklyIncentiveReconciliationBatch({
+          ...reconciliation.value,
+          db: admin.firestore(),
+          documentIdField: admin.firestore.FieldPath.documentId(),
+          fieldValue: admin.firestore.FieldValue,
+        });
+        if (reconciliation.value.apply) {
+          await admin.firestore().doc(`adminAuditEvents/integrity_reconcile_${reconciliation.value.requestId}`).set({
+            action: 'weekly-incentive-reconcile-apply',
+            actorEmail: decodedToken.email || '',
+            actorRole: decodedToken.adminRole || '',
+            actorUid: decodedToken.uid,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            entityId: reconciliation.value.requestId,
+            entityType: 'system',
+            id: `integrity_reconcile_${reconciliation.value.requestId}`,
+            kind: 'weekly-incentive-integrity',
+            note: reconciliation.value.reason,
+            status: 'completed',
+            summary: result.summary,
+          }, { merge: false });
+        }
+        response.json({ ok: true, action: dashboardRequest.value.action, reconciliation: result });
+      } catch (error) {
+        console.error('Failed to reconcile weekly incentives:', error);
+        response.status(500).json({ error: 'Failed to reconcile weekly incentives.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'room-target-campaign') {
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          roomTargetCampaign: await getAdminRoomTargetCampaign({ db: admin.firestore() }),
+        });
+      } catch (error) {
+        console.error('Failed to load Room Target campaign:', error);
+        response.status(500).json({ error: 'Failed to load Room Target campaign.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'attendance-shadow') {
+      const targetUid = typeof request.body?.targetUid === 'string'
+        ? request.body.targetUid.trim()
+        : '';
+      if (!targetUid || targetUid.length > 128 || targetUid.includes('/')) {
+        response.status(400).json({ error: 'A valid targetUid is required.' });
+        return;
+      }
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          attendance: await getAttendanceShadowReport({
+            clock: {
+              nowMillis: () => Date.now(),
+              timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+            },
+            db: admin.firestore(),
+            uid: targetUid,
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to load attendance shadow report:', error);
+        response.status(500).json({ error: 'Failed to load attendance shadow report.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'payroll-overview') {
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          payroll: await getAdminPayroll({
+            clock: {
+              nowMillis: () => Date.now(),
+              timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+            },
+            db: admin.firestore(),
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to load payroll overview:', error);
+        response.status(500).json({ error: 'Failed to load payroll overview.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'payroll-mutate') {
+      const mutation = normalizePayrollAdminMutation(request.body);
+      if (!mutation.ok) {
+        response.status(400).json({ error: `Invalid payroll operation (${mutation.code}).` });
+        return;
+      }
+      try {
+        const result = await mutateAdminPayroll({
+          clock: {
+            nowMillis: () => Date.now(),
+            timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+          },
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        const conflicts = ['NEXT_CYCLE_REQUIRED', 'REVISION_CONFLICT', 'REQUEST_ID_CONFLICT'];
+        const missing = ['ENROLLMENT_NOT_FOUND', 'PLAN_NOT_FOUND', 'PROFILE_NOT_FOUND'];
+        if (result.errorCode) {
+          response.status(conflicts.includes(result.errorCode) ? 409 : missing.includes(result.errorCode) ? 404 : 400)
+            .json({ code: result.errorCode, error: result.errorCode });
+          return;
+        }
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        console.error('Failed to mutate payroll:', error);
+        response.status(500).json({ error: 'Failed to update payroll.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'attendance-outage-mutate') {
+      const mutation = normalizeAttendanceOutageMutation(request.body);
+      if (!mutation.ok) {
+        response.status(400).json({ error: 'A valid outage window and audit reason are required.' });
+        return;
+      }
+      try {
+        const result = await mutateAttendanceOutageWindow({
+          clock: {
+            nowMillis: () => Date.now(),
+            timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+          },
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        if (result.errorCode === 'OUTAGE_NOT_FOUND') {
+          response.status(404).json({ error: 'Attendance outage window was not found.' });
+          return;
+        }
+        if (result.errorCode) throw new Error(result.errorCode);
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        console.error('Failed to mutate attendance outage window:', error);
+        response.status(500).json({ error: 'Failed to update attendance outage window.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'rocket-campaign-mutate') {
+      const mutation = normalizeAdminRoomRocketMutation(request.body);
+      if (!mutation.ok) {
+        response.status(mutation.status).json({ error: mutation.error });
+        return;
+      }
+      try {
+        const result = await mutateAdminRoomRocketCampaign({
+          clock: {
+            nowMillis: () => Date.now(),
+            timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+          },
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to mutate Rocket campaign:', error);
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to mutate Rocket campaign.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'room-target-campaign-mutate') {
+      const mutation = normalizeAdminRoomTargetMutation(request.body);
+      if (!mutation.ok) {
+        response.status(mutation.status).json({ error: mutation.error });
+        return;
+      }
+      try {
+        const result = await mutateAdminRoomTargetCampaign({
+          clock: {
+            nowMillis: () => Date.now(),
+            timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+          },
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to mutate Room Target campaign:', error);
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to mutate Room Target campaign.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'room-target-member-hold') {
+      const mutation = normalizeAdminRoomTargetMemberHold(request.body);
+      if (!mutation.ok) {
+        response.status(mutation.status).json({ error: mutation.error });
+        return;
+      }
+      try {
+        const result = await mutateAdminRoomTargetMemberHold({
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: mutation.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to update Room Target member hold:', error);
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to update Room Target member hold.' : error.message,
+        });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'report-action') {
       const reportAction = normalizeAdminReportAction(request.body);
 
@@ -1651,7 +4094,7 @@ exports.adminDashboard = onRequest(
       }
 
       try {
-        const eventId = await executeAdminReportAction(admin.firestore(), decodedToken, reportAction.value);
+        const eventId = await executeAdminReportAction(dashboardDb, decodedToken, reportAction.value, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1680,7 +4123,7 @@ exports.adminDashboard = onRequest(
       }
 
       try {
-        const eventId = await executeAdminRoomAction(admin.firestore(), decodedToken, roomAction.value);
+        const eventId = await executeAdminRoomAction(dashboardDb, decodedToken, roomAction.value, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1695,6 +4138,7 @@ exports.adminDashboard = onRequest(
 
         response.status(status).json({
           error: status >= 500 ? 'Failed to execute admin room action.' : error.message,
+          ...(error && error.code ? { code: error.code } : {}),
         });
       }
       return;
@@ -1709,7 +4153,8 @@ exports.adminDashboard = onRequest(
       }
 
       try {
-        const noteId = await createAdminUserNote(admin.firestore(), decodedToken, note.value);
+        await assertUserTargetAccess(dashboardDb, operatorScope, note.value.targetUid);
+        const noteId = await createAdminUserNote(dashboardDb, decodedToken, note.value, operatorScope);
         response.json({
           ok: true,
           action: dashboardRequest.value.action,
@@ -1726,7 +4171,8 @@ exports.adminDashboard = onRequest(
       const dissolution = normalizeAdminCoupleDissolve(request.body);
       if (!dissolution.ok) { response.status(dissolution.status).json({ error: dissolution.error }); return; }
       try {
-        const eventId = await executeAdminCoupleDissolve(admin.firestore(), decodedToken, dissolution.value);
+        await assertUserTargetAccess(dashboardDb, operatorScope, dissolution.value.targetUid);
+        const eventId = await executeAdminCoupleDissolve(dashboardDb, decodedToken, dissolution.value, operatorScope);
         response.json({ ok: true, action: dashboardRequest.value.action, eventId });
       } catch (error) {
         response.status(error?.status || 500).json({ error: error?.message || 'Failed to dissolve couple.' });
@@ -1776,6 +4222,64 @@ exports.adminDashboard = onRequest(
         response.json({ ok: true, action: dashboardRequest.value.action, eventId });
       } catch (error) {
         response.status(error?.status || 500).json({ error: error?.message || 'Failed to update representative permissions.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'representative-operations') {
+      const query = normalizeRepresentativeOperationsQuery(request.body);
+      if (!query.ok) { response.status(400).json({ error: query.error }); return; }
+      try {
+        const operations = await resolveRepresentativeOperations({
+          db: admin.firestore(),
+          publicReference: query.value.publicReference,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, operations });
+      } catch (error) {
+        console.error('[functions.adminDashboard] representative-operations:error', error);
+        response.status(500).json({ error: 'Failed to load representative operations.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'representative-policy-update') {
+      const policy = normalizeAdminRepresentativePolicyInput(request.body);
+      if (!policy.ok) { response.status(400).json({ error: policy.error }); return; }
+      try {
+        const eventId = await executeRepresentativePolicyUpdate({
+          db: admin.firestore(), decodedToken, fieldValue: admin.firestore.FieldValue, input: policy.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, eventId });
+      } catch (error) {
+        response.status(error?.status || 500).json({ error: error?.message || 'Failed to update representative policy.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'representative-override-update') {
+      const override = normalizeAdminRepresentativeOverrideInput(request.body);
+      if (!override.ok) { response.status(400).json({ error: override.error }); return; }
+      try {
+        const eventId = await executeRepresentativeOverrideUpdate({
+          db: admin.firestore(), decodedToken, fieldValue: admin.firestore.FieldValue, input: override.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, eventId });
+      } catch (error) {
+        response.status(error?.status || 500).json({ error: error?.message || 'Failed to update representative limits.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'representative-pin-reset') {
+      const pinReset = normalizeAdminRepresentativePinResetInput(request.body);
+      if (!pinReset.ok) { response.status(400).json({ error: pinReset.error }); return; }
+      try {
+        const eventId = await executeRepresentativePinReset({
+          db: admin.firestore(), decodedToken, fieldValue: admin.firestore.FieldValue, input: pinReset.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, eventId });
+      } catch (error) {
+        response.status(error?.status || 500).json({ error: error?.message || 'Failed to require a representative PIN reset.' });
       }
       return;
     }
@@ -1860,13 +4364,20 @@ exports.adminDashboard = onRequest(
   },
 );
 
-async function executeAdminCoupleDissolve(db, decodedToken, input) {
+async function executeAdminCoupleDissolve(
+  db,
+  decodedToken,
+  input,
+  scope = { ok: true, regionCodes: null },
+) {
   return db.runTransaction(async (transaction) => {
     const auditRef = db.doc(`adminAuditEvents/couple_${input.requestId}`);
     const membershipRef = db.doc(`coupleMemberships/${input.targetUid}`);
-    const [auditSnapshot, membershipSnapshot] = await Promise.all([
+    const targetProfileRef = db.doc(`publicProfiles/${input.targetUid}`);
+    const [auditSnapshot, membershipSnapshot, targetProfileSnapshot] = await Promise.all([
       transaction.get(auditRef),
       transaction.get(membershipRef),
+      transaction.get(targetProfileRef),
     ]);
 
     if (auditSnapshot.exists) {
@@ -1913,13 +4424,19 @@ async function executeAdminCoupleDissolve(db, decodedToken, input) {
 
     transaction.create(auditRef, {
       action: 'couple-dissolve',
+      actorRegionCodes: scope.regionCodes || [],
+      actorRole: resolveAdminRole(decodedToken),
       actorEmail: decodedToken.email || '',
       actorUid: decodedToken.uid,
+      after: { coupleId: '', partnerUid: '' },
+      before: { coupleId, partnerUid },
       coupleId,
+      countryCode: String(targetProfileSnapshot.data()?.countryCode || '').trim().toUpperCase(),
       createdAt: timestamp,
       kind: 'moderation',
       partnerUid,
       reason: input.reason,
+      requestId: input.requestId,
       status: coupleId ? 'completed' : 'no-op',
       targetUid: input.targetUid,
     });
@@ -1972,9 +4489,26 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
   return db.runTransaction(async (transaction) => {
     const catalogRef = db.doc(`giftCatalog/${input.giftId}`);
     const auditRef = db.doc(`adminAuditEvents/gift_${input.requestId}`);
-    const [catalogSnapshot, auditSnapshot] = await Promise.all([
+    const presentationReferences = input.presentation.animationEnabled
+      ? [
+        ['visual', input.presentation.visualAsset],
+        ['fallback', input.presentation.fallbackAsset],
+        ...(input.presentation.audioAsset ? [['audio', input.presentation.audioAsset]] : []),
+      ]
+      : [];
+    const presentationRefs = presentationReferences.flatMap(([, reference]) => [
+      db.doc(`cosmeticAssets/${reference.assetId}`),
+      db.doc(`cosmeticAssets/${reference.assetId}/versions/${reference.assetVersionId}`),
+      db.doc(`cosmeticAssetApprovals/${reference.assetId}__${reference.assetVersionId}`),
+    ]);
+    const physicalReceiptRef = input.presentation.animationEnabled
+      ? db.doc(`giftPresentationApprovalReceipts/${input.presentation.physicalApprovalReceiptId}`)
+      : null;
+    const [catalogSnapshot, auditSnapshot, ...presentationSnapshots] = await Promise.all([
       transaction.get(catalogRef),
       transaction.get(auditRef),
+      ...presentationRefs.map((reference) => transaction.get(reference)),
+      ...(physicalReceiptRef ? [transaction.get(physicalReceiptRef)] : []),
     ]);
     if (auditSnapshot.exists) {
       const previous = auditSnapshot.data();
@@ -1987,6 +4521,61 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
       throw Object.assign(new Error('Gift changed after it was opened. Refresh before saving.'), { status: 409 });
     }
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
+    if (input.presentation.animationEnabled) {
+      const records = {};
+      let offset = 0;
+      for (const [key] of presentationReferences) {
+        const [summary, version, approval] = presentationSnapshots.slice(offset, offset + 3);
+        records[key] = {
+          approval: approval?.exists ? approval.data() : undefined,
+          summary: summary?.exists ? summary.data() : undefined,
+          version: version?.exists ? version.data() : undefined,
+        };
+        offset += 3;
+      }
+      const existingReceipt = presentationSnapshots[offset];
+      if (!existingReceipt?.exists && !input.physicalApproval) {
+        throw Object.assign(new Error('A new Android and iOS physical approval receipt is required.'), { status: 409 });
+      }
+      const proposedReceipt = existingReceipt?.exists ? existingReceipt.data() : {
+        androidPassed: true,
+        androidDevice: input.physicalApproval.androidDevice,
+        audioAssetId: input.presentation.audioAsset?.assetId || '',
+        audioAssetVersionId: input.presentation.audioAsset?.assetVersionId || '',
+        audioChecksum: records.audio?.version?.sha256 || '',
+        createdAt: timestamp,
+        durationMs: input.presentation.durationMs,
+        fallbackAssetId: input.presentation.fallbackAsset.assetId,
+        fallbackAssetVersionId: input.presentation.fallbackAsset.assetVersionId,
+        fallbackChecksum: records.fallback?.version?.sha256 || '',
+        giftId: input.giftId,
+        id: input.presentation.physicalApprovalReceiptId,
+        hapticPolicy: input.presentation.hapticPolicy,
+        iosPassed: true,
+        iosDevice: input.physicalApproval.iosDevice,
+        notes: input.physicalApproval.notes,
+        minimumClientVersion: input.presentation.minimumClientVersion,
+        performanceTier: input.presentation.performanceTier,
+        reviewerEmail: decodedToken.email || '',
+        reviewerUid: decodedToken.uid,
+        status: 'passed',
+        soundPolicy: input.presentation.soundPolicy,
+        testedClientVersion: input.physicalApproval.testedClientVersion,
+        tier: input.presentation.tier,
+        visualAssetId: input.presentation.visualAsset.assetId,
+        visualAssetVersionId: input.presentation.visualAsset.assetVersionId,
+        visualChecksum: records.visual?.version?.sha256 || '',
+      };
+      records.physicalReceipt = proposedReceipt;
+      const inspected = inspectApprovedGiftPresentation({
+        presentation: input.presentation,
+        records,
+      });
+      if (!inspected.ok) {
+        throw Object.assign(new Error(`Gift presentation approval failed: ${inspected.code}.`), { status: 409 });
+      }
+      if (!existingReceipt?.exists) transaction.create(physicalReceiptRef, proposedReceipt);
+    }
     transaction.set(catalogRef, {
       createdAt: catalogSnapshot.exists && isTimestampLike(catalogSnapshot.data().createdAt)
         ? catalogSnapshot.data().createdAt
@@ -1997,6 +4586,7 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
       lastEditorUid: decodedToken.uid,
       nameAr: input.nameAr,
       price: input.price,
+      presentation: input.presentation,
       scoreValue: input.scoreValue,
       status: input.status,
       updatedAt: timestamp,
@@ -2009,6 +4599,8 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
       giftId: input.giftId,
       kind: 'economy',
       price: input.price,
+      presentation: input.presentation,
+      physicalApprovalReceiptId: input.presentation.physicalApprovalReceiptId || '',
       reason: input.reason,
       scoreValue: input.scoreValue,
       status: input.status,
@@ -2017,7 +4609,26 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
   });
 }
 
-async function resolveAdminOverview(db) {
+async function resolveAdminOverview(db, scope = { ok: true, regionCodes: null }) {
+  if (scope.regionCodes) {
+    const [users, rooms, moderationEvents, reports, auditEvents] = await Promise.all([
+      db.collection('publicProfiles').where('countryCode', 'in', scope.regionCodes).limit(1000).get(),
+      db.collection('rooms').where('countryCode', 'in', scope.regionCodes).limit(1000).get(),
+      db.collectionGroup('moderationEvents').where('regionCode', 'in', scope.regionCodes).limit(1000).get(),
+      db.collection('reports').where('countryCode', 'in', scope.regionCodes).limit(1000).get(),
+      db.collection('adminAuditEvents').where('countryCode', 'in', scope.regionCodes).limit(1000).get(),
+    ]);
+    const roomRows = rooms.docs.map((doc) => doc.data());
+    return createAdminOverviewPayload({
+      activeRooms: roomRows.filter((room) => room.status === 'active').length,
+      adminAuditEvents: auditEvents.size,
+      gameRooms: roomRows.filter((room) => room.type === 'game').length,
+      moderationEvents: moderationEvents.size,
+      privateRooms: roomRows.filter((room) => room.visibility === 'private').length,
+      reports: reports.size,
+      users: users.size,
+    });
+  }
   const [
     usersSnapshot,
     activeRoomsSnapshot,
@@ -2047,7 +4658,7 @@ async function resolveAdminOverview(db) {
   });
 }
 
-async function resolveAdminUsers(db, body) {
+async function resolveAdminUsers(db, body, scope = { ok: true, regionCodes: null }) {
   const query = normalizeAdminUsersQuery(body);
   const privateProfiles = new Map();
   const publicProfiles = new Map();
@@ -2156,19 +4767,22 @@ async function resolveAdminUsers(db, body) {
     snapshots.filter((snapshot) => snapshot.exists).forEach((snapshot) => wallets.set(snapshot.id, snapshot.data()));
   }
 
-  const rows = [...privateProfiles.entries()]
-    .map(([uid, profile]) => {
-      const publicProfile = publicProfiles.get(uid);
-      return mapAdminUserProfileDocument(
-        uid,
-        profile,
-        publicProfile,
-        reservations.get(publicProfile?.publicId),
-        notificationPreferences.get(uid),
-        wallets.get(uid),
-      );
-    })
-    .filter(Boolean);
+  const rows = filterRowsByOperatorScope(
+    [...privateProfiles.entries()]
+      .map(([uid, profile]) => {
+        const publicProfile = publicProfiles.get(uid);
+        return mapAdminUserProfileDocument(
+          uid,
+          profile,
+          publicProfile,
+          reservations.get(publicProfile?.publicId),
+          notificationPreferences.get(uid),
+          wallets.get(uid),
+        );
+      })
+      .filter(Boolean),
+    scope,
+  );
 
   const items = filterAdminUserRows(rows, query).slice(0, query.limit);
   return {
@@ -2211,7 +4825,21 @@ function addAdminSearchSnapshot(snapshot, discoveredUids, privateProfiles, publi
   });
 }
 
-async function resolveAdminUserSummary(db) {
+async function resolveAdminUserSummary(db, scope = { ok: true, regionCodes: null }) {
+  if (scope.regionCodes) {
+    const snapshot = await db.collection('publicProfiles')
+      .where('countryCode', 'in', scope.regionCodes)
+      .limit(1000)
+      .get();
+    const profiles = snapshot.docs.map((doc) => doc.data());
+    return {
+      active: profiles.filter((profile) => profile.moderationStatus === 'active').length,
+      pendingAvatars: profiles.filter((profile) => profile.avatarModerationStatus === 'pending').length,
+      removed: profiles.filter((profile) => profile.moderationStatus === 'removed').length,
+      suspended: profiles.filter((profile) => profile.moderationStatus === 'suspended').length,
+      total: profiles.length,
+    };
+  }
   const [total, active, suspended, removed, pendingAvatars] = await Promise.all([
     getCollectionCount(db.collection('users')),
     getCollectionCount(db.collection('publicProfiles').where('moderationStatus', '==', 'active')),
@@ -2239,9 +4867,10 @@ async function resolveAdminUserDetail(db, auth, targetUid) {
     publicProfile: db.doc(`publicProfiles/${targetUid}`),
     restrictions: db.doc(`adminUserRestrictions/${targetUid}`),
     representative: db.doc(`representativePrivileges/${targetUid}`),
+    representativePin: db.doc(`representativeTransferPins/${targetUid}`),
     wallet: db.doc(`walletSummaries/${targetUid}`),
   };
-  const [privateSnapshot, publicSnapshot, walletSnapshot, coupleSnapshot, restrictionsSnapshot, preferencesSnapshot, representativeSnapshot, authUser, notesSnapshot, auditSnapshot, walletEventsSnapshot, devicesSnapshot, context] = await Promise.all([
+  const [privateSnapshot, publicSnapshot, walletSnapshot, coupleSnapshot, restrictionsSnapshot, preferencesSnapshot, representativeSnapshot, pinSnapshot, authUser, notesSnapshot, auditSnapshot, walletEventsSnapshot, devicesSnapshot, context] = await Promise.all([
     refs.privateProfile.get(),
     refs.publicProfile.get(),
     refs.wallet.get(),
@@ -2249,6 +4878,7 @@ async function resolveAdminUserDetail(db, auth, targetUid) {
     refs.restrictions.get(),
     refs.preferences.get(),
     refs.representative.get(),
+    refs.representativePin.get(),
     auth.getUser(targetUid),
     safeDetailQuery('notes', db.collection('adminUserNotes').where('targetUid', '==', targetUid).orderBy('createdAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeDetailQuery('activity', db.collection('adminAuditEvents').where('targetUid', '==', targetUid).orderBy('createdAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
@@ -2299,7 +4929,17 @@ async function resolveAdminUserDetail(db, auth, targetUid) {
       return { actorEmail: typeof data.actorEmail === 'string' ? data.actorEmail : '', actorUid: typeof data.actorUid === 'string' ? data.actorUid : '', createdAt: readAdminTimestampIso(data.createdAt), id: doc.id, note: typeof data.note === 'string' ? data.note : '' };
     }),
     profile,
-    representative: { active: representativeSnapshot.data()?.active === true, currencies: { coins: representativeSnapshot.data()?.currencies?.coins === true, diamonds: representativeSnapshot.data()?.currencies?.diamonds === true }, updatedAt: readAdminTimestampIso(representativeSnapshot.data()?.updatedAt) },
+    representative: {
+      active: representativeSnapshot.data()?.active === true,
+      currencies: { coins: representativeSnapshot.data()?.currencies?.coins === true, diamonds: representativeSnapshot.data()?.currencies?.diamonds === true },
+      limits: mapRepresentativeOverrideLimits(representativeSnapshot.data()?.limits),
+      pin: {
+        configured: pinSnapshot.exists,
+        resetRequired: pinSnapshot.data()?.resetRequired === true,
+        updatedAt: pinSnapshot.exists ? readAdminTimestampIso(pinSnapshot.data()?.updatedAt) || 'missing' : 'missing',
+      },
+      updatedAt: representativeSnapshot.exists ? readAdminTimestampIso(representativeSnapshot.data()?.updatedAt) || 'missing' : 'missing',
+    },
     restrictions: {
       mutedUntil: readAdminTimestampIso(restrictions.mutedUntil),
       reason: typeof restrictions.reason === 'string' ? restrictions.reason : '',
@@ -2523,18 +5163,44 @@ function chunkValues(values, size) {
   return chunks;
 }
 
-async function executeAdminUserAction(db, auth, decodedToken, action) {
+async function assertUserTargetAccess(db, scope, targetUid) {
+  if (!scope.regionCodes) return;
+  const profileSnapshot = await db.doc(`publicProfiles/${targetUid}`).get();
+  const scopeCheck = assertUserInOperatorScope(
+    scope,
+    profileSnapshot.exists ? profileSnapshot.data() : undefined,
+  );
+  if (!scopeCheck.ok) {
+    throw Object.assign(new Error(scopeCheck.error), {
+      code: scopeCheck.code,
+      status: scopeCheck.status,
+    });
+  }
+}
+
+async function executeAdminUserAction(db, auth, decodedToken, action, scope = { ok: true, regionCodes: null }) {
+  if (['ban', 'force-sign-out', 'suspend', 'unban', 'unsuspend'].includes(action.action)) {
+    const freshness = assertFreshAdminAuth(decodedToken);
+    if (!freshness.ok) {
+      throw Object.assign(new Error(freshness.error), {
+        code: freshness.code,
+        status: freshness.status,
+      });
+    }
+  }
   const eventId = await db.runTransaction(async (transaction) => {
     const auditRef = db.doc(`adminAuditEvents/user_${action.requestId}`);
     const userRef = db.doc(`users/${action.targetUid}`);
     const profileRef = db.doc(`publicProfiles/${action.targetUid}`);
     const restrictionRef = db.doc(`adminUserRestrictions/${action.targetUid}`);
     const noteRef = db.doc(`adminUserNotes/${action.requestId}`);
-    const [auditSnapshot, userSnapshot, profileSnapshot, restrictionSnapshot] = await Promise.all([
+    const targetOperatorRef = db.doc(`adminProfiles/${action.targetUid}`);
+    const [auditSnapshot, userSnapshot, profileSnapshot, restrictionSnapshot, targetOperatorSnapshot] = await Promise.all([
       transaction.get(auditRef),
       transaction.get(userRef),
       transaction.get(profileRef),
       transaction.get(restrictionRef),
+      transaction.get(targetOperatorRef),
     ]);
     if (auditSnapshot.exists) {
       const previous = auditSnapshot.data();
@@ -2545,6 +5211,20 @@ async function executeAdminUserAction(db, auth, decodedToken, action) {
     const profileRequiredActions = ['avatar-approve', 'avatar-reject', 'ban', 'mute', 'suspend', 'unban', 'unmute', 'unsuspend'];
     if (!profileSnapshot.exists && profileRequiredActions.includes(action.action)) throw createHttpError(409, 'Target public profile is missing and must be repaired before this action.');
     const profile = profileSnapshot.exists ? profileSnapshot.data() : {};
+    const scopeCheck = assertUserInOperatorScope(scope, profile);
+    if (!scopeCheck.ok) {
+      throw Object.assign(createHttpError(scopeCheck.status, scopeCheck.error), { code: scopeCheck.code });
+    }
+    const hierarchyCheck = assertAdminTargetHierarchy(
+      resolveAdminRole(decodedToken),
+      targetOperatorSnapshot.exists ? targetOperatorSnapshot.data() : undefined,
+      action.targetUid,
+    );
+    if (!hierarchyCheck.ok) {
+      throw Object.assign(createHttpError(hierarchyCheck.status, hierarchyCheck.error), {
+        code: hierarchyCheck.code,
+      });
+    }
     const currentUpdatedAt = readAdminTimestampIso(profile.updatedAt);
     if (action.expectedUpdatedAt && action.expectedUpdatedAt !== currentUpdatedAt) throw createHttpError(409, 'This user changed since the profile was opened. Refresh before continuing.');
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
@@ -2597,12 +5277,30 @@ async function executeAdminUserAction(db, auth, decodedToken, action) {
     }
     transaction.create(auditRef, {
       action: `user-${action.action}`,
+      actorRegionCodes: scope.regionCodes || [],
+      actorRole: resolveAdminRole(decodedToken),
       actorEmail: decodedToken.email || '',
       actorUid: decodedToken.uid,
+      after: {
+        avatarModerationStatus: update.avatarModerationStatus ?? profile.avatarModerationStatus ?? '',
+        moderationStatus: update.moderationStatus ?? profile.moderationStatus ?? '',
+        muted: action.action === 'mute'
+          ? true
+          : action.action === 'unmute'
+            ? false
+            : Boolean(restrictionSnapshot.data()?.mutedUntil),
+      },
+      before: {
+        avatarModerationStatus: profile.avatarModerationStatus || '',
+        moderationStatus: profile.moderationStatus || '',
+        muted: Boolean(restrictionSnapshot.data()?.mutedUntil),
+      },
+      countryCode: typeof profile.countryCode === 'string' ? profile.countryCode.trim().toUpperCase() : '',
       createdAt: timestamp,
       durationHours: action.durationHours,
       kind: 'user-moderation',
       note: action.reason,
+      requestId: action.requestId,
       status: update.moderationStatus || profile.moderationStatus || '',
       targetUid: action.targetUid,
     });
@@ -2630,7 +5328,53 @@ function readAdminAmount(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
-async function resolveAdminAuditEvents(db, body) {
+async function filterOperationalRowsByScope(db, rows, scope) {
+  if (!scope.regionCodes) return rows;
+  const roomIds = [...new Set(rows.map((row) => row.roomId).filter(Boolean))];
+  const targetUids = [...new Set(rows
+    .filter((row) => !row.roomId)
+    .map((row) => row.targetUid || row.reporterUid)
+    .filter(Boolean))];
+  const [roomSnapshots, profileSnapshots] = await Promise.all([
+    roomIds.length ? db.getAll(...roomIds.map((roomId) => db.doc(`rooms/${roomId}`))) : [],
+    targetUids.length ? db.getAll(...targetUids.map((uid) => db.doc(`publicProfiles/${uid}`))) : [],
+  ]);
+  const roomCountries = new Map(roomSnapshots
+    .filter((snapshot) => snapshot.exists)
+    .map((snapshot) => [snapshot.id, String(snapshot.data()?.countryCode || '').trim().toUpperCase()]));
+  const userCountries = new Map(profileSnapshots
+    .filter((snapshot) => snapshot.exists)
+    .map((snapshot) => [snapshot.id, String(snapshot.data()?.countryCode || '').trim().toUpperCase()]));
+  return rows.filter((row) => {
+    const countryCode = String(
+      roomCountries.get(row.roomId)
+      || userCountries.get(row.targetUid || row.reporterUid)
+      || row.countryCode
+      || '',
+    ).trim().toUpperCase();
+    return scope.regionCodes.includes(countryCode);
+  }).map((row) => ({
+    ...row,
+    countryCode: String(
+      roomCountries.get(row.roomId)
+      || userCountries.get(row.targetUid || row.reporterUid)
+      || row.countryCode
+      || '',
+    ).trim().toUpperCase(),
+  }));
+}
+
+async function assertReportInOperatorScope(db, scope, report) {
+  const rows = await filterOperationalRowsByScope(db, [report], scope);
+  if (rows.length === 0) {
+    throw Object.assign(createHttpError(403, 'This report is outside the operator region scope.'), {
+      code: 'REGION_SCOPE_DENIED',
+    });
+  }
+  return rows[0];
+}
+
+async function resolveAdminAuditEvents(db, body, scope = { ok: true, regionCodes: null }) {
   const normalized = normalizeAdminAuditQuery(body);
   const identityUids = normalized.search ? await resolveAdminIdentityUids(db, normalized.search, 20) : [];
   const query = { ...normalized, identityUids };
@@ -2638,12 +5382,13 @@ async function resolveAdminAuditEvents(db, body) {
   const cursor = decodeAdminAuditCursor(query.cursor);
   if (cursor) auditQuery = auditQuery.startAfter(admin.firestore.Timestamp.fromDate(new Date(cursor.createdAt)), cursor.id);
   const snapshot = await auditQuery.limit(query.readLimit).get();
-  const rows = snapshot.docs
+  const mappedRows = snapshot.docs
     .map((doc) => mapAdminAuditEventDocument(doc.id, doc.data()))
     .filter(Boolean);
+  const rows = await filterOperationalRowsByScope(db, mappedRows, scope);
   const items = filterAdminAuditEventRows(rows, query).slice(0, query.limit);
   const hasNextPage = snapshot.size === query.readLimit;
-  const cursorRow = items.at(-1) || rows.at(-1);
+  const cursorRow = mappedRows.at(-1);
   return {
     items,
     pageInfo: {
@@ -2670,12 +5415,16 @@ function decodeAdminAuditCursor(value) {
   }
 }
 
-async function resolveAdminAuditSummary(db) {
+async function resolveAdminAuditSummary(db, scope = { ok: true, regionCodes: null }) {
   const [total, recentSnapshot] = await Promise.all([
     getCollectionCount(db.collection('adminAuditEvents')),
     db.collection('adminAuditEvents').orderBy('createdAt', 'desc').limit(500).get(),
   ]);
-  const rows = recentSnapshot.docs.map((doc) => mapAdminAuditEventDocument(doc.id, doc.data())).filter(Boolean);
+  const rows = await filterOperationalRowsByScope(
+    db,
+    recentSnapshot.docs.map((doc) => mapAdminAuditEventDocument(doc.id, doc.data())).filter(Boolean),
+    scope,
+  );
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const todayIso = today.toISOString();
   return {
@@ -2685,16 +5434,21 @@ async function resolveAdminAuditSummary(db) {
     retentionDays: 365,
     security: rows.filter((row) => /ban|suspend|mute|sign-out|security/.test(`${row.action} ${row.kind}`.toLowerCase())).length,
     today: rows.filter((row) => row.createdAt >= todayIso).length,
-    total,
+    total: scope.regionCodes ? rows.length : total,
   };
 }
 
-async function resolveAdminAuditDetail(db, eventId) {
+async function resolveAdminAuditDetail(db, eventId, scope = { ok: true, regionCodes: null }) {
   const snapshot = await db.collection('adminAuditEvents').doc(eventId).get();
   if (!snapshot.exists) throw createHttpError(404, 'Audit event was not found.');
   const data = snapshot.data() || {};
   const event = mapAdminAuditEventDocument(snapshot.id, data);
   if (!event) throw createHttpError(404, 'Audit event was not found.');
+  if ((await filterOperationalRowsByScope(db, [event], scope)).length === 0) {
+    throw Object.assign(createHttpError(403, 'This audit event is outside the operator region scope.'), {
+      code: 'REGION_SCOPE_DENIED',
+    });
+  }
   const before = sanitizeAdminAuditValue(data.before || data.previous || {});
   let after = sanitizeAdminAuditValue(data.after || data.next || {});
   if (!after || Object.keys(after).length === 0) {
@@ -2731,12 +5485,17 @@ function sanitizeAdminAuditValue(value, depth = 0) {
   return Object.fromEntries(entries);
 }
 
-async function resolveAdminAuditExport(db, body) {
+async function resolveAdminAuditExport(db, body, scope = { ok: true, regionCodes: null }) {
   const normalized = normalizeAdminAuditQuery(body);
   const identityUids = normalized.search ? await resolveAdminIdentityUids(db, normalized.search, 20) : [];
   const query = { ...normalized, identityUids };
   const snapshot = await db.collection('adminAuditEvents').orderBy('createdAt', 'desc').limit(1000).get();
-  const rows = filterAdminAuditEventRows(snapshot.docs.map((doc) => mapAdminAuditEventDocument(doc.id, doc.data())).filter(Boolean), query).slice(0, 1000);
+  const scopedRows = await filterOperationalRowsByScope(
+    db,
+    snapshot.docs.map((doc) => mapAdminAuditEventDocument(doc.id, doc.data())).filter(Boolean),
+    scope,
+  );
+  const rows = filterAdminAuditEventRows(scopedRows, query).slice(0, 1000);
   const headers = ['timestamp', 'administrator', 'administrator_email', 'action', 'entity_type', 'entity_id', 'target', 'status', 'source', 'event_id', 'note'];
   const csvRows = rows.map((row) => [row.createdAt, row.actorUid, row.actorEmail, row.action, row.entityType, row.entityId, row.targetUid, row.status, row.source, row.id, row.note]);
   const csv = [headers, ...csvRows].map((row) => row.map(escapeAdminCsvCell).join(',')).join('\r\n');
@@ -2987,7 +5746,7 @@ async function resolveAdminEconomyTargetUid(db, search) {
   return publicId.docs[0]?.id || specialId.docs[0]?.id || search;
 }
 
-async function resolveAdminRooms(db, body) {
+async function resolveAdminRooms(db, body, scope = { ok: true, regionCodes: null }) {
   const query = normalizeAdminRoomsQuery(body);
   let roomsQuery = db
     .collection('rooms')
@@ -3004,13 +5763,14 @@ async function resolveAdminRooms(db, body) {
     const roomId = typeof doc.data()?.roomId === 'string' ? doc.data().roomId : '';
     if (roomId) reportCounts.set(roomId, (reportCounts.get(roomId) || 0) + 1);
   });
-  const rows = snapshot.docs
+  const mappedRooms = snapshot.docs
     .map((doc) => mapAdminRoomDocument(doc.id, doc.data()))
     .filter(Boolean)
     .map((room) => ({ ...room, openReportCount: reportCounts.get(room.id) || 0 }));
+  const rows = filterRowsByOperatorScope(mappedRooms, scope);
   const items = filterAdminRoomRows(rows, query).slice(0, query.limit);
   const scannedAllAvailableRows = snapshot.size < query.readLimit;
-  const lastScannedRow = rows.at(-1) || null;
+  const lastScannedRow = mappedRooms.at(-1) || null;
 
   return {
     items,
@@ -3038,12 +5798,15 @@ function decodeAdminRoomCursor(value) {
   }
 }
 
-async function resolveAdminRoomSummary(db) {
+async function resolveAdminRoomSummary(db, scope = { ok: true, regionCodes: null }) {
   const [roomsSnapshot, activeReportsSnapshot] = await Promise.all([
     db.collection('rooms').limit(500).get(),
     db.collection('reports').where('status', 'in', ['open', 'triage']).limit(500).get(),
   ]);
-  const rooms = roomsSnapshot.docs.map((doc) => mapAdminRoomDocument(doc.id, doc.data())).filter(Boolean);
+  const rooms = filterRowsByOperatorScope(
+    roomsSnapshot.docs.map((doc) => mapAdminRoomDocument(doc.id, doc.data())).filter(Boolean),
+    scope,
+  );
   const flaggedRoomIds = new Set(activeReportsSnapshot.docs.map((doc) => doc.data()?.roomId).filter((value) => typeof value === 'string' && value));
   const activeRooms = rooms.filter((room) => room.status === 'active');
   return {
@@ -3141,7 +5904,7 @@ async function resolveAdminRoomDetail(db, roomId) {
   };
 }
 
-async function resolveAdminReports(db, body) {
+async function resolveAdminReports(db, body, scope = { ok: true, regionCodes: null }) {
   const query = normalizeAdminReportsQuery(body);
   const identityUids = await resolveAdminReportIdentityUids(db, query.search);
   let reportsQuery = db
@@ -3153,12 +5916,13 @@ async function resolveAdminReports(db, body) {
     reportsQuery = reportsQuery.startAfter(admin.firestore.Timestamp.fromDate(new Date(cursor.updatedAt)), cursor.id);
   }
   const snapshot = await reportsQuery.limit(query.readLimit).get();
-  const rows = snapshot.docs
+  const mappedRows = snapshot.docs
     .map((doc) => mapAdminReportDocument(doc.id, doc.data()))
     .filter(Boolean);
+  const rows = await filterOperationalRowsByScope(db, mappedRows, scope);
   const items = filterAdminReportRows(rows, { ...query, identityUids }).slice(0, query.limit);
   const scannedAllAvailableRows = snapshot.size < query.readLimit;
-  const lastScannedRow = rows.at(-1) || null;
+  const lastScannedRow = mappedRows.at(-1) || null;
 
   return {
     items,
@@ -3197,11 +5961,12 @@ function decodeAdminReportCursor(value) {
   }
 }
 
-async function resolveAdminReportSummary(db) {
+async function resolveAdminReportSummary(db, scope = { ok: true, regionCodes: null }) {
   const snapshot = await db.collection('reports').orderBy('updatedAt', 'desc').limit(500).get();
-  const reports = snapshot.docs
+  const mappedReports = snapshot.docs
     .map((doc) => mapAdminReportDocument(doc.id, doc.data()))
     .filter(Boolean);
+  const reports = await filterOperationalRowsByScope(db, mappedReports, scope);
   const dayAgo = Date.now() - (24 * 60 * 60 * 1000);
   const today = new Date().toISOString().slice(0, 10);
   const active = reports.filter((report) => report.status !== 'resolved');
@@ -3216,13 +5981,27 @@ async function resolveAdminReportSummary(db) {
   };
 }
 
-async function resolveAdminReportDetail(db, reportId) {
+async function resolveAdminReportDetail(
+  db,
+  reportId,
+  scope = { ok: true, regionCodes: null },
+  decodedToken = {},
+) {
   const reportRef = db.collection('reports').doc(reportId);
   const reportSnapshot = await reportRef.get();
   if (!reportSnapshot.exists) {
     throw createHttpError(404, 'Report was not found.');
   }
   const report = mapAdminReportDocument(reportSnapshot.id, reportSnapshot.data());
+  const scopedReport = await assertReportInOperatorScope(db, scope, report);
+  if (scopedReport.evidence.length > 0) {
+    const freshness = assertFreshAdminAuth(decodedToken);
+    if (!freshness.ok) {
+      throw Object.assign(createHttpError(freshness.status, freshness.error), {
+        code: freshness.code,
+      });
+    }
+  }
   const identityRefs = [report.reporterUid, report.targetUid]
     .filter(Boolean)
     .map((uid) => db.collection('publicProfiles').doc(uid));
@@ -3253,7 +6032,7 @@ async function resolveAdminReportDetail(db, reportId) {
       reporter: identitiesByUid[report.reporterUid] || { displayName: '', publicId: report.reporterPublicId, specialId: '', uid: report.reporterUid },
       target: identitiesByUid[report.targetUid] || { displayName: '', publicId: report.targetPublicId, specialId: '', uid: report.targetUid },
     },
-    report,
+    report: scopedReport,
   };
 }
 
@@ -3275,15 +6054,17 @@ async function recordAdminClientError(db, decodedToken, input) {
 }
 
 async function resolveAdminSettings(db, auth, decodedToken) {
-  const [user, preferencesSnapshot, featuresSnapshot, historySnapshot] = await Promise.all([
+  const [user, preferencesSnapshot, featuresSnapshot, historySnapshot, roomGiftPolicy] = await Promise.all([
     auth.getUser(decodedToken.uid),
     db.doc(`adminPreferences/${decodedToken.uid}`).get(),
     db.doc('appConfig/socialFeatures').get(),
     db.collection('adminAuditEvents').where('kind', '==', 'administrator-security').orderBy('createdAt', 'desc').limit(20).get(),
+    resolveRoomGiftPolicy(db),
   ]);
   const saved = preferencesSnapshot.exists ? preferencesSnapshot.data() : {};
   return {
     featureFlags: mergeSocialFeatureFlags(featuresSnapshot.exists ? featuresSnapshot.data() : {}),
+    featureFlagsUpdatedAt: featuresSnapshot.exists ? readAdminTimestampIso(featuresSnapshot.data()?.updatedAt) || 'missing' : 'missing',
     history: historySnapshot.docs.map((doc) => mapAdminAuditEventDocument(doc.id, doc.data())).filter(Boolean),
     preferences: {
       density: saved.density === 'compact' ? 'compact' : 'comfortable',
@@ -3296,6 +6077,7 @@ async function resolveAdminSettings(db, auth, decodedToken) {
       updatedAt: readAdminTimestampIso(saved.updatedAt),
     },
     roleDefinitions: ADMIN_ROLES.map((role) => ({ permissions: getAdminPermissions(role), role })),
+    roomGiftPolicy,
     session: {
       createdAt: user.metadata.creationTime || '',
       disabled: user.disabled === true,
@@ -3342,6 +6124,10 @@ async function executeAdminFeatureFlagUpdate(db, decodedToken, input) {
       throw Object.assign(new Error('Admin request ID conflicts with an existing operation.'), { status: 409 });
     }
     const before = mergeSocialFeatureFlags(configSnapshot.exists ? configSnapshot.data() : {});
+    const currentUpdatedAt = configSnapshot.exists ? readAdminTimestampIso(configSnapshot.data()?.updatedAt) || 'missing' : 'missing';
+    if (currentUpdatedAt !== input.expectedUpdatedAt) {
+      throw Object.assign(new Error('Feature flags changed since they were loaded. Refresh before continuing.'), { status: 409 });
+    }
     const after = mergeSocialFeatureFlags(before, { [input.flag]: input.enabled });
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
     transaction.set(configRef, { ...after, updatedAt: timestamp, updatedBy: decodedToken.uid }, { merge: true });
@@ -3363,8 +6149,58 @@ async function executeAdministratorAction(db, auth, decodedToken, input) {
   const auditSnapshot = await auditRef.get();
   if (auditSnapshot.exists) {
     const existing = auditSnapshot.data();
-    if (existing?.actorUid === decodedToken.uid && existing?.administratorAction === input.action) return { eventId: auditRef.id, targetUid: existing.targetUid || '' };
+    if (existing?.actorUid === decodedToken.uid && existing?.administratorAction === input.action) {
+      return { eventId: auditRef.id, targetUid: existing.targetUid || '' };
+    }
     throw Object.assign(new Error('Admin request ID conflicts with an existing operation.'), { status: 409 });
+  }
+
+  if (input.action === 'set-region-scope') {
+    let target;
+    try {
+      target = await auth.getUser(input.targetUid);
+    } catch (error) {
+      if (error?.code === 'auth/user-not-found') {
+        throw Object.assign(new Error('The Firebase account was not found.'), { status: 404 });
+      }
+      throw error;
+    }
+    const targetRole = resolveAdminRole({ ...(target.customClaims || {}), admin: target.customClaims?.admin });
+    if (targetRole !== 'super-moderator') {
+      throw Object.assign(new Error('Region scope can only be assigned to Super Moderators.'), { status: 409 });
+    }
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+    const operatorProfileRef = db.doc(`adminProfiles/${target.uid}`);
+    const existing = await operatorProfileRef.get();
+    const beforeCodes = existing.exists && Array.isArray(existing.data()?.regionCodes)
+      ? existing.data().regionCodes
+      : [];
+    await db.batch()
+      .set(operatorProfileRef, {
+        regionCodes: input.regionCodes,
+        role: 'super-moderator',
+        status: input.regionCodes.length > 0 ? 'active' : 'pending',
+        uid: target.uid,
+        updatedAt: timestamp,
+        updatedBy: decodedToken.uid,
+      }, { merge: true })
+      .create(auditRef, {
+        action: 'super-moderator-scope-update',
+        administratorAction: input.action,
+        actorEmail: decodedToken.email || '',
+        actorUid: decodedToken.uid,
+        after: { regionCodes: input.regionCodes, status: input.regionCodes.length > 0 ? 'active' : 'pending' },
+        before: { regionCodes: beforeCodes },
+        createdAt: timestamp,
+        kind: 'administrator-security',
+        note: input.reason,
+        source: 'admin-dashboard',
+        status: 'completed',
+        targetEmail: target.email || '',
+        targetUid: target.uid,
+      })
+      .commit();
+    return { eventId: auditRef.id, targetUid: target.uid };
   }
 
   let target;
@@ -3384,7 +6220,7 @@ async function executeAdministratorAction(db, auth, decodedToken, input) {
   }
 
   if (oldRole === 'owner' && ['change-role', 'remove-admin'].includes(input.action)) {
-    const administrators = await resolveAdminAdministrators(auth);
+    const administrators = await resolveAdminAdministrators(auth, db);
     if (administrators.filter((item) => item.role === 'owner').length <= 1) throw Object.assign(new Error('The final owner cannot be demoted or removed.'), { status: 409 });
   }
 
@@ -3423,7 +6259,7 @@ async function executeAdministratorAction(db, auth, decodedToken, input) {
   return { eventId: auditRef.id, targetUid: target.uid };
 }
 
-async function resolveAdminAdministrators(auth) {
+async function resolveAdminAdministrators(auth, db = null) {
   const administrators = [];
   let pageToken;
   do {
@@ -3436,16 +6272,53 @@ async function resolveAdminAdministrators(auth) {
         displayName: user.displayName || '',
         email: user.email || '',
         lastSignInAt: user.metadata.lastSignInTime || '',
+        regionCodes: [],
         role: resolveAdminRole(user.customClaims),
+        scopeStatus: '',
         tokensValidAfterAt: user.tokensValidAfterTime || '',
         uid: user.uid,
       })));
     pageToken = page.pageToken;
   } while (pageToken);
+  if (db) {
+    await Promise.all(administrators.map(async (administrator) => {
+      if (administrator.role !== 'super-moderator') return;
+      const snapshot = await db.doc(`adminProfiles/${administrator.uid}`).get();
+      if (!snapshot.exists) {
+        administrator.scopeStatus = 'pending';
+        return;
+      }
+      const data = snapshot.data();
+      administrator.regionCodes = Array.isArray(data.regionCodes) ? data.regionCodes : [];
+      administrator.scopeStatus = typeof data.status === 'string' ? data.status : '';
+    }));
+  }
   return administrators.sort((left, right) => (left.displayName || left.email || left.uid).localeCompare(right.displayName || right.email || right.uid));
 }
 
-async function executeAdminReportAction(db, decodedToken, action) {
+async function executeAdminReportAction(
+  db,
+  decodedToken,
+  action,
+  scope = { ok: true, regionCodes: null },
+) {
+  const preflightSnapshot = await db.collection('reports').doc(action.reportId).get();
+  if (!preflightSnapshot.exists) {
+    throw createHttpError(404, 'Admin report action requires an existing report.');
+  }
+  const scopedReport = await assertReportInOperatorScope(
+    db,
+    scope,
+    mapAdminReportDocument(preflightSnapshot.id, preflightSnapshot.data()),
+  );
+  if (['escalate', 'reopen', 'resolve'].includes(action.action)) {
+    const freshness = assertFreshAdminAuth(decodedToken);
+    if (!freshness.ok) {
+      throw Object.assign(createHttpError(freshness.status, freshness.error), {
+        code: freshness.code,
+      });
+    }
+  }
   return db.runTransaction(async (transaction) => {
     const reportRef = db.collection('reports').doc(action.reportId);
     const auditRef = db.collection('adminAuditEvents').doc(`report_${action.requestId}`);
@@ -3527,13 +6400,27 @@ async function executeAdminReportAction(db, decodedToken, action) {
     transaction.update(reportRef, update);
     transaction.set(auditRef, {
       action: `report-${action.action}`,
+      actorRegionCodes: scope.regionCodes || [],
+      actorRole: resolveAdminRole(decodedToken),
       actorEmail: decodedToken.email || '',
       actorUid: decodedToken.uid,
+      after: {
+        assignedTo: update.assignedTo || report.assignedTo || '',
+        severity: update.severity || report.severity || 'medium',
+        status: update.status || report.status || 'open',
+      },
       assignedTo: update.assignedTo || report.assignedTo || '',
+      before: {
+        assignedTo: report.assignedTo || '',
+        severity: report.severity || 'medium',
+        status: report.status || 'open',
+      },
+      countryCode: scopedReport.countryCode,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       kind: 'report-workflow',
       note: action.note || '',
       reportId: action.reportId,
+      requestId: action.requestId,
       severity: update.severity || report.severity || 'medium',
       status: update.status || report.status || 'open',
       targetUid: report.targetUid || '',
@@ -3543,38 +6430,150 @@ async function executeAdminReportAction(db, decodedToken, action) {
   });
 }
 
-async function executeAdminRoomAction(db, decodedToken, action) {
+async function executeAdminRoomAction(db, decodedToken, action, scope = { ok: true, regionCodes: null }) {
+  const requiresFreshAuth = [
+    'clear-staff-lockdown',
+    'close-room',
+    'kick-everyone',
+    'remove-member',
+    'reopen-room',
+    'reverse-ownership-transfer',
+    'staff-lockdown',
+  ].includes(action.action);
+  if (requiresFreshAuth) {
+    const freshness = assertFreshAdminAuth(decodedToken);
+    if (!freshness.ok) {
+      throw Object.assign(createHttpError(freshness.status, freshness.error), {
+        code: freshness.code,
+      });
+    }
+  }
+  if (scope.role === 'super-moderator' && action.action === 'transfer-host') {
+    throw Object.assign(createHttpError(403, 'Super Moderators cannot transfer room ownership or hosting.'), {
+      code: 'FORBIDDEN',
+    });
+  }
+  if (
+    action.action === 'staff-lockdown'
+    || action.action === 'kick-everyone'
+    || action.action === 'clear-staff-lockdown'
+    || (
+      scope.role === 'super-moderator'
+      && ['close-room', 'mute-member', 'remove-member', 'unmute-member'].includes(action.action)
+    )
+  ) {
+    const roomSnapshot = await db.doc(`rooms/${action.roomId}`).get();
+    if (!roomSnapshot.exists) throw createHttpError(404, 'Admin room action requires an existing room.');
+    const room = roomSnapshot.data();
+    const scopeCheck = assertRoomInOperatorScope(scope, room);
+    if (!scopeCheck.ok) throw createHttpError(scopeCheck.status, scopeCheck.error);
+    const result = await executeRoomCommand({
+      body: {
+        action: action.action,
+        expectedRevision: Number.isInteger(room.revision) ? room.revision : 1,
+        reason: action.reason,
+        requestId: action.requestId,
+        roomId: action.roomId,
+        targetUid: action.targetUid,
+      },
+      db,
+      decodedToken,
+      fieldValue: admin.firestore.FieldValue,
+    });
+    if (!result.ok) {
+      throw Object.assign(new Error(result.error || 'Room command failed.'), {
+        status: result.status || 400,
+        code: result.code,
+      });
+    }
+    if (result.liveKit?.type !== 'none') {
+      const roomService = new RoomServiceClient(
+        liveKitUrl.value(),
+        liveKitApiKey.value(),
+        liveKitApiSecret.value(),
+      );
+      try {
+        await synchronizeRoomCommandLiveKit({
+          db,
+          fieldValue: admin.firestore.FieldValue,
+          liveKit: result.liveKit,
+          requestId: result.result.requestId,
+          roomId: result.result.roomId,
+          roomService,
+        });
+      } catch (error) {
+        console.error('[functions.adminDashboard] livekit-sync:pending', {
+          action: action.action,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          requestId: action.requestId,
+          roomId: action.roomId,
+        });
+      }
+    }
+    return `command_${action.requestId}`;
+  }
+
   return db.runTransaction(async (transaction) => {
     const roomRef = db.doc(`rooms/${action.roomId}`);
     const auditRef = db.doc(`adminAuditEvents/room_${action.requestId}`);
     const targetRef = action.targetUid ? roomRef.collection('members').doc(action.targetUid) : null;
-    const [roomSnapshot, auditSnapshot, targetSnapshot] = await Promise.all([
+    const targetOperatorRef = action.targetUid ? db.doc(`adminProfiles/${action.targetUid}`) : null;
+    const [roomSnapshot, auditSnapshot, targetSnapshot, targetOperatorSnapshot] = await Promise.all([
       transaction.get(roomRef),
       transaction.get(auditRef),
       targetRef ? transaction.get(targetRef) : Promise.resolve(null),
+      targetOperatorRef ? transaction.get(targetOperatorRef) : Promise.resolve(null),
     ]);
 
     if (!roomSnapshot.exists) {
       throw createHttpError(404, 'Admin room action requires an existing room.');
     }
+    const room = roomSnapshot.data();
+    const scopeCheck = assertRoomInOperatorScope(scope, room);
+    if (!scopeCheck.ok) throw createHttpError(scopeCheck.status, scopeCheck.error);
     if (auditSnapshot.exists) {
       const previous = auditSnapshot.data();
       if (previous.action === action.action && previous.actorUid === decodedToken.uid && previous.roomId === action.roomId && previous.targetUid === action.targetUid) return auditRef.id;
       throw createHttpError(409, 'This request identifier was already used.');
     }
 
-    const room = roomSnapshot.data();
     const currentUpdatedAt = readAdminTimestampIso(room.updatedAt);
     if (action.expectedUpdatedAt && action.expectedUpdatedAt !== currentUpdatedAt) throw createHttpError(409, 'This room changed since it was opened. Refresh before continuing.');
+    if (room.staffLockdown && action.action === 'reopen-room') {
+      throw createHttpError(403, 'Clear staff lockdown before reopening this room.');
+    }
     const target = targetSnapshot?.exists ? targetSnapshot.data() : undefined;
+    if (action.targetUid) {
+      const hierarchyCheck = assertAdminTargetHierarchy(
+        resolveAdminRole(decodedToken),
+        targetOperatorSnapshot?.exists ? targetOperatorSnapshot.data() : undefined,
+        action.targetUid,
+      );
+      if (!hierarchyCheck.ok) {
+        throw Object.assign(createHttpError(hierarchyCheck.status, hierarchyCheck.error), {
+          code: hierarchyCheck.code,
+        });
+      }
+    }
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
     const eventRef = roomRef.collection('moderationEvents').doc(action.requestId);
     const actionPayload = {
       action: action.action,
+      actorRegionCodes: scope.regionCodes || [],
+      actorRole: resolveAdminRole(decodedToken),
       actorEmail: decodedToken.email || '',
       actorUid: decodedToken.uid,
+      before: {
+        availability: room.availability || '',
+        hostId: room.hostId || '',
+        status: room.status || '',
+        targetMuted: Boolean(target?.mutedAt),
+        targetStatus: target?.status || '',
+      },
+      countryCode: typeof room.countryCode === 'string' ? room.countryCode.trim().toUpperCase() : '',
       createdAt: timestamp,
       reason: action.reason,
+      requestId: action.requestId,
       roomId: action.roomId,
       targetUid: action.targetUid || '',
     };
@@ -3584,9 +6583,98 @@ async function executeAdminRoomAction(db, decodedToken, action) {
       transaction.update(roomRef, { status: 'closed', updatedAt: timestamp, updatedBy: decodedToken.uid });
     } else if (action.action === 'reopen-room') {
       if (room.status !== 'closed') throw createHttpError(409, 'Only closed rooms can be reopened.');
-      const hostSnapshot = room.hostId === action.targetUid && targetSnapshot ? targetSnapshot : await transaction.get(roomRef.collection('members').doc(room.hostId));
-      if (!hostSnapshot?.exists || hostSnapshot.data()?.status !== 'active') throw createHttpError(409, 'The room host must have an active membership before reopening.');
-      transaction.update(roomRef, { status: 'active', updatedAt: timestamp, updatedBy: decodedToken.uid });
+      if (room.deletionStatus === 'finalized' || room.availability === 'purged') {
+        throw createHttpError(409, 'The room recovery period has ended.');
+      }
+      const recoveringRemoval = room.availability === 'removed' && room.deletionStatus === 'recoverable';
+      if (!recoveringRemoval) {
+        const hostSnapshot = room.hostId === action.targetUid && targetSnapshot
+          ? targetSnapshot
+          : await transaction.get(roomRef.collection('members').doc(room.hostId));
+        if (!hostSnapshot?.exists || hostSnapshot.data()?.status !== 'active') {
+          throw createHttpError(409, 'The room host must have an active membership before reopening.');
+        }
+      }
+      transaction.update(roomRef, {
+        ...(recoveringRemoval
+          ? {
+            availability: 'active',
+            deletionStatus: admin.firestore.FieldValue.delete(),
+            removalReason: admin.firestore.FieldValue.delete(),
+            removedAt: admin.firestore.FieldValue.delete(),
+            removedBy: admin.firestore.FieldValue.delete(),
+            scheduledDeletionAt: admin.firestore.FieldValue.delete(),
+          }
+          : {}),
+        status: 'active',
+        updatedAt: timestamp,
+        updatedBy: decodedToken.uid,
+      });
+    } else if (action.action === 'reverse-ownership-transfer') {
+      if (resolveAdminRole(decodedToken) !== 'owner') {
+        throw createHttpError(403, 'Only the Platform Owner can reverse a fraudulent ownership transfer.');
+      }
+      if (room.status !== 'active' || room.availability !== 'active') {
+        throw createHttpError(409, 'Ownership reversal requires an active room.');
+      }
+      if (!room.lastOwnershipTransferId) {
+        throw createHttpError(409, 'This room has no reversible ownership transfer.');
+      }
+      const transferRef = roomRef.collection('ownershipTransfers').doc(room.lastOwnershipTransferId);
+      const transferSnapshot = await transaction.get(transferRef);
+      if (
+        !transferSnapshot.exists
+        || transferSnapshot.data()?.status !== 'accepted'
+        || transferSnapshot.data()?.fromUid !== action.targetUid
+        || transferSnapshot.data()?.toUid !== (room.ownerUid || room.hostId)
+      ) {
+        throw createHttpError(409, 'The latest accepted transfer does not match this reversal.');
+      }
+      if (!target || target.status !== 'active' || target.authorityRole !== 'moderator') {
+        throw createHttpError(409, 'The former owner must have an active moderator membership.');
+      }
+      const currentOwnerUid = room.ownerUid || room.hostId;
+      const currentOwnerRef = roomRef.collection('members').doc(currentOwnerUid);
+      const currentOwnerSnapshot = await transaction.get(currentOwnerRef);
+      if (!currentOwnerSnapshot.exists || currentOwnerSnapshot.data()?.status !== 'active') {
+        throw createHttpError(409, 'The current owner membership is not active.');
+      }
+      const currentOwner = currentOwnerSnapshot.data();
+      transaction.update(currentOwnerRef, {
+        authorityRole: 'moderator',
+        role: currentOwner.seatId ? 'speaker' : 'listener',
+        updatedAt: timestamp,
+        updatedBy: decodedToken.uid,
+      });
+      transaction.update(targetRef, {
+        authorityRole: 'owner',
+        role: 'host',
+        updatedAt: timestamp,
+        updatedBy: decodedToken.uid,
+      });
+      transaction.update(transferRef, {
+        reversalAuditId: auditRef.id,
+        reversedAt: timestamp,
+        reversedBy: decodedToken.uid,
+        reversalReason: action.reason,
+        status: 'reversed',
+        updatedAt: timestamp,
+      });
+      transaction.update(roomRef, {
+        hostAvatarLabel: target.avatarLabel || '',
+        hostDisplayName: target.displayName || '',
+        hostId: action.targetUid,
+        lastOwnershipTransferredAt: timestamp,
+        lastOwnershipTransferId: admin.firestore.FieldValue.delete(),
+        ownerAvatarLabel: target.avatarLabel || '',
+        ownerDisplayName: target.displayName || '',
+        ownerUid: action.targetUid,
+        ownershipRevision: Number.isInteger(room.ownershipRevision) ? room.ownershipRevision + 1 : 2,
+        ownershipTransferCooldownUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        revision: Number.isInteger(room.revision) ? room.revision + 1 : 2,
+        updatedAt: timestamp,
+        updatedBy: decodedToken.uid,
+      });
     } else if (['mute-member', 'remove-member', 'transfer-host', 'unmute-member'].includes(action.action)) {
       if (room.status !== 'active') throw createHttpError(409, 'Participant actions require an active room.');
       if (!target || target.status !== 'active') throw createHttpError(409, 'An active target participant is required.');
@@ -3635,9 +6723,29 @@ async function executeAdminRoomAction(db, decodedToken, action) {
       }
     }
 
-    transaction.create(eventRef, actionPayload);
+    const afterPayload = {
+      availability: action.action === 'reopen-room' ? 'active' : room.availability || '',
+      hostId: action.action === 'transfer-host' ? action.targetUid : room.hostId || '',
+      status: action.action === 'close-room'
+        ? 'closed'
+        : action.action === 'reopen-room'
+          ? 'active'
+          : room.status || '',
+      targetMuted: action.action === 'mute-member'
+        ? true
+        : action.action === 'unmute-member'
+          ? false
+          : Boolean(target?.mutedAt),
+      targetStatus: action.action === 'remove-member' ? 'removed' : target?.status || '',
+    };
+    transaction.create(eventRef, {
+      ...actionPayload,
+      after: afterPayload,
+      regionCode: actionPayload.countryCode,
+    });
     transaction.create(auditRef, {
       ...actionPayload,
+      after: afterPayload,
       eventPath: eventRef.path,
       kind: 'room-moderation',
       status: action.action === 'close-room' ? 'closed' : action.action === 'reopen-room' ? 'active' : room.status,
@@ -3653,12 +6761,21 @@ function createHttpError(status, message) {
   return error;
 }
 
-async function createAdminUserNote(db, decodedToken, note) {
+async function createAdminUserNote(
+  db,
+  decodedToken,
+  note,
+  scope = { ok: true, regionCodes: null },
+) {
   const noteRef = db.collection('adminUserNotes').doc();
+  const profileSnapshot = await db.doc(`publicProfiles/${note.targetUid}`).get();
 
   await noteRef.set({
+    actorRegionCodes: scope.regionCodes || [],
+    actorRole: resolveAdminRole(decodedToken),
     actorEmail: decodedToken.email || '',
     actorUid: decodedToken.uid,
+    countryCode: String(profileSnapshot.data()?.countryCode || '').trim().toUpperCase(),
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     note: note.note,
     targetUid: note.targetUid,

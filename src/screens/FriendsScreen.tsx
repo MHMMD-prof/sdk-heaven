@@ -21,6 +21,8 @@ import { useRepresentativeBadgeProjection } from '../social/useRepresentativeBad
 import { useSocialFeatureFlags } from '../social/useSocialFeatureFlags';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
+import { AvatarFrameLayer } from '../components/AvatarPresentation';
+import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
 
 type FriendsScreenProps = NativeStackScreenProps<RootStackParamList, 'Friends'>;
 type FriendsTab = keyof FriendsOverview;
@@ -29,6 +31,7 @@ const emptyOverview: FriendsOverview = { friends: [], incoming: [], outgoing: []
 
 export function FriendsScreen({ navigation }: FriendsScreenProps) {
   const flags = useSocialFeatureFlags();
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const [activeTab, setActiveTab] = useState<FriendsTab>('friends');
   const [busyUid, setBusyUid] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -147,6 +150,7 @@ export function FriendsScreen({ navigation }: FriendsScreenProps) {
               <FriendRow
                 badgeActive={activeBadges[row.profile.uid] ?? row.profile.representativeBadgeActive}
                 busy={busyUid === row.profile.uid}
+                cosmeticsFlags={cosmeticsFlags}
                 key={row.profile.uid}
                 kind={activeTab}
                 onAction={(action) => {
@@ -191,6 +195,7 @@ function TabButton({ active, badge = 0, label, onPress }: { active: boolean; bad
 function FriendRow({
   badgeActive,
   busy,
+  cosmeticsFlags,
   kind,
   onAction,
   onOpen,
@@ -198,6 +203,7 @@ function FriendRow({
 }: {
   badgeActive?: boolean;
   busy: boolean;
+  cosmeticsFlags: CosmeticsFeatureFlags;
   kind: FriendsTab;
   onAction: (action: FriendMutationAction) => void;
   onOpen: () => void;
@@ -215,6 +221,7 @@ function FriendRow({
           ) : (
             <Text style={styles.avatarText}>{[...profile.displayName][0] || '؟'}</Text>
           )}
+          <AvatarFrameLayer flags={cosmeticsFlags} frame={profile.equippedAvatarFrame} />
         </View>
         <View style={styles.friendCopy}>
           <View style={styles.nameRow}>

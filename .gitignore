@@ -13,6 +13,9 @@ web-build/
 expo-env.d.ts
 .wave4-android-export/
 .wave5-android-export/
+.wave6-android-export/
+.wave7-android-export/
+.tmp-wave5-export/
 
 # Native
 .kotlin/
@@ -34,6 +37,7 @@ firebase-debug.log
 firebase-debug.*.log
 firestore-debug.log
 .firebase-rules-test/
+.firebase-rules-test.json
 
 # macOS
 .DS_Store

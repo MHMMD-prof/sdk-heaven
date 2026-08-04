@@ -22,7 +22,7 @@ import { firebaseDb } from '../auth/firebase';
 import { mockVoiceRooms } from '../data/mockVoiceRooms';
 import { RoomCountryCode, VoiceRoom, VoiceRoomType } from '../types/voice';
 import { debugError, debugLog } from '../utils/debugLog';
-import { createMockVoiceRoomDraft } from './createMockVoiceRoomDraft';
+import { isVoiceRoomMockFallbackAllowed } from './voiceRoomLaunchGates';
 import {
   CreateRoomInput,
   JoinPrivateRoomInput,
@@ -36,6 +36,8 @@ import {
   selectMostRecentRoomDocument,
 } from './roomProfile';
 import { applyRoomPresence, mapRoomPresenceDocument } from './roomPresence';
+import { useVoiceRoomFeatureFlags } from './voiceRoomFeatureFlags';
+import { voiceRoomPerformanceBudgets } from './voiceRoomPerformanceBudgets';
 import {
   MAX_ROOM_SEATS,
   createVacantRoomSeatDocument,
@@ -63,16 +65,27 @@ type VoiceRoomsContextValue = {
   createRoom: (input: CreateRoomInput) => Promise<VoiceRoom>;
   createDraftRoom: (type: VoiceRoomType, title?: string, countryCode?: RoomCountryCode) => Promise<VoiceRoom>;
   createPrivateRoom: (input: CreateRoomInput) => Promise<VoiceRoom>;
-  getRoomById: (roomId: string) => VoiceRoom;
+  getRoomById: (roomId: string) => VoiceRoom | undefined;
   joinRoom: (roomId: string) => Promise<VoiceRoom>;
   joinPrivateRoom: (input: JoinPrivateRoomInput) => Promise<VoiceRoom>;
   forgetVisitedRoom: (roomId: string) => Promise<void>;
   startRoomPresence: (roomId: string) => void;
   stopRoomPresence: (roomId: string) => Promise<void>;
+  getPresenceSessionId: (roomId: string) => string | undefined;
 };
 
 const hostedRoomLookupTimeoutMs = 4_000;
 const roomSyncInteractionFallbackMs = 350;
+
+function isReconnectableRoomPresence(data: DocumentData | undefined, nowMs = Date.now()) {
+  const leaseExpiresAtMs = typeof data?.leaseExpiresAt?.toMillis === 'function'
+    ? data.leaseExpiresAt.toMillis()
+    : 0;
+  return (
+    (data?.status === 'online' || data?.status === 'reconnecting')
+    && leaseExpiresAtMs >= nowMs
+  );
+}
 
 function mapCompatibleRoomDocument(data: unknown, roomId: string, source: string) {
   const result = mapRoomDocumentResult(data, roomId);
@@ -92,6 +105,7 @@ export const VoiceRoomsContext = createContext<VoiceRoomsContextValue | undefine
 
 export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   const { authUser } = useAuth();
+  const voiceRoomFeatureFlags = useVoiceRoomFeatureFlags();
   const [isRoomSyncReady, setRoomSyncReady] = useState(false);
   const [firestoreActivityRooms, setFirestoreActivityRooms] = useState<VoiceRoom[]>([]);
   const [firestorePopularRooms, setFirestorePopularRooms] = useState<VoiceRoom[]>([]);
@@ -122,7 +136,10 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   }, [firestoreActivityRooms, firestorePopularRooms]);
   const rooms = useMemo(
     () => {
-      const sourceRooms = roomsStatus === 'error' ? mockVoiceRooms : firestoreRooms;
+      const sourceRooms =
+        roomsStatus === 'error' && isVoiceRoomMockFallbackAllowed()
+          ? mockVoiceRooms
+          : firestoreRooms;
 
       return sourceRooms.map((room) => joinedRoomOverrides[room.id] ?? room);
     },
@@ -414,6 +431,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
     const unsubscribeCallbacks = joinedRoomIds.flatMap((roomId) => {
       const roomRef = doc(firebaseDb, 'rooms', roomId);
       const memberRef = doc(firebaseDb, 'rooms', roomId, 'members', authUser.uid);
+      const presenceRef = doc(firebaseDb, 'rooms', roomId, 'presence', authUser.uid);
 
       return [
         onSnapshot(
@@ -517,7 +535,11 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
           (error) => debugError('voice.rooms', 'seatSnapshot:error', error, { roomId, uid: authUser.uid }),
         ),
         onSnapshot(
-          collection(firebaseDb, 'rooms', roomId, 'presence'),
+          query(
+            collection(firebaseDb, 'rooms', roomId, 'presence'),
+            orderBy('updatedAt', 'desc'),
+            limit(voiceRoomPerformanceBudgets.presenceListenerLimit),
+          ),
           (snapshot) => {
             const presenceDocuments = snapshot.docs
               .map((presenceSnapshot) => mapRoomPresenceDocument(presenceSnapshot.data()))
@@ -660,6 +682,10 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
     );
   }, []);
 
+  const getPresenceSessionId = useCallback((roomId: string) => {
+    return presenceSessionIdsRef.current[roomId];
+  }, []);
+
   const stopRoomPresence = useCallback(
     async (roomId: string) => {
       setActivePresenceRoomIds((currentRoomIds) => currentRoomIds.filter((currentRoomId) => currentRoomId !== roomId));
@@ -679,6 +705,9 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
     async (input: CreateRoomInput) => {
       if (!authUser) {
         throw new Error('A complete signed-in profile is required to create a room.');
+      }
+      if (!voiceRoomFeatureFlags.newJoins) {
+        throw new Error('إنشاء الغرف متوقف مؤقتاً.');
       }
 
       const roomRef = doc(collection(firebaseDb, 'rooms'));
@@ -754,7 +783,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       return room;
     },
-    [authUser, recordVisitedRoom],
+    [authUser, recordVisitedRoom, voiceRoomFeatureFlags.newJoins],
   );
 
   const createDraftRoom = useCallback(
@@ -774,15 +803,17 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         throw new Error('A complete signed-in profile is required to join a room.');
       }
 
-      const fallbackRoom = mockVoiceRooms.find((room) => room.id === roomId);
-
-      if (fallbackRoom && roomsStatus === 'error') {
-        recordVisitedRoom(fallbackRoom);
-        return fallbackRoom;
+      if (isVoiceRoomMockFallbackAllowed()) {
+        const fallbackRoom = mockVoiceRooms.find((room) => room.id === roomId);
+        if (fallbackRoom && roomsStatus === 'error') {
+          recordVisitedRoom(fallbackRoom);
+          return fallbackRoom;
+        }
       }
 
       const roomRef = doc(firebaseDb, 'rooms', roomId);
       const memberRef = doc(firebaseDb, 'rooms', roomId, 'members', authUser.uid);
+      const presenceRef = doc(firebaseDb, 'rooms', roomId, 'presence', authUser.uid);
 
       debugLog('voice.rooms', 'joinRoom:transaction:start', { roomId, uid: authUser.uid });
 
@@ -804,6 +835,18 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         }
 
         const existingMember = await transaction.get(memberRef);
+        if (!voiceRoomFeatureFlags.newJoins) {
+          const existingPresence = existingMember.exists()
+            ? await transaction.get(presenceRef)
+            : null;
+          if (
+            !existingMember.exists()
+            || !existingPresence?.exists()
+            || !isReconnectableRoomPresence(existingPresence.data())
+          ) {
+            throw new Error('الانضمام إلى الغرف متوقف مؤقتاً.');
+          }
+        }
         if (roomDocument.visibility === 'private' && !existingMember.exists()) {
           throw new Error('Private room invite is required.');
         }
@@ -863,7 +906,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       return room;
     },
-    [authUser, recordVisitedRoom, roomsStatus],
+    [authUser, recordVisitedRoom, roomsStatus, voiceRoomFeatureFlags.newJoins],
   );
 
   const joinPrivateRoom = useCallback(
@@ -874,6 +917,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       const roomRef = doc(firebaseDb, 'rooms', input.roomId);
       const memberRef = doc(firebaseDb, 'rooms', input.roomId, 'members', authUser.uid);
+      const presenceRef = doc(firebaseDb, 'rooms', input.roomId, 'presence', authUser.uid);
 
       debugLog('voice.rooms', 'joinPrivateRoom:transaction:start', {
         roomId: input.roomId,
@@ -899,6 +943,19 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
         }
 
         const existingMember = await transaction.get(memberRef);
+
+        if (!voiceRoomFeatureFlags.newJoins) {
+          const existingPresence = existingMember.exists()
+            ? await transaction.get(presenceRef)
+            : null;
+          if (
+            !existingMember.exists()
+            || !existingPresence?.exists()
+            || !isReconnectableRoomPresence(existingPresence.data())
+          ) {
+            throw new Error('الانضمام إلى الغرف متوقف مؤقتاً.');
+          }
+        }
 
         if (!canJoinRoomWithInvite(roomDocument, input.inviteCode, existingMember.exists())) {
           throw new Error('Private room invite is invalid.');
@@ -963,29 +1020,15 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       return room;
     },
-    [authUser, recordVisitedRoom],
+    [authUser, recordVisitedRoom, voiceRoomFeatureFlags.newJoins],
   );
 
   const getRoomById = useCallback(
-    (roomId: string) => {
-      return (
-        joinedRoomOverrides[roomId] ??
-        (myActiveRoom?.id === roomId ? myActiveRoom : undefined) ??
-        rooms.find((room) => room.id === roomId) ??
-        createMockVoiceRoomDraft({
-          host: authUser
-            ? {
-                avatarLabel: authUser.avatarLabel,
-                displayName: authUser.displayName,
-                id: authUser.uid,
-              }
-            : undefined,
-          id: roomId,
-          type: roomId.includes('game') ? 'game' : 'voice',
-        })
-      );
-    },
-    [authUser, joinedRoomOverrides, myActiveRoom, rooms],
+    (roomId: string) =>
+      joinedRoomOverrides[roomId]
+      ?? (myActiveRoom?.id === roomId ? myActiveRoom : undefined)
+      ?? rooms.find((room) => room.id === roomId),
+    [joinedRoomOverrides, myActiveRoom, rooms],
   );
 
   const value = useMemo(
@@ -1004,6 +1047,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       roomsStatus,
       startRoomPresence,
       stopRoomPresence,
+      getPresenceSessionId,
       visitedRooms,
     }),
     [
@@ -1011,6 +1055,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       createPrivateRoom,
       createRoom,
       forgetVisitedRoom,
+      getPresenceSessionId,
       getRoomById,
       joinPrivateRoom,
       joinRoom,

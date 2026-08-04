@@ -1,4 +1,5 @@
 const { createFriendshipId } = require('./socialFriendsCore');
+const { createDirectConversationId } = require('./directChatCore');
 const {
   buildRoomChatFingerprint,
   filterChatText,
@@ -9,6 +10,7 @@ const {
   roomChatError,
   validateRoomChatRequest,
 } = require('./roomChatCore');
+const { preserveVoiceReportEvidenceInTransaction } = require('./roomRecordingService');
 
 const MESSAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const REPORT_RATE_WINDOW_MS = 60 * 60 * 1_000;
@@ -81,6 +83,15 @@ async function executeRoomChatCommand({
     const giftRef = command.giftEventId
       ? roomRef.collection('giftEvents').doc(command.giftEventId)
       : null;
+    const directConversationId = command.action === 'block-user' && command.targetUid
+      ? createDirectConversationId(actorUid, command.targetUid)
+      : '';
+    const directConversationRef = directConversationId
+      ? db.doc(`directConversations/${directConversationId}`)
+      : null;
+    const directRequestRef = directConversationId
+      ? db.doc(`directMessageRequests/${directConversationId}`)
+      : null;
 
     const [
       roomSnapshot,
@@ -100,6 +111,8 @@ async function executeRoomChatCommand({
       safetyRateSnapshot,
       mediaSnapshot,
       giftSnapshot,
+      directConversationSnapshot,
+      directRequestSnapshot,
     ] = await Promise.all([
       transaction.get(roomRef),
       transaction.get(actorMemberRef),
@@ -118,15 +131,29 @@ async function executeRoomChatCommand({
       command.action === 'report-content' ? transaction.get(safetyRateRef) : Promise.resolve(null),
       mediaRef ? transaction.get(mediaRef) : Promise.resolve(null),
       giftRef ? transaction.get(giftRef) : Promise.resolve(null),
+      directConversationRef ? transaction.get(directConversationRef) : Promise.resolve(null),
+      directRequestRef ? transaction.get(directRequestRef) : Promise.resolve(null),
     ]);
 
     const room = roomSnapshot.exists ? roomSnapshot.data() : undefined;
+    let recordingSessionSnapshot = null;
+    if (command.action === 'report-content' && command.subjectType === 'voice') {
+      const activeRecordingSessionId = typeof room?.activeRecordingSessionId === 'string'
+        ? room.activeRecordingSessionId.trim()
+        : '';
+      if (activeRecordingSessionId) {
+        recordingSessionSnapshot = await transaction.get(
+          roomRef.collection('recordingSessions').doc(activeRecordingSessionId),
+        );
+      }
+    }
     const membership = actorMemberSnapshot.exists ? actorMemberSnapshot.data() : undefined;
     const profile = profileSnapshot.exists ? profileSnapshot.data() : undefined;
     const publicProfile = publicProfileSnapshot.exists ? publicProfileSnapshot.data() : undefined;
     const featureFlags = flagsSnapshot.exists ? flagsSnapshot.data() : undefined;
     const authority = resolveRoomChatAuthority({
       decodedToken,
+      featureFlags,
       membership,
       operatorProfile: operatorProfileSnapshot.exists ? operatorProfileSnapshot.data() : undefined,
       room,
@@ -231,6 +258,7 @@ async function executeRoomChatCommand({
         roomId: command.roomId,
         schemaVersion: 2,
         senderAvatarLabel: resolution.value.senderAvatarLabel,
+        ...(resolution.value.senderAvatarFrame ? { senderAvatarFrame: resolution.value.senderAvatarFrame } : {}),
         senderDisplayName: resolution.value.senderDisplayName,
         senderUid: actorUid,
         status: 'active',
@@ -285,6 +313,20 @@ async function executeRoomChatCommand({
       const friendshipId = createFriendshipId(actorUid, command.targetUid);
       transaction.delete(db.doc(`friendships/${friendshipId}`));
       transaction.delete(db.doc(`friendRequests/${friendshipId}`));
+      if (directRequestSnapshot?.exists && directRequestSnapshot.data()?.status === 'pending') {
+        transaction.set(directRequestRef, {
+          blockedAt: timestamp,
+          blockedByUid: actorUid,
+          status: 'blocked',
+          updatedAt: timestamp,
+        }, { merge: true });
+        if (directConversationSnapshot?.exists) {
+          transaction.set(directConversationRef, {
+            requestState: 'blocked',
+            updatedAt: timestamp,
+          }, { merge: true });
+        }
+      }
     } else if (command.action === 'unblock-user') {
       transaction.delete(blockRef);
     } else if (command.action === 'report-content') {
@@ -295,11 +337,33 @@ async function executeRoomChatCommand({
         media: mediaSnapshot?.exists ? mediaSnapshot.data() : undefined,
         message: messageSnapshot?.exists ? messageSnapshot.data() : undefined,
       });
+      let evidenceMeta = { audioStatus: 'missing', created: false, evidenceId: null };
+      if (command.subjectType === 'voice') {
+        const recordingSession = recordingSessionSnapshot?.exists
+          ? { sessionId: recordingSessionSnapshot.id, ...recordingSessionSnapshot.data() }
+          : undefined;
+        evidenceMeta = preserveVoiceReportEvidenceInTransaction({
+          clock,
+          db,
+          featureFlags,
+          fieldValue,
+          nowMs,
+          reportId,
+          roomId: command.roomId,
+          senderUid: actorUid,
+          session: recordingSession,
+          timestamp,
+          transaction,
+        });
+      }
       transaction.create(db.doc(`reports/${reportId}`), {
         assignedTo: '',
         category: command.category,
+        contentExcerpt: reportTarget.messageSnapshot?.text || command.details,
         createdAt: timestamp,
         details: command.details,
+        evidenceAudioStatus: evidenceMeta.audioStatus,
+        evidenceId: evidenceMeta.evidenceId || '',
         evidencePreservationRequested: command.subjectType === 'voice',
         giftEventId: command.giftEventId,
         mediaId: command.mediaId,
@@ -310,6 +374,7 @@ async function executeRoomChatCommand({
         reporterUid: actorUid,
         resolutionNote: '',
         roomId: command.roomId,
+        severity: reportSeverity(command.category),
         source: 'voice-room-safety-v1',
         status: 'open',
         subjectType: command.subjectType,
@@ -507,6 +572,10 @@ function resolveReportTarget({ command, gift, media, message }) {
       }
       : null,
   };
+}
+
+function reportSeverity(category) {
+  return ['sexual-content', 'threat', 'underage'].includes(category) ? 'high' : 'medium';
 }
 
 function writeDeniedRequest({

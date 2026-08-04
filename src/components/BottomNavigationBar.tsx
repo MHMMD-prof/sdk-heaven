@@ -1,26 +1,42 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { ComponentProps } from 'react';
+import { I18nManager, Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../theme';
 import { MainTabKey } from '../types/navigation';
 
 const tabs: Array<{
   key: MainTabKey;
-  label: string;
-  icon: ImageSourcePropType;
+  labelAr: string;
+  labelEn: string;
+  icon?: ImageSourcePropType;
+  symbol?: ComponentProps<typeof SymbolView>['name'];
 }> = [
-  { key: 'home', label: 'الرئيسية', icon: require('../../assets/home/icons/home.png') },
-  { key: 'groups', label: 'الصوتية', icon: require('../../assets/home/icons/voice.png') },
-  { key: 'games', label: 'الألعاب', icon: require('../../assets/home/icons/games.png') },
-  { key: 'me', label: 'أنا', icon: require('../../assets/home/icons/profile.png') },
+  { key: 'home', labelAr: 'الرئيسية', labelEn: 'Home', icon: require('../../assets/home/icons/home.png') },
+  {
+    key: 'rooms',
+    labelAr: 'الغرف',
+    labelEn: 'Rooms',
+    symbol: { ios: 'person.3.fill', android: 'groups', web: 'groups' },
+  },
+  {
+    key: 'chats',
+    labelAr: 'المحادثات',
+    labelEn: 'Chats',
+    symbol: { ios: 'bubble.left.and.bubble.right.fill', android: 'forum', web: 'forum' },
+  },
+  { key: 'games', labelAr: 'الألعاب', labelEn: 'Games', icon: require('../../assets/home/icons/games.png') },
+  { key: 'me', labelAr: 'أنا', labelEn: 'Me', icon: require('../../assets/home/icons/profile.png') },
 ];
 
 type BottomNavigationBarProps = {
   activeTab: MainTabKey;
   onTabPress: (tab: MainTabKey) => void;
+  unreadCount?: number;
 };
 
-export function BottomNavigationBar({ activeTab, onTabPress }: BottomNavigationBarProps) {
+export function BottomNavigationBar({ activeTab, onTabPress, unreadCount = 0 }: BottomNavigationBarProps) {
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       <LinearGradient
@@ -31,11 +47,12 @@ export function BottomNavigationBar({ activeTab, onTabPress }: BottomNavigationB
       >
         {tabs.map((tab) => {
           const isActive = activeTab === tab.key;
+          const label = I18nManager.isRTL ? tab.labelAr : tab.labelEn;
 
           return (
             <Pressable
               accessibilityRole="tab"
-              accessibilityLabel={tab.label}
+              accessibilityLabel={label}
               accessibilityState={{ selected: isActive }}
               key={tab.key}
               onPress={() => onTabPress(tab.key)}
@@ -46,9 +63,22 @@ export function BottomNavigationBar({ activeTab, onTabPress }: BottomNavigationB
               ]}
             >
               <View style={[styles.iconShell, isActive && styles.activeIconShell]}>
-                <Image source={tab.icon} style={[styles.icon, !isActive && styles.inactiveIcon]} />
+                {tab.symbol ? (
+                  <SymbolView
+                    name={tab.symbol}
+                    size={27}
+                    tintColor={isActive ? '#F6D77E' : '#756653'}
+                  />
+                ) : tab.icon ? (
+                  <Image source={tab.icon} style={[styles.icon, !isActive && styles.inactiveIcon]} />
+                ) : null}
+                {tab.key === 'chats' && unreadCount > 0 ? (
+                  <View accessibilityLabel={I18nManager.isRTL ? `${unreadCount} رسائل غير مقروءة` : `${unreadCount} unread messages`} style={styles.badge}>
+                    <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                  </View>
+                ) : null}
               </View>
-              <Text style={[styles.label, isActive && styles.activeLabel]}>{tab.label}</Text>
+              <Text style={[styles.label, isActive && styles.activeLabel]}>{label}</Text>
             </Pressable>
           );
         })}
@@ -67,7 +97,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderColor: 'rgba(216,168,78,0.3)',
     borderTopWidth: 1,
-    flexDirection: 'row-reverse',
+    flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row',
     justifyContent: 'space-between',
     minHeight: 72,
     paddingHorizontal: 4,
@@ -124,10 +154,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: typography.weights.semibold,
     textAlign: 'center',
-    writingDirection: 'rtl',
+    writingDirection: I18nManager.isRTL ? 'rtl' : 'ltr',
   },
   activeLabel: {
     color: '#F6D77E',
+    fontWeight: typography.weights.black,
+  },
+  badge: {
+    alignItems: 'center',
+    backgroundColor: colors.ruby,
+    borderColor: '#060202',
+    borderRadius: radius.full,
+    borderWidth: 2,
+    justifyContent: 'center',
+    minHeight: 19,
+    minWidth: 19,
+    paddingHorizontal: 4,
+    position: 'absolute',
+    right: -7,
+    top: -6,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
     fontWeight: typography.weights.black,
   },
 });

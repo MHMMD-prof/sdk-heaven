@@ -103,11 +103,13 @@ export type AdminAuditExport = { count: number; csv: string; filename: string; t
 
 export type AdminStoreCatalogItem = {
   availability: 'available' | 'disabled' | 'unavailable';
-  category: 'game-items' | 'chat-themes' | 'avatar-frames' | 'cars' | 'custom-ids';
+  category: 'game-items' | 'chat-themes' | 'avatar-frames' | 'profile-skins' | 'chat-bubbles' | 'nameplates' | 'cosmetic-badges' | 'seat-effects' | 'stickers' | 'cars' | 'custom-ids';
+  cosmeticAsset?: { assetId: string; assetVersionId: string };
   customId?: string;
   createdAt: string;
   description: { ar: string; en: string };
   duration: { kind: 'permanent' } | { kind: 'timed'; unit: 'days' | 'weeks' | 'months'; value: number };
+  entryPresentation?: AdminEntryPresentation;
   featured: boolean;
   itemId: string;
   lastEditorEmail: string;
@@ -117,9 +119,421 @@ export type AdminStoreCatalogItem = {
   previewAssetUrl: string;
   prices: { coins?: number; diamonds?: number };
   purchasingEnabled: boolean;
+  stickerAsset?: { assetId: string; assetVersionId: string };
   stock: { kind: 'unlimited' } | { kind: 'limited'; remaining: number };
   thumbnailUrl: string;
   updatedAt: string;
+};
+
+export type AdminEntryPresentation = {
+  animationEnabled: boolean;
+  audioAsset?: { assetId: string; assetVersionId: string };
+  audioFormat?: 'm4a-aac';
+  durationMs: number;
+  fallbackAsset?: { assetId: string; assetVersionId: string };
+  fallbackFormat?: 'png' | 'legacy-webp';
+  minimumClientVersion: string;
+  performanceTier: 'low' | 'standard' | 'high';
+  physicalApprovalReceiptId?: string;
+  schemaVersion: 1;
+  soundPolicy: 'off' | 'soft' | 'full';
+  visualAsset?: { assetId: string; assetVersionId: string };
+  visualFormat?: 'lottie-json' | 'mp4';
+};
+
+export type AdminEntryPhysicalApproval = {
+  androidDevice: string;
+  androidPassed: boolean;
+  controlsSafeZonePassed: boolean;
+  iosDevice: string;
+  iosPassed: boolean;
+  notes: string;
+  opaqueCompositionPassed: boolean;
+  testedClientVersion: string;
+};
+
+export type AdminRoomThemeSeat = {
+  seatNumber: number;
+  x: number;
+  y: number;
+  scale: number;
+  z: number;
+};
+
+export type AdminRoomThemeManifest = {
+  manifestVersion: 1;
+  themeId: string;
+  publicationStatus: 'draft' | 'published' | 'disabled';
+  renderingEnabled: boolean;
+  purchasingEnabled: boolean;
+  minimumClientVersion: string;
+  revision: number;
+  assets: Record<'background' | 'stage' | 'emptySeatFrame' | 'badge' | 'dock' | 'drawer', { uri: string; version: number } | null>;
+  colors: Record<'background' | 'panel' | 'panelRaised' | 'ruby' | 'rubyBright' | 'gold' | 'goldSoft' | 'text' | 'textMuted', string>;
+  layouts: Record<'5' | '10' | '15' | '20', AdminRoomThemeSeat[]>;
+};
+
+export type AdminRoomThemeDetail = {
+  manifest: AdminRoomThemeManifest | null;
+  versions: Array<{ manifest: AdminRoomThemeManifest; revision: number }>;
+};
+
+export type AdminCosmeticAssetSummary = {
+  id: string;
+  assetId: string;
+  approvedVersionId?: string;
+  approvalId?: string;
+  category: string;
+  currentVersionId?: string;
+  moderationStatus: 'draft' | 'processing' | 'pending' | 'approved' | 'rejected' | 'suspended';
+  ownerType: 'platform' | 'user';
+  ownerUid?: string;
+  pendingVersionId?: string;
+  publicationStatus: 'unpublished' | 'published' | 'disabled';
+  publishedVersionId?: string;
+  renderingEnabled: boolean;
+  revision: number;
+  slot?: string;
+  updatedAt?: string;
+};
+
+export type AdminCosmeticAssetVersion = {
+  id: string;
+  assetId: string;
+  assetVersionId: string;
+  audioAssetId?: string;
+  audioAssetVersionId?: string;
+  byteSize: number;
+  category: string;
+  contentType: string;
+  createdAt?: string;
+  durationMs: number;
+  fallbackAssetId?: string;
+  fallbackAssetVersionId?: string;
+  format: string;
+  frameRate: number;
+  height: number;
+  sha256: string;
+  storagePath: string;
+  transparent: boolean;
+  width: number;
+};
+
+export type AdminCosmeticAssetApproval = {
+  id: string;
+  assetId: string;
+  assetVersionId: string;
+  checksum: string;
+  createdAt?: string;
+  decision: 'approved' | 'rejected';
+  reason: string;
+  reviewerUid: string;
+};
+
+export type AdminCosmeticAssetDetail = {
+  asset: AdminCosmeticAssetSummary | null;
+  approvals: AdminCosmeticAssetApproval[];
+  versions: AdminCosmeticAssetVersion[];
+};
+
+export type AdminRocketAsset = {
+  bytes: number;
+  durationMs?: number;
+  format: 'png' | 'webp' | 'animated-webp' | 'mp3' | 'm4a';
+  height?: number;
+  storagePath: string;
+  uri: string;
+  version: number;
+  width?: number;
+};
+
+export type AdminRocketRewardBundle = {
+  coins: number;
+  diamonds: number;
+  items: Array<{ itemId: string; duplicateFallback?: { amount: number; currency: 'coins' | 'diamonds' } }>;
+  schemaVersion: 1;
+};
+
+export type AdminRocketTemplate = {
+  animationApproval?: {
+    approvalId: string;
+    fallbackVerified: true;
+    memoryVerified: true;
+    physicalAndroidDevice: string;
+    reducedMotionVerified: true;
+    testedClientVersion: string;
+  };
+  appearance: {
+    animationAsset?: AdminRocketAsset;
+    name: { ar: string; en: string };
+    soundAsset?: AdminRocketAsset;
+    staticAsset?: AdminRocketAsset;
+  };
+  enabledRankCount: 1 | 2 | 3;
+  minimumClientVersion: string;
+  publicationStatus: 'draft' | 'published' | 'disabled';
+  rewards: Partial<Record<'1' | '2' | '3', AdminRocketRewardBundle>>;
+  schemaVersion: 1;
+  targetSupportPoints: number;
+  templateId: 'global-room-rocket';
+  templateVersion: 1;
+  timeZone: string;
+};
+
+export type AdminRocketCampaignDetail = {
+  campaign: {
+    draft?: AdminRocketTemplate;
+    emergencyDisabled: boolean;
+    lastPublishedRevision: number;
+    nextEffectiveCycleId: string;
+    revision: number;
+  } | null;
+  operations: {
+    activeCycleCount: number;
+    activeCycles: Array<{
+      cycleId: string;
+      endAtMillis: number;
+      roomId: string;
+      state: string;
+      supportPoints: number;
+      targetSupportPoints: number;
+    }>;
+    qualifyingRoomCount: number;
+    settlementCounts: Record<string, number>;
+    settledRewards: { coins: number; diamonds: number; itemGrantCount: number };
+    settlementSampleLimited: boolean;
+  };
+  versions: Array<{
+    effectiveFromAtMillis: number;
+    effectiveFromCycleId: string;
+    revision: number;
+    rewardLiability: { coins: number; diamonds: number; itemGrantCount: number; rankCount: number };
+    template: AdminRocketTemplate;
+  }>;
+};
+
+export type AdminDailyLoginRewardItem = {
+  duplicateFallback?: { amount: number; currency: 'coins' | 'diamonds' };
+  itemId: string;
+};
+
+export type AdminDailyLoginRewardBundle = {
+  coins: number;
+  diamonds: number;
+  items: AdminDailyLoginRewardItem[];
+  schemaVersion: 1;
+};
+
+export type AdminDailyLoginTemplate = {
+  minimumClientVersion: string;
+  rewards: Array<{ day: number; reward: AdminDailyLoginRewardBundle }>;
+  schemaVersion: 1;
+  timeZone: 'Asia/Baghdad';
+};
+
+export type AdminDailyLoginVersion = AdminDailyLoginTemplate & {
+  createdAtMillis?: number;
+  publicationStatus: 'published';
+  publishedAtMillis?: number;
+  revision: number;
+  startsAtMillis?: number;
+};
+
+export type AdminDailyLoginCampaignDetail = {
+  current: {
+    activeRevision: number;
+    claimsPaused: boolean;
+    emergencyDisabled: boolean;
+    lastPublishedRevision: number;
+    presentationVisible: boolean;
+    publicationStatus: 'draft' | 'published' | 'retired';
+    revision: number;
+    scheduledAtMillis?: number;
+    scheduledRevision?: number;
+    schemaVersion: 1;
+  } | null;
+  draft: {
+    revision: number;
+    template: AdminDailyLoginTemplate;
+    updatedAtMillis?: number;
+    updatedBy: string;
+  } | null;
+  effective: AdminDailyLoginVersion | null;
+  features: {
+    itemRewardsEnabled: boolean;
+    rewardsEnabled: boolean;
+  };
+  liability: Array<{ claimants: number; coins: number; diamonds: number; items: number }>;
+  metrics: {
+    claimCount: number;
+    failedClaimCount: number;
+    heldUserCount: number;
+    itemRewardCount: number;
+    lastReconciliationAtMillis: number;
+    replayCount: number;
+    settled: { coins: number; diamonds: number };
+    sevenDayPerUser: { claimants: number; coins: number; diamonds: number; items: number };
+  };
+  revision: number;
+  versions: AdminDailyLoginVersion[];
+};
+
+export type AdminRoomTargetTemplate = {
+  conversion: {
+    denominator: number;
+    numerator: number;
+    payoutCurrency: 'coins' | 'diamonds';
+    rounding: 'floor';
+    sourceCurrency: 'coins';
+  };
+  eligibleGiftRules: {
+    committedOnly: true;
+    excludeSelfGifts: true;
+    minimumDebitedCoins: number;
+  };
+  enabled: boolean;
+  maxSelectedUsers: number;
+  perRoomReturnCap: number;
+  perUserReturnCap: number;
+  publicationStatus: 'draft' | 'published' | 'disabled';
+  returnBps: number;
+  riskValuation: {
+    diamondValueCoins: number;
+    itemValuesCoins: Record<string, number>;
+  };
+  schemaVersion: 1;
+  targetSupportPoints: number;
+  templateId: 'global-room-target';
+  templateVersion: 1;
+  timeZone: string;
+};
+
+export type AdminRoomTargetRiskSnapshot = {
+  commissionBps?: number;
+  commissionPolicyVersion?: number;
+  evaluatedAtMillis?: number;
+  marginCoins?: number;
+  rocketLiabilityCoins?: number;
+  roomTargetLiabilityCoins?: number;
+  stackedLiabilityCoins?: number;
+  targetCommissionCoins?: number;
+  viable?: boolean;
+};
+
+export type AdminRoomTargetCampaignDetail = {
+  campaign: {
+    draft?: AdminRoomTargetTemplate;
+    emergencyDisabled: boolean;
+    lastPublishedRevision: number;
+    nextEffectiveCycleId: string;
+    revision: number;
+  } | null;
+  operations: {
+    activeCycleCount: number;
+    activeCycles: Array<{
+      cycleId: string;
+      eligibleSpendCoins: number;
+      endAtMillis: number;
+      roomId: string;
+      rosterSize: number;
+      state: string;
+      supportPoints: number;
+      targetSupportPoints: number;
+    }>;
+    activeHoldCount: number;
+    qualifyingRoomCount: number;
+    settlementCounts: Record<string, number>;
+    settledReturns: { coins: number; diamonds: number };
+    settlementSampleLimited: boolean;
+  };
+  versions: Array<{
+    effectiveFromAtMillis: number;
+    effectiveFromCycleId: string;
+    operation: string;
+    revision: number;
+    riskSnapshot: AdminRoomTargetRiskSnapshot;
+    template: AdminRoomTargetTemplate;
+  }>;
+};
+
+export type AdminWeeklyIncentiveIntegrity = {
+  alerts: Array<{ id: string; alertId?: string; assessmentId?: string; discrepancies?: string[]; settlementId?: string; state?: string }>;
+  assessments: Array<{ id: string; assessmentId?: string; riskScore?: number; settlementId?: string; signals?: Array<{ code: string; severity: string }> }>;
+  generatedAtMillis: number;
+  health: {
+    estimatedLiabilityCoins: number;
+    failedPayoutCount: number;
+    heldPayoutCount: number;
+    heldValueCoins: number;
+    reconciliationDriftCount: number;
+    schedulers: Array<{ id: string; lagMillis: number; lastRunAtMillis: number; status: string }>;
+  };
+  reports: Array<{ balanced?: boolean; discrepancies?: string[]; id: string; kind?: string; sourceId?: string }>;
+  retentionPolicy: Record<string, { days: number; condition?: string }>;
+};
+
+export type AdminAttendanceShadowReport = {
+  days: Array<{ dayId: string; endAtMillis: number; excusedMillis: number; qualifiedMillis: number; startAtMillis: number }>;
+  generatedAtMillis: number;
+  muteGraceMillis: number;
+  muteGraceCycling: { flagged: boolean; resetCount: number; windowMillis: number };
+  outageWindows: Array<{ endAtMillis: number; outageId: string; reason: string; startAtMillis: number }>;
+  rawIntervals: Array<{ endAtMillis: number; exclusionReason: string; intervalId: string; roomId: string; seatId: string; startAtMillis: number; state: string }>;
+  reconnectGroups: Array<{ endAtMillis: number; intervalCount: number; qualifiedMillis: number; startAtMillis: number }>;
+  reportOnly: true;
+  sessions: Array<{ connected: boolean; lastObservedAtMillis: number; microphonePublished: boolean; muted: boolean; roomId: string; seated: boolean; seatId: string; sessionId: string }>;
+  timeZone: string;
+  uid: string;
+};
+
+export type AdminPayrollPlan = {
+  category: 'super-admin' | 'employee' | 'female-host';
+  currency: 'coins' | 'diamonds';
+  dailyMinimumMinutes: number;
+  enabled: boolean;
+  effectiveFromCycleId: string;
+  muteGraceMinutes: 5;
+  name: { ar: string; en: string };
+  planId: string;
+  requiredWeekdays: number[];
+  revision: number;
+  schemaVersion: 1;
+  timeZone: 'Asia/Baghdad';
+  weeklyAmount: number;
+};
+
+export type AdminPayrollEnrollment = {
+  effectiveFromCycleId: string;
+  endAtMillis: number;
+  planId: string;
+  schemaVersion: 1;
+  startAtMillis: number;
+  state: 'active' | 'suspended' | 'ended';
+  uid: string;
+  weeklyAmountOverride: number;
+};
+
+export type AdminPayrollOverview = {
+  cycle: { cycleId: string; endAtMillis: number; startAtMillis: number; timeZone: string };
+  nextCycle: { cycleId: string; endAtMillis: number; startAtMillis: number; timeZone: string };
+  enrollments: Array<{ currentConfig: AdminPayrollEnrollment | null; pendingConfig: AdminPayrollEnrollment | null; uid: string }>;
+  outcomes: Array<{
+    amount: number;
+    createdAtMillis: number;
+    currency: string;
+    cycleId: string;
+    daily: Array<{ dayId: string; met: boolean; qualifiedMinutes: number; requiredMinutes: number; weekday: number }>;
+    failureCode: string;
+    ledgerBalanced: boolean;
+    ledgerDiscrepancies: string[];
+    outcomeId: string;
+    planId: string;
+    settlementId: string;
+    state: string;
+    uid: string;
+  }>;
+  plans: Array<{ currentConfig: AdminPayrollPlan | null; pendingConfig: AdminPayrollPlan | null; planId: string }>;
+  projected: Array<{ amount: number; currency: string; enrollmentCount: number; planId: string }>;
 };
 
 export type AdminStoreFilters = {
@@ -138,6 +552,20 @@ export type AdminGiftCatalogItem = {
   lastEditorUid: string;
   nameAr: string;
   price: number;
+  presentation: {
+    animationEnabled: boolean;
+    audioAsset?: { assetId: string; assetVersionId: string };
+    durationMs: number;
+    fallbackAsset?: { assetId: string; assetVersionId: string };
+    hapticPolicy: 'off' | 'light' | 'success';
+    minimumClientVersion: string;
+    performanceTier: 'low' | 'standard' | 'high';
+    physicalApprovalReceiptId?: string;
+    schemaVersion: 1;
+    soundPolicy: 'off' | 'soft' | 'full';
+    tier: 'inline' | 'targeted' | 'major' | 'global';
+    visualAsset?: { assetId: string; assetVersionId: string };
+  };
   scoreValue: number;
   status: 'available' | 'disabled';
   updatedAt: string;
@@ -297,7 +725,13 @@ export type AdminUserDetail = {
   notifications: { configured: boolean; preferences: { coupleRequests: boolean; friendRequests: boolean; gifts: boolean; walletTransfers: boolean }; registeredDeviceCount: number };
   notes: Array<{ actorEmail: string; actorUid: string; createdAt: string; id: string; note: string }>;
   profile: AdminUserRow;
-  representative: { active: boolean; currencies: { coins: boolean; diamonds: boolean }; updatedAt: string };
+  representative: {
+    active: boolean;
+    currencies: { coins: boolean; diamonds: boolean };
+    limits: Partial<Record<'coins' | 'diamonds', RepresentativeCurrencyLimits>>;
+    pin: { configured: boolean; resetRequired: boolean; updatedAt: string };
+    updatedAt: string;
+  };
   restrictions: { mutedUntil: string; reason: string };
   wallet: {
     balances: { coins: number; diamonds: number };
@@ -330,7 +764,7 @@ export type AdminRoomRow = {
 };
 
 export type AdminRoomStatusFilter = 'active' | 'closed' | 'all';
-export type AdminRoomAction = 'close-room' | 'mute-member' | 'remove-member' | 'reopen-room' | 'transfer-host' | 'unmute-member';
+export type AdminRoomAction = 'clear-staff-lockdown' | 'close-room' | 'kick-everyone' | 'mute-member' | 'remove-member' | 'reopen-room' | 'staff-lockdown' | 'transfer-host' | 'unmute-member';
 export type AdminRoomMediaAction = 'approve-room-image' | 'reject-room-image' | 'remove-room-image' | 'restore-room-customization';
 export type AdminRoomFilters = {
   capacity?: '' | 'quiet' | 'busy' | 'crowded';
@@ -399,7 +833,9 @@ export type AdminAdministrator = {
   displayName: string;
   email: string;
   lastSignInAt: string;
+  regionCodes: string[];
   role: AdminRole;
+  scopeStatus: string;
   tokensValidAfterAt: string;
   uid: string;
 };
@@ -411,12 +847,66 @@ export type AdminPreferences = {
 };
 export type AdminSettings = {
   featureFlags: Record<'usersDiscovery' | 'friends' | 'wallet' | 'gifts' | 'couples' | 'pushNotifications' | 'representativeTransfers', boolean>;
+  featureFlagsUpdatedAt: string;
   history: AdminAuditEventRow[];
   preferences: AdminPreferences;
   roleDefinitions: Array<{ permissions: string[]; role: AdminRole }>;
+  roomGiftPolicy: {
+    commissionBps: number;
+    configured: boolean;
+    effectiveAt: string;
+    updatedAt: string;
+    updatedBy: string;
+    version: number;
+  };
   session: { createdAt: string; disabled: boolean; emailVerified: boolean; lastSignInAt: string; tokensValidAfterAt: string };
 };
-export type AdministratorAction = 'grant-role' | 'change-role' | 'remove-admin' | 'revoke-sessions';
+
+export type RepresentativeCurrencyLimits = {
+  maxPerDay: number;
+  maxPerTransfer: number;
+  maxTransfersPerHour: number;
+};
+
+export type AdminRepresentativeTransfer = {
+  amount: number;
+  createdAt: string;
+  currency: 'coins' | 'diamonds';
+  eligibleForReversal: boolean;
+  publicReference: string;
+  recipientDisplayName: string;
+  recipientPublicId: string;
+  recipientUid: string;
+  representativeDisplayName: string;
+  representativePublicId: string;
+  representativeUid: string;
+  reversalReason: string;
+  reversedAt: string;
+  status: 'completed' | 'expired' | 'reversed';
+  transferId: string;
+};
+
+export type AdminRepresentativeEvent = {
+  actorUid: string;
+  amount: number;
+  createdAt: string;
+  currency: '' | 'coins' | 'diamonds';
+  id: string;
+  kind: string;
+  publicReference: string;
+  representativeUid: string;
+  status: string;
+};
+
+export type AdminRepresentativeOperations = {
+  auditHistory: AdminRepresentativeEvent[];
+  policy: { configured: boolean; limits?: Record<'coins' | 'diamonds', RepresentativeCurrencyLimits>; updatedAt: string };
+  receipt: AdminRepresentativeTransfer | null;
+  recentReversals: AdminRepresentativeEvent[];
+  recentSecurityEvents: AdminRepresentativeEvent[];
+  recentTransfers: AdminRepresentativeTransfer[];
+};
+export type AdministratorAction = 'grant-role' | 'change-role' | 'remove-admin' | 'revoke-sessions' | 'set-region-scope';
 export type AdminReportSummary = {
   open: number;
   overdue: number;
@@ -573,18 +1063,47 @@ export async function updateAdminSettings(user: User, preferences: Omit<AdminPre
   return payload.eventId;
 }
 
-export async function executeAdministratorAction(user: User, input: { administratorAction: AdministratorAction; email?: string; reason: string; role?: AdminRole; targetUid?: string }): Promise<string> {
+export async function executeAdministratorAction(user: User, input: {
+  administratorAction: AdministratorAction;
+  email?: string;
+  reason: string;
+  regionCodes?: string[];
+  role?: AdminRole;
+  targetUid?: string;
+}): Promise<string> {
   const payload = await requestAdminDashboard<AdminMutationResponse>(user, {
-    action: 'administrator-action', administratorAction: input.administratorAction, email: input.email || '',
-    reason: input.reason, requestId: crypto.randomUUID(), role: input.role || 'support', targetUid: input.targetUid || '',
+    action: 'administrator-action',
+    administratorAction: input.administratorAction,
+    email: input.email || '',
+    reason: input.reason,
+    regionCodes: input.regionCodes || [],
+    requestId: crypto.randomUUID(),
+    role: input.role || 'support',
+    targetUid: input.targetUid || '',
   });
   if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Administrator action failed.');
   return payload.eventId;
 }
 
-export async function updateAdminFeatureFlag(user: User, input: { enabled: boolean; flag: keyof AdminSettings['featureFlags']; reason: string }): Promise<string> {
+export async function updateAdminFeatureFlag(user: User, input: { enabled: boolean; expectedUpdatedAt: string; flag: keyof AdminSettings['featureFlags']; reason: string }): Promise<string> {
   const payload = await requestAdminDashboard<AdminMutationResponse>(user, { action: 'feature-flag-update', ...input, requestId: crypto.randomUUID() });
   if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Feature flag update failed.');
+  return payload.eventId;
+}
+
+export async function updateRoomGiftPolicy(user: User, input: {
+  commissionBps: number;
+  expectedVersion: number;
+  reason: string;
+}): Promise<string> {
+  const payload = await requestAdminDashboard<AdminMutationResponse>(user, {
+    action: 'room-gift-policy-update',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) {
+    throw new Error(payload.error || 'Room gift commission could not be updated.');
+  }
   return payload.eventId;
 }
 
@@ -710,9 +1229,69 @@ export async function adjustAdminWallet(user: User, input: { amount: number; cur
   return payload.eventId;
 }
 
-export async function updateAdminRepresentative(user: User, input: { active: boolean; coins: boolean; diamonds: boolean; expectedUpdatedAt?: string; targetUid: string }): Promise<string> {
+export async function updateAdminRepresentative(user: User, input: { active: boolean; coins: boolean; diamonds: boolean; expectedUpdatedAt: string; reason: string; targetUid: string }): Promise<string> {
   const payload = await requestAdminDashboard<AdminUserActionResponse>(user, { action: 'representative-update', ...input, requestId: crypto.randomUUID() });
   if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Representative permission update failed.');
+  return payload.eventId;
+}
+
+export async function requestAdminRepresentativeOperations(user: User, publicReference = ''): Promise<AdminRepresentativeOperations> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean; operations?: unknown }>(user, {
+    action: 'representative-operations', publicReference,
+  });
+  if (payload.ok !== true || !isAdminRepresentativeOperations(payload.operations)) {
+    throw new Error(payload.error || 'Representative operations are unavailable.');
+  }
+  return payload.operations;
+}
+
+export async function updateAdminRepresentativePolicy(user: User, input: {
+  expectedUpdatedAt: string;
+  limits: Record<'coins' | 'diamonds', RepresentativeCurrencyLimits>;
+  reason: string;
+}): Promise<string> {
+  const payload = await requestAdminDashboard<AdminMutationResponse>(user, {
+    action: 'representative-policy-update', ...input, requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Representative policy update failed.');
+  return payload.eventId;
+}
+
+export async function updateAdminRepresentativeOverride(user: User, input: {
+  expectedUpdatedAt: string;
+  limits: Partial<Record<'coins' | 'diamonds', RepresentativeCurrencyLimits>>;
+  reason: string;
+  targetUid: string;
+}): Promise<string> {
+  const payload = await requestAdminDashboard<AdminMutationResponse>(user, {
+    action: 'representative-override-update', ...input, requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Representative override update failed.');
+  return payload.eventId;
+}
+
+export async function resetAdminRepresentativePin(user: User, input: {
+  expectedUpdatedAt: string;
+  reason: string;
+  targetUid: string;
+}): Promise<string> {
+  const payload = await requestAdminDashboard<AdminMutationResponse>(user, {
+    action: 'representative-pin-reset', ...input, requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Representative PIN reset failed.');
+  return payload.eventId;
+}
+
+export async function reverseAdminRepresentativeTransfer(user: User, input: {
+  expectedAmount: number;
+  expectedCurrency: 'coins' | 'diamonds';
+  publicReference: string;
+  reason: string;
+}): Promise<string> {
+  const payload = await requestAdminDashboard<AdminMutationResponse>(user, {
+    action: 'representative-reversal', ...input, requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Representative reversal failed.');
   return payload.eventId;
 }
 
@@ -727,12 +1306,375 @@ export async function requestAdminStoreCatalogPage(user: User, filters: AdminSto
   return { items, pageInfo: readAdminPageInfo(payload.pageInfo, items.length) };
 }
 
-export async function upsertAdminStoreCatalog(user: User, input: { expectedUpdatedAt?: string; item: Omit<AdminStoreCatalogItem, 'createdAt' | 'lastEditorEmail' | 'lastEditorUid' | 'updatedAt'>; reason: string }): Promise<string> {
+export async function upsertAdminStoreCatalog(user: User, input: { entryPhysicalApproval?: AdminEntryPhysicalApproval; expectedUpdatedAt?: string; item: Omit<AdminStoreCatalogItem, 'createdAt' | 'lastEditorEmail' | 'lastEditorUid' | 'updatedAt'>; reason: string }): Promise<string> {
   const payload = await requestAdminDashboard<AdminStoreCatalogUpsertResponse>(user, {
-    action: 'store-catalog-upsert', expectedUpdatedAt: input.expectedUpdatedAt || '', item: input.item, reason: input.reason, requestId: crypto.randomUUID(),
+    action: 'store-catalog-upsert', entryPhysicalApproval: input.entryPhysicalApproval, expectedUpdatedAt: input.expectedUpdatedAt || '', item: input.item, reason: input.reason, requestId: crypto.randomUUID(),
   });
   if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Store catalog update failed.');
   return payload.eventId;
+}
+
+export async function requestAdminRoomTheme(user: User, themeId: string): Promise<AdminRoomThemeDetail> {
+  const payload = await requestAdminDashboard<{ ok?: boolean; error?: string; theme?: AdminRoomThemeDetail }>(user, {
+    action: 'room-theme',
+    themeId,
+  });
+  if (payload.ok !== true || !payload.theme) throw new Error(payload.error || 'Room theme is unavailable.');
+  return payload.theme;
+}
+
+export async function requestAdminCosmeticAssets(
+  user: User,
+  filters: {
+    assetId?: string;
+    category?: string;
+    moderationStatus?: string;
+    publicationStatus?: string;
+  } = {},
+): Promise<{ assets?: AdminCosmeticAssetSummary[] } | AdminCosmeticAssetDetail> {
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    ok?: boolean;
+    registry?: { assets?: AdminCosmeticAssetSummary[] } | AdminCosmeticAssetDetail;
+  }>(user, {
+    action: 'cosmetic-assets',
+    assetId: filters.assetId || '',
+    category: filters.category || '',
+    moderationStatus: filters.moderationStatus || '',
+    publicationStatus: filters.publicationStatus || '',
+  });
+  if (payload.ok !== true || !payload.registry) {
+    throw new Error(payload.error || 'Cosmetics asset registry is unavailable.');
+  }
+  return payload.registry;
+}
+
+export async function mutateAdminCosmeticAsset(
+  user: User,
+  input: {
+    asset?: {
+      assetId: string;
+      assetVersionId: string;
+      audioAssetId?: string;
+      audioAssetVersionId?: string;
+      category: string;
+      fallbackAssetId?: string;
+      fallbackAssetVersionId?: string;
+      format: string;
+      loop: boolean;
+      minimumClientVersion: string;
+      ownerType: 'platform' | 'user';
+      ownerUid?: string;
+      performanceTier: 'low' | 'standard' | 'high';
+      slot?: string;
+      usage: 'static' | 'looping' | 'one-shot';
+    };
+    assetId?: string;
+    assetVersionId?: string;
+    confirmation?: string;
+    authoritySeparationPassed?: boolean;
+    readableIdentityPassed?: boolean;
+    expectedRevision: number;
+    operation:
+      | 'validate-version'
+      | 'approve-version'
+      | 'reject-version'
+      | 'publish-version'
+      | 'emergency-disable'
+      | 'suspend'
+      | 'rollback-version';
+    reason: string;
+  },
+): Promise<{ approvalId?: string; eventId: string; revision: number; validationReceiptId?: string }> {
+  const payload = await requestAdminDashboard<{
+    approvalId?: string;
+    error?: string;
+    eventId?: string;
+    ok?: boolean;
+    revision?: number;
+    validationReceiptId?: string;
+  }>(user, {
+    action: 'cosmetic-assets-mutate',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (
+    payload.ok !== true
+    || !payload.eventId
+    || !Number.isSafeInteger(payload.revision)
+  ) {
+    throw new Error(payload.error || 'Cosmetics asset operation failed.');
+  }
+  return {
+    ...(payload.approvalId ? { approvalId: payload.approvalId } : {}),
+    eventId: payload.eventId,
+    revision: Number(payload.revision),
+    ...(payload.validationReceiptId
+      ? { validationReceiptId: payload.validationReceiptId }
+      : {}),
+  };
+}
+
+export async function mutateAdminRoomTheme(user: User, input: {
+  expectedRevision: number;
+  manifest?: AdminRoomThemeManifest;
+  operation: 'save-draft' | 'publish' | 'emergency-disable' | 'rollback';
+  reason: string;
+  rollbackRevision?: number;
+  themeId: string;
+}): Promise<number> {
+  const payload = await requestAdminDashboard<{ ok?: boolean; error?: string; revision?: number }>(user, {
+    action: 'room-theme-mutate',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !Number.isSafeInteger(payload.revision)) throw new Error(payload.error || 'Room theme update failed.');
+  return Number(payload.revision);
+}
+
+export async function requestAdminRocketCampaign(user: User): Promise<AdminRocketCampaignDetail> {
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    ok?: boolean;
+    rocketCampaign?: AdminRocketCampaignDetail;
+  }>(user, { action: 'rocket-campaign' });
+  if (payload.ok !== true || !payload.rocketCampaign) {
+    throw new Error(payload.error || 'Rocket campaign is unavailable.');
+  }
+  return payload.rocketCampaign;
+}
+
+export async function requestAdminDailyLoginCampaign(user: User): Promise<AdminDailyLoginCampaignDetail> {
+  const payload = await requestAdminDashboard<{
+    dailyLoginCampaign?: AdminDailyLoginCampaignDetail;
+    error?: string;
+    ok?: boolean;
+  }>(user, { action: 'daily-login-campaign' });
+  if (payload.ok !== true || !payload.dailyLoginCampaign) {
+    throw new Error(payload.error || 'Daily Login campaign is unavailable.');
+  }
+  return payload.dailyLoginCampaign;
+}
+
+export async function mutateAdminDailyLoginCampaign(user: User, input: {
+  enabled?: boolean;
+  expectedRevision: number;
+  operation:
+    | 'emergency-disable'
+    | 'emergency-enable'
+    | 'publish'
+    | 'rollback'
+    | 'save-draft'
+    | 'set-claims-paused'
+    | 'set-presentation-visible';
+  reason: string;
+  rollbackRevision?: number;
+  template?: AdminDailyLoginTemplate;
+}): Promise<{ effectiveAtMillis?: number; publishedRevision?: number; revision: number }> {
+  const payload = await requestAdminDashboard<{
+    effectiveAtMillis?: number;
+    error?: string;
+    ok?: boolean;
+    publishedRevision?: number;
+    revision?: number;
+  }>(user, {
+    action: 'daily-login-campaign-mutate',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !Number.isSafeInteger(payload.revision)) {
+    throw new Error(payload.error || 'Daily Login campaign update failed.');
+  }
+  return {
+    ...(Number.isSafeInteger(payload.effectiveAtMillis) ? { effectiveAtMillis: payload.effectiveAtMillis } : {}),
+    ...(Number.isSafeInteger(payload.publishedRevision) ? { publishedRevision: payload.publishedRevision } : {}),
+    revision: Number(payload.revision),
+  };
+}
+
+export async function requestAdminRoomTargetCampaign(user: User): Promise<AdminRoomTargetCampaignDetail> {
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    ok?: boolean;
+    roomTargetCampaign?: AdminRoomTargetCampaignDetail;
+  }>(user, { action: 'room-target-campaign' });
+  if (payload.ok !== true || !payload.roomTargetCampaign) {
+    throw new Error(payload.error || 'Room Target campaign is unavailable.');
+  }
+  return payload.roomTargetCampaign;
+}
+
+export async function requestAdminWeeklyIncentiveIntegrity(user: User): Promise<AdminWeeklyIncentiveIntegrity> {
+  const payload = await requestAdminDashboard<{ error?: string; integrity?: AdminWeeklyIncentiveIntegrity; ok?: boolean }>(
+    user,
+    { action: 'weekly-incentive-integrity' },
+  );
+  if (payload.ok !== true || !payload.integrity) throw new Error(payload.error || 'Incentive integrity is unavailable.');
+  return payload.integrity;
+}
+
+export async function mutateAdminWeeklyIncentiveIntegrity(user: User, input: {
+  alertId?: string;
+  assessmentId?: string;
+  operation: 'approve-settlement' | 'reject-settlement' | 'resolve-alert';
+  reason: string;
+  settlementId?: string;
+}): Promise<void> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean }>(user, {
+    action: 'weekly-incentive-integrity-mutate',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true) throw new Error(payload.error || 'Integrity review failed.');
+}
+
+export async function reconcileAdminWeeklyIncentives(user: User, input: {
+  apply: boolean;
+  reason?: string;
+}): Promise<{ balanced: number; scanned: number; unbalanced: number }> {
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    ok?: boolean;
+    reconciliation?: { summary: { balanced: number; scanned: number; unbalanced: number } };
+  }>(user, {
+    action: 'weekly-incentive-reconcile',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.reconciliation) throw new Error(payload.error || 'Reconciliation failed.');
+  return payload.reconciliation.summary;
+}
+
+export async function mutateAdminRoomTargetCampaign(user: User, input: {
+  expectedRevision: number;
+  operation: 'save-draft' | 'publish' | 'emergency-disable' | 'rollback';
+  reason: string;
+  rollbackRevision?: number;
+  template?: AdminRoomTargetTemplate;
+}): Promise<{ effectiveFromCycleId?: string; revision: number; riskSnapshot?: AdminRoomTargetRiskSnapshot }> {
+  const payload = await requestAdminDashboard<{
+    effectiveFromCycleId?: string;
+    error?: string;
+    ok?: boolean;
+    revision?: number;
+    riskSnapshot?: AdminRoomTargetRiskSnapshot;
+  }>(user, {
+    action: 'room-target-campaign-mutate',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !Number.isSafeInteger(payload.revision)) {
+    throw new Error(payload.error || 'Room Target campaign update failed.');
+  }
+  return {
+    ...(payload.effectiveFromCycleId ? { effectiveFromCycleId: payload.effectiveFromCycleId } : {}),
+    revision: Number(payload.revision),
+    ...(payload.riskSnapshot ? { riskSnapshot: payload.riskSnapshot } : {}),
+  };
+}
+
+export async function mutateAdminRoomTargetMemberHold(user: User, input: {
+  cycleId: string;
+  operation: 'apply' | 'release';
+  reason: string;
+  roomId: string;
+  targetUid: string;
+}): Promise<string> {
+  const payload = await requestAdminDashboard<{ error?: string; eventId?: string; ok?: boolean }>(user, {
+    action: 'room-target-member-hold',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Room Target hold update failed.');
+  return payload.eventId;
+}
+
+export async function requestAdminAttendanceShadow(user: User, targetUid: string): Promise<AdminAttendanceShadowReport> {
+  const payload = await requestAdminDashboard<{ attendance?: AdminAttendanceShadowReport; error?: string; ok?: boolean }>(
+    user,
+    { action: 'attendance-shadow', targetUid },
+  );
+  if (payload.ok !== true || !payload.attendance) throw new Error(payload.error || 'Attendance shadow report is unavailable.');
+  return payload.attendance;
+}
+
+export async function mutateAdminAttendanceOutage(user: User, input: {
+  endAtMillis?: number;
+  operation: 'create' | 'revoke';
+  outageId?: string;
+  reason: string;
+  startAtMillis?: number;
+}): Promise<string> {
+  const requestId = crypto.randomUUID();
+  const payload = await requestAdminDashboard<{ auditId?: string; error?: string; ok?: boolean }>(user, {
+    action: 'attendance-outage-mutate',
+    endAtMillis: input.endAtMillis || 0,
+    operation: input.operation,
+    outageId: input.outageId || requestId,
+    reason: input.reason,
+    requestId,
+    startAtMillis: input.startAtMillis || 0,
+  });
+  if (payload.ok !== true || !payload.auditId) throw new Error(payload.error || 'Attendance outage update failed.');
+  return payload.auditId;
+}
+
+export async function requestAdminPayroll(user: User): Promise<AdminPayrollOverview> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean; payroll?: AdminPayrollOverview }>(
+    user,
+    { action: 'payroll-overview' },
+  );
+  if (payload.ok !== true || !payload.payroll) throw new Error(payload.error || 'Payroll is unavailable.');
+  return payload.payroll;
+}
+
+export async function mutateAdminPayroll(user: User, input:
+  | { operation: 'upsert-plan'; plan: AdminPayrollPlan; reason: string }
+  | { enrollment: AdminPayrollEnrollment; operation: 'enroll'; reason: string; uid: string }
+  | { operation: 'suspend' | 'resume' | 'end' | 'hold' | 'release-hold'; reason: string; uid: string }
+  | { cycleId: string; dayId: string; operation: 'excuse-day'; reason: string; uid: string }
+): Promise<{ auditId: string; effectiveFromCycleId?: string }> {
+  const payload = await requestAdminDashboard<{
+    auditId?: string;
+    effectiveFromCycleId?: string;
+    error?: string;
+    ok?: boolean;
+  }>(user, {
+    action: 'payroll-mutate',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.auditId) throw new Error(payload.error || 'Payroll update failed.');
+  return {
+    auditId: payload.auditId,
+    ...(payload.effectiveFromCycleId ? { effectiveFromCycleId: payload.effectiveFromCycleId } : {}),
+  };
+}
+
+export async function mutateAdminRocketCampaign(user: User, input: {
+  expectedRevision: number;
+  operation: 'save-draft' | 'publish' | 'emergency-disable' | 'rollback';
+  reason: string;
+  rollbackRevision?: number;
+  template?: AdminRocketTemplate;
+}): Promise<{ effectiveFromCycleId?: string; revision: number }> {
+  const payload = await requestAdminDashboard<{
+    effectiveFromCycleId?: string;
+    error?: string;
+    ok?: boolean;
+    revision?: number;
+  }>(user, {
+    action: 'rocket-campaign-mutate',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !Number.isSafeInteger(payload.revision)) {
+    throw new Error(payload.error || 'Rocket campaign update failed.');
+  }
+  return {
+    ...(payload.effectiveFromCycleId ? { effectiveFromCycleId: payload.effectiveFromCycleId } : {}),
+    revision: Number(payload.revision),
+  };
 }
 
 export async function requestAdminGiftCatalogPage(user: User, filters: AdminStoreFilters = {}): Promise<AdminListPage<AdminGiftCatalogItem>> {
@@ -831,6 +1773,15 @@ export async function upsertAdminGiftCatalog(user: User, input: {
   iconKey: 'rose' | 'crown' | 'diamond' | 'heart' | 'star';
   nameAr: string;
   price: number;
+  physicalApproval?: {
+    androidDevice: string;
+    androidPassed: boolean;
+    iosDevice: string;
+    iosPassed: boolean;
+    notes: string;
+    testedClientVersion: string;
+  };
+  presentation: AdminGiftCatalogItem['presentation'];
   reason: string;
   scoreValue: number;
   status: 'available' | 'disabled';
@@ -1030,16 +1981,25 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
     | ({ action: 'audit-export' } & Omit<Required<AdminAuditFilters>, 'cursor'>)
     | { action: 'audit-detail'; eventId: string }
     | { action: 'client-error'; message: string; requestId: string; route: string; source: string; stack: string }
-    | { action: 'admin-settings' | 'administrators' | 'audit-summary' | 'overview' | 'report-summary' | 'room-summary' | 'session' | 'store-summary' | 'user-summary' }
+    | { action: 'admin-settings' | 'administrators' | 'audit-summary' | 'daily-login-campaign' | 'overview' | 'payroll-overview' | 'report-summary' | 'rocket-campaign' | 'room-target-campaign' | 'room-summary' | 'session' | 'store-summary' | 'user-summary' | 'weekly-incentive-integrity' }
+    | { action: 'attendance-shadow'; targetUid: string }
+    | { action: 'attendance-outage-mutate'; endAtMillis: number; operation: 'create' | 'revoke'; outageId: string; reason: string; requestId: string; startAtMillis: number }
+    | ({ action: 'payroll-mutate'; requestId: string } & (
+      | { operation: 'upsert-plan'; plan: AdminPayrollPlan; reason: string }
+      | { enrollment: AdminPayrollEnrollment; operation: 'enroll'; reason: string; uid: string }
+      | { operation: 'suspend' | 'resume' | 'end' | 'hold' | 'release-hold'; reason: string; uid: string }
+      | { cycleId: string; dayId: string; operation: 'excuse-day'; reason: string; uid: string }
+    ))
     | ({ action: 'admin-settings-update'; requestId: string } & Omit<AdminPreferences, 'updatedAt'>)
-    | { action: 'administrator-action'; administratorAction: AdministratorAction; email: string; reason: string; requestId: string; role: AdminRole; targetUid: string }
-    | { action: 'feature-flag-update'; enabled: boolean; flag: keyof AdminSettings['featureFlags']; reason: string; requestId: string }
+    | { action: 'administrator-action'; administratorAction: AdministratorAction; email: string; reason: string; regionCodes?: string[]; requestId: string; role: AdminRole; targetUid: string }
+    | { action: 'feature-flag-update'; enabled: boolean; expectedUpdatedAt: string; flag: keyof AdminSettings['featureFlags']; reason: string; requestId: string }
     | { action: 'report-detail'; reportId: string }
     | ({ action: 'reports' } & Required<AdminReportFilters>)
     | { action: 'report-action'; assigneeUid: string; expectedUpdatedAt: string; note: string; reportAction: AdminReportAction; reportId: string; requestId: string }
     | ({ action: 'rooms' } & Required<AdminRoomFilters>)
     | { action: 'room-detail'; roomId: string }
     | { action: 'room-action'; expectedUpdatedAt: string; reason: string; requestId: string; roomAction: AdminRoomAction; roomId: string; targetUid: string }
+    | { action: 'room-gift-policy-update'; commissionBps: number; expectedVersion: number; reason: string; requestId: string }
     | ({ action: 'users' } & Required<AdminUserFilters>)
     | { action: 'user-detail'; targetUid: string }
     | { action: 'user-history'; cursor: string; limit: number; section: AdminUserHistorySection; targetUid: string }
@@ -1049,11 +2009,114 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
     | { action: 'economy-history'; createdFrom: string; createdTo: string; currency: string; cursor: string; search: string; source: string; targetUid: string; type: string }
     | { action: 'economy-export'; createdFrom: string; createdTo: string; currency: string; requestId: string; search: string; source: string; targetUid: string; type: string }
     | { action: 'store-item-detail'; itemId: string }
-    | { action: 'store-catalog-upsert'; expectedUpdatedAt: string; item: Omit<AdminStoreCatalogItem, 'createdAt' | 'lastEditorEmail' | 'lastEditorUid' | 'updatedAt'>; reason: string; requestId: string }
+    | { action: 'store-catalog-upsert'; entryPhysicalApproval?: AdminEntryPhysicalApproval; expectedUpdatedAt: string; item: Omit<AdminStoreCatalogItem, 'createdAt' | 'lastEditorEmail' | 'lastEditorUid' | 'updatedAt'>; reason: string; requestId: string }
+    | { action: 'cosmetic-assets'; assetId: string; category: string; moderationStatus: string; publicationStatus: string }
+    | {
+      action: 'cosmetic-assets-mutate';
+      asset?: {
+        assetId: string;
+        assetVersionId: string;
+        audioAssetId?: string;
+        audioAssetVersionId?: string;
+        category: string;
+        fallbackAssetId?: string;
+        fallbackAssetVersionId?: string;
+        format: string;
+        loop: boolean;
+        minimumClientVersion: string;
+        ownerType: 'platform' | 'user';
+        ownerUid?: string;
+        performanceTier: 'low' | 'standard' | 'high';
+        slot?: string;
+        usage: 'static' | 'looping' | 'one-shot';
+      };
+      assetId?: string;
+      assetVersionId?: string;
+      confirmation?: string;
+      expectedRevision: number;
+      operation: 'validate-version' | 'approve-version' | 'reject-version' | 'publish-version' | 'emergency-disable' | 'suspend' | 'rollback-version';
+      reason: string;
+      requestId: string;
+    }
+    | { action: 'room-theme'; themeId: string }
+    | {
+      action: 'room-theme-mutate';
+      expectedRevision: number;
+      manifest?: AdminRoomThemeManifest;
+      operation: 'save-draft' | 'publish' | 'emergency-disable' | 'rollback';
+      reason: string;
+      requestId: string;
+      rollbackRevision?: number;
+      themeId: string;
+    }
+    | {
+      action: 'rocket-campaign-mutate';
+      expectedRevision: number;
+      operation: 'save-draft' | 'publish' | 'emergency-disable' | 'rollback';
+      reason: string;
+      requestId: string;
+      rollbackRevision?: number;
+      template?: AdminRocketTemplate;
+    }
+    | {
+      action: 'daily-login-campaign-mutate';
+      enabled?: boolean;
+      expectedRevision: number;
+      operation:
+        | 'emergency-disable'
+        | 'emergency-enable'
+        | 'publish'
+        | 'rollback'
+        | 'save-draft'
+        | 'set-claims-paused'
+        | 'set-presentation-visible';
+      reason: string;
+      requestId: string;
+      rollbackRevision?: number;
+      template?: AdminDailyLoginTemplate;
+    }
+    | {
+      action: 'room-target-campaign-mutate';
+      expectedRevision: number;
+      operation: 'save-draft' | 'publish' | 'emergency-disable' | 'rollback';
+      reason: string;
+      requestId: string;
+      rollbackRevision?: number;
+      template?: AdminRoomTargetTemplate;
+    }
+    | {
+      action: 'room-target-member-hold';
+      cycleId: string;
+      operation: 'apply' | 'release';
+      reason: string;
+      requestId: string;
+      roomId: string;
+      targetUid: string;
+    }
+    | {
+      action: 'weekly-incentive-integrity-mutate';
+      alertId?: string;
+      assessmentId?: string;
+      operation: 'approve-settlement' | 'reject-settlement' | 'resolve-alert';
+      reason: string;
+      requestId: string;
+      settlementId?: string;
+    }
+    | {
+      action: 'weekly-incentive-reconcile';
+      apply: boolean;
+      reason?: string;
+      requestId: string;
+    }
     | { action: 'user-note'; note: string; targetUid: string }
     | { action: 'wallet-credit'; amount: number; note: string; requestId: string; targetUid: string }
     | { action: 'wallet-adjust'; amount: number; currency: 'coins' | 'diamonds'; expectedUpdatedAt?: string; mutationType: 'credit' | 'debit'; note: string; requestId: string; targetUid: string }
-    | { action: 'representative-update'; active: boolean; coins: boolean; diamonds: boolean; expectedUpdatedAt?: string; requestId: string; targetUid: string }
+    | { action: 'representative-update'; active: boolean; coins: boolean; diamonds: boolean; expectedUpdatedAt: string; reason: string; requestId: string; targetUid: string }
+    | { action: 'representative-operations'; publicReference: string }
+    | { action: 'representative-policy-update'; expectedUpdatedAt: string; limits: Record<'coins' | 'diamonds', RepresentativeCurrencyLimits>; reason: string; requestId: string }
+    | { action: 'representative-override-update'; expectedUpdatedAt: string; limits: Partial<Record<'coins' | 'diamonds', RepresentativeCurrencyLimits>>; reason: string; requestId: string; targetUid: string }
+    | { action: 'representative-pin-reset'; expectedUpdatedAt: string; reason: string; requestId: string; targetUid: string }
+    | { action: 'representative-reversal'; expectedAmount: number; expectedCurrency: 'coins' | 'diamonds'; publicReference: string; reason: string; requestId: string }
     | { action: 'couple-dissolve'; reason: string; requestId: string; targetUid: string }
     | { action: 'special-id-upsert'; expectedUpdatedAt: string; price: number; reason: string; requestId: string; specialId: string; status: 'available' | 'disabled' }
     | {
@@ -1363,7 +2426,9 @@ function isAdminAdministrator(value: unknown): value is AdminAdministrator {
   const row = value as Record<string, unknown>;
   return typeof row.createdAt === 'string' && typeof row.disabled === 'boolean' && typeof row.displayName === 'string'
     && typeof row.email === 'string' && typeof row.lastSignInAt === 'string' && isAdminRole(row.role)
-    && typeof row.tokensValidAfterAt === 'string' && typeof row.uid === 'string';
+    && typeof row.tokensValidAfterAt === 'string' && typeof row.uid === 'string'
+    && Array.isArray(row.regionCodes) && row.regionCodes.every((code) => typeof code === 'string')
+    && typeof row.scopeStatus === 'string';
 }
 
 function isAdminRole(value: unknown): value is AdminRole {
@@ -1384,12 +2449,76 @@ function isAdminSettings(value: unknown): value is AdminSettings {
     && ['createdAt', 'lastSignInAt', 'tokensValidAfterAt'].every((key) => typeof session[key] === 'string')
     && typeof session.disabled === 'boolean' && typeof session.emailVerified === 'boolean'
     && ['usersDiscovery', 'friends', 'wallet', 'gifts', 'couples', 'pushNotifications', 'representativeTransfers'].every((key) => typeof flags[key] === 'boolean')
+    && typeof row.featureFlagsUpdatedAt === 'string'
+    && isRoomGiftPolicy(row.roomGiftPolicy)
     && Array.isArray(row.history) && row.history.every(isAdminAuditEventRow)
     && Array.isArray(row.roleDefinitions) && row.roleDefinitions.every((definition) => {
       if (!definition || typeof definition !== 'object') return false;
       const item = definition as Record<string, unknown>;
       return isAdminRole(item.role) && Array.isArray(item.permissions) && item.permissions.every((permission) => typeof permission === 'string');
     });
+}
+
+function isRoomGiftPolicy(value: unknown) {
+  if (!value || typeof value !== 'object') return false;
+  const policy = value as Record<string, unknown>;
+  return Number.isInteger(policy.commissionBps)
+    && Number(policy.commissionBps) >= 0
+    && Number(policy.commissionBps) <= 10_000
+    && typeof policy.configured === 'boolean'
+    && typeof policy.effectiveAt === 'string'
+    && typeof policy.updatedAt === 'string'
+    && typeof policy.updatedBy === 'string'
+    && Number.isInteger(policy.version)
+    && Number(policy.version) >= 0;
+}
+
+function isRepresentativeCurrencyLimits(value: unknown): value is RepresentativeCurrencyLimits {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return Number.isSafeInteger(row.maxPerDay) && Number(row.maxPerDay) > 0
+    && Number.isSafeInteger(row.maxPerTransfer) && Number(row.maxPerTransfer) > 0
+    && Number.isSafeInteger(row.maxTransfersPerHour) && Number(row.maxTransfersPerHour) > 0;
+}
+
+function isAdminRepresentativeTransfer(value: unknown): value is AdminRepresentativeTransfer {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return Number.isSafeInteger(row.amount) && Number(row.amount) > 0
+    && typeof row.createdAt === 'string'
+    && ['coins', 'diamonds'].includes(String(row.currency))
+    && typeof row.eligibleForReversal === 'boolean'
+    && typeof row.publicReference === 'string'
+    && typeof row.recipientUid === 'string'
+    && typeof row.representativeUid === 'string'
+    && typeof row.reversalReason === 'string'
+    && typeof row.reversedAt === 'string'
+    && ['completed', 'expired', 'reversed'].includes(String(row.status))
+    && typeof row.transferId === 'string';
+}
+
+function isAdminRepresentativeEvent(value: unknown): value is AdminRepresentativeEvent {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.actorUid === 'string' && typeof row.amount === 'number' && typeof row.createdAt === 'string'
+    && typeof row.currency === 'string' && typeof row.id === 'string' && typeof row.kind === 'string'
+    && typeof row.publicReference === 'string' && typeof row.representativeUid === 'string' && typeof row.status === 'string';
+}
+
+function isAdminRepresentativeOperations(value: unknown): value is AdminRepresentativeOperations {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  const policy = row.policy as Record<string, unknown> | undefined;
+  const limits = policy?.limits as Record<string, unknown> | undefined;
+  return Boolean(policy)
+    && typeof policy?.configured === 'boolean'
+    && typeof policy?.updatedAt === 'string'
+    && (!policy.configured || Boolean(limits) && isRepresentativeCurrencyLimits(limits?.coins) && isRepresentativeCurrencyLimits(limits?.diamonds))
+    && (row.receipt === null || isAdminRepresentativeTransfer(row.receipt))
+    && Array.isArray(row.recentTransfers) && row.recentTransfers.every(isAdminRepresentativeTransfer)
+    && Array.isArray(row.recentReversals) && row.recentReversals.every(isAdminRepresentativeEvent)
+    && Array.isArray(row.recentSecurityEvents) && row.recentSecurityEvents.every(isAdminRepresentativeEvent)
+    && Array.isArray(row.auditHistory) && row.auditHistory.every(isAdminRepresentativeEvent);
 }
 
 function isAdminReportSummary(value: unknown): value is AdminReportSummary {
@@ -1441,6 +2570,8 @@ function isAdminUserDetail(value: unknown): value is AdminUserDetail {
   const notifications = row.notifications as Record<string, unknown>;
   const notificationPreferences = notifications.preferences as Record<string, unknown> | undefined;
   const representativeCurrencies = representative.currencies as Record<string, unknown> | undefined;
+  const representativeLimits = representative.limits as Record<string, unknown> | undefined;
+  const representativePin = representative.pin as Record<string, unknown> | undefined;
   const balances = wallet.balances;
   if (!balances || typeof balances !== 'object') return false;
   const walletBalances = balances as Record<string, unknown>;
@@ -1456,6 +2587,9 @@ function isAdminUserDetail(value: unknown): value is AdminUserDetail {
     && typeof restrictions.reason === 'string'
     && typeof representative.active === 'boolean'
     && typeof representativeCurrencies?.coins === 'boolean' && typeof representativeCurrencies?.diamonds === 'boolean'
+    && Boolean(representativeLimits)
+    && Object.entries(representativeLimits || {}).every(([key, value]) => ['coins', 'diamonds'].includes(key) && isRepresentativeCurrencyLimits(value))
+    && typeof representativePin?.configured === 'boolean' && typeof representativePin?.resetRequired === 'boolean' && typeof representativePin?.updatedAt === 'string'
     && typeof representative.updatedAt === 'string'
     && typeof notifications.configured === 'boolean'
     && typeof notifications.registeredDeviceCount === 'number'

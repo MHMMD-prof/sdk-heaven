@@ -13,6 +13,9 @@ const ROOM_COMMAND_ACTIONS = Object.freeze([
   'transfer-ownership',
   'lock-audio',
   'unlock-audio',
+  'staff-lockdown',
+  'kick-everyone',
+  'clear-staff-lockdown',
   'close-room',
   'remove-room',
   'update-room-settings',
@@ -34,6 +37,9 @@ const BAN_TARGET_ACTIONS = new Set(['unban-member']);
 const ROLE_ACTIONS = new Set(['assign-moderator', 'remove-moderator', 'transfer-ownership']);
 const NON_MUTATING_ACTIONS = new Set(['report-member']);
 const COMMAND_CENTER_ACTIONS = new Set(['remove-room', 'unban-member', 'update-room-settings']);
+const SUPER_MODERATION_ACTIONS = new Set(['staff-lockdown', 'kick-everyone', 'clear-staff-lockdown']);
+const FRESH_AUTH_ACTIONS = new Set(['staff-lockdown', 'kick-everyone', 'clear-staff-lockdown', 'remove-room', 'ban-member']);
+const RECENT_AUTH_MAX_AGE_MS = 10 * 60 * 1000;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{15,95}$/;
 const FIRESTORE_ID_PATTERN = /^[^/]{1,128}$/;
 const ROOM_SETTING_KEYS = new Set([
@@ -43,7 +49,6 @@ const ROOM_SETTING_KEYS = new Set([
   'historyVisibility',
   'keywordFilterMode',
   'slowModeSeconds',
-  'themeId',
   'welcomeMessage',
 ]);
 const ROOM_CHAT_MODES = new Set(['everyone', 'followers', 'off']);
@@ -51,7 +56,7 @@ const ROOM_EFFECTS_POLICIES = new Set(['full', 'reduced', 'off']);
 const ROOM_HISTORY_VISIBILITIES = new Set(['everyone', 'after-join', 'hidden']);
 const ROOM_KEYWORD_FILTER_MODES = new Set(['off', 'standard', 'strict']);
 const ROOM_SLOW_MODE_SECONDS = new Set([0, 5, 10, 30, 60]);
-const ROOM_THEME_IDS = new Set(['midnight', 'royal', 'ocean', 'emerald']);
+const STAFF_LOCKDOWN_SETTINGS_BLOCKED = new Set(['chatMode', 'effectsPolicy']);
 
 const AUTHORITY_ACTIONS = Object.freeze({
   member: new Set(['report-member']),
@@ -67,19 +72,28 @@ const AUTHORITY_ACTIONS = Object.freeze({
   ]),
   'super-moderator': new Set([
     'promote-speaker', 'demote-listener', 'mute-member', 'unmute-member',
-    'remove-member', 'ban-member', 'unban-member', 'lock-audio', 'unlock-audio', 'close-room', 'remove-room',
+    'remove-member', 'ban-member', 'unban-member', 'lock-audio', 'unlock-audio',
+    'staff-lockdown', 'kick-everyone', 'clear-staff-lockdown', 'close-room', 'remove-room',
     'report-member',
   ]),
-  'platform-owner': new Set(ROOM_COMMAND_ACTIONS),
+  'platform-owner': new Set([
+    ...ROOM_COMMAND_ACTIONS,
+  ]),
 });
 
 function normalizeRoomCommandBody(body = {}) {
+  const reportId = typeof body.reportId === 'string'
+    ? body.reportId.trim().slice(0, 128)
+    : typeof body.caseId === 'string'
+      ? body.caseId.trim().slice(0, 128)
+      : '';
   return {
     action: typeof body.action === 'string' ? body.action.trim() : '',
     expectedRevision: Number.isInteger(body.expectedRevision) && body.expectedRevision >= 1
       ? body.expectedRevision
       : null,
     reason: typeof body.reason === 'string' ? body.reason.trim().slice(0, 240) : '',
+    reportId,
     requestId: typeof body.requestId === 'string' ? body.requestId.trim() : '',
     roomId: typeof body.roomId === 'string' ? body.roomId.trim() : '',
     settings: normalizeRoomSettingsPatch(body.settings),
@@ -119,9 +133,6 @@ function normalizeRoomSettingsPatch(value) {
       normalized[key] = input;
     } else if (key === 'slowModeSeconds') {
       if (!ROOM_SLOW_MODE_SECONDS.has(input)) return { ok: false, value: {} };
-      normalized[key] = input;
-    } else if (key === 'themeId') {
-      if (!ROOM_THEME_IDS.has(input)) return { ok: false, value: {} };
       normalized[key] = input;
     }
   }
@@ -167,7 +178,7 @@ function resolveMemberAuthority(membership, uid, room = {}) {
 
 function resolveStaffRoomAuthority({ decodedToken = {}, operatorProfile, room }) {
   if (decodedToken.admin !== true) return { authority: null };
-  if (decodedToken.adminRole === 'owner' || !decodedToken.adminRole) {
+  if (decodedToken.adminRole === 'owner') {
     return { authority: 'platform-owner' };
   }
   if (decodedToken.adminRole !== 'super-moderator') return { authority: null };
@@ -193,11 +204,13 @@ function resolveRoomCommand({
   body = {},
   decodedToken = {},
   featureFlags,
+  nowMs = Date.now(),
   operatorProfile,
   profile,
   room,
   targetBan,
   targetMembership,
+  targetOperatorProfile,
 }) {
   const command = normalizeRoomCommandBody(body);
 
@@ -238,8 +251,15 @@ function resolveRoomCommand({
   if (COMMAND_CENTER_ACTIONS.has(command.action) && featureFlags?.voice_room_command_center !== true) {
     return roomCommandError('FEATURE_DISABLED', 503, 'The room Command Center is not enabled.');
   }
-  if (command.action === 'transfer-ownership' && authority !== 'owner') {
-    return roomCommandError('FORBIDDEN', 403, 'Only the current room owner can transfer ownership.');
+  if (authority === 'super-moderator' && featureFlags?.voice_room_super_moderation !== true) {
+    return roomCommandError('FEATURE_DISABLED', 503, 'Super Moderator emergency controls are not enabled.');
+  }
+  if (command.action === 'transfer-ownership') {
+    return roomCommandError(
+      'OWNERSHIP_OFFER_REQUIRED',
+      409,
+      'Immediate ownership transfer is retired. Create an expiring ownership offer instead.',
+    );
   }
   if (command.action === 'update-room-settings') {
     if (authority !== 'owner' && authority !== 'platform-owner') {
@@ -249,8 +269,34 @@ function resolveRoomCommand({
       return roomCommandError('ROOM_SETTINGS_INVALID', 400, 'The room settings patch is invalid.');
     }
   }
-  if (command.action === 'remove-room' && command.reason.length < 4) {
-    return roomCommandError('REASON_REQUIRED', 400, 'A removal reason is required.');
+  if (
+    (command.action === 'remove-room' || SUPER_MODERATION_ACTIONS.has(command.action))
+    && command.reason.length < 4
+  ) {
+    return roomCommandError('REASON_REQUIRED', 400, 'A structured reason is required.');
+  }
+  if (hasActiveStaffLockdown(room) && (authority === 'owner' || authority === 'moderator')) {
+    if (command.action === 'unlock-audio') {
+      return roomCommandError('STAFF_LOCKDOWN_ACTIVE', 403, 'Only platform staff can clear a staff lockdown.');
+    }
+    if (command.action === 'update-room-settings') {
+      const patchKeys = Object.keys(command.settings.value || {});
+      if (patchKeys.some((key) => STAFF_LOCKDOWN_SETTINGS_BLOCKED.has(key))) {
+        return roomCommandError('STAFF_LOCKDOWN_ACTIVE', 403, 'Room staff cannot reverse staff lockdown settings.');
+      }
+    }
+  }
+  if (command.action === 'clear-staff-lockdown' && !hasActiveStaffLockdown(room)) {
+    return roomCommandError('STAFF_LOCKDOWN_INACTIVE', 409, 'This room is not under staff lockdown.');
+  }
+  if (['staff-lockdown', 'kick-everyone'].includes(command.action) && hasActiveStaffLockdown(room)) {
+    return roomCommandError('STAFF_LOCKDOWN_ACTIVE', 409, 'This room is already under staff lockdown.');
+  }
+  const requiresFreshAuth = FRESH_AUTH_ACTIONS.has(command.action)
+    && (authority === 'super-moderator' || authority === 'platform-owner'
+      || (command.action === 'remove-room' && authority === 'owner'));
+  if (requiresFreshAuth && !isRecentAuth(decodedToken, nowMs)) {
+    return roomCommandError('FRESH_AUTH_REQUIRED', 401, 'Fresh authentication is required for this action.');
   }
   if (!NON_MUTATING_ACTIONS.has(command.action)) {
     const revision = positiveInteger(room.revision) ? room.revision : 1;
@@ -278,6 +324,26 @@ function resolveRoomCommand({
     }
     if (authority === 'owner' && targetAuthority === 'owner') {
       return roomCommandError('TARGET_PROTECTED', 403, 'The room owner cannot be targeted by this action.');
+    }
+    if (
+      (authority === 'owner' || authority === 'moderator')
+      && isProtectedPlatformStaff(targetOperatorProfile, command.targetUid)
+    ) {
+      return roomCommandError('TARGET_PROTECTED', 403, 'Room staff cannot act on platform staff.');
+    }
+    if (
+      authority === 'super-moderator'
+      && isProtectedFromSuperModerator(targetOperatorProfile, command.targetUid)
+    ) {
+      return roomCommandError('TARGET_PROTECTED', 403, 'Super Moderators cannot act on the Platform Owner or another Super Moderator.');
+    }
+    if (
+      authority === 'platform-owner'
+      && targetOperatorProfile?.role === 'owner'
+      && targetOperatorProfile?.status !== 'revoked'
+      && targetOperatorProfile?.uid === command.targetUid
+    ) {
+      return roomCommandError('TARGET_PROTECTED', 403, 'Platform Owners cannot use room moderation against another Platform Owner.');
     }
     if (command.action === 'assign-moderator' && targetAuthority !== 'member') {
       return roomCommandError('TARGET_INVALID', 409, 'Only a regular member can become a moderator.');
@@ -307,6 +373,7 @@ function resolveRoomCommand({
     value: {
       ...command,
       actorAuthority: authority,
+      actorUid: decodedToken.uid,
       currentRevision,
       nextRevision: NON_MUTATING_ACTIONS.has(command.action) ? currentRevision : currentRevision + 1,
       regionCode: staff.regionCode || room.countryCode || '',
@@ -322,6 +389,7 @@ function buildRoomCommandFingerprint(actorUid, command) {
     command.targetUid,
     command.expectedRevision ?? '',
     command.reason,
+    command.reportId || '',
     JSON.stringify(command.settings?.value || {}),
   ].join('|');
 }
@@ -334,6 +402,8 @@ function buildRoomCommandMutationPlan({ actorMembership, command, room, targetMe
     actorMemberPatch: null,
     ban: null,
     banPatch: null,
+    clearActiveGameSession: false,
+    clearActiveMusicLease: false,
     liveKit: { type: 'none' },
     roomPatch,
     targetMemberDelete: false,
@@ -353,7 +423,7 @@ function buildRoomCommandMutationPlan({ actorMembership, command, room, targetMe
   } else if (command.action === 'unmute-member') {
     const canPublishAudio = targetMembership?.role === 'host' || targetMembership?.role === 'speaker';
     plan.targetMemberPatch = { canPublishAudio, forceMuted: false };
-    plan.liveKit = permissionSync(targetUid, canPublishAudio && room.audioLockdown !== true);
+    plan.liveKit = permissionSync(targetUid, canPublishAudio && room.audioLockdown !== true && !hasActiveStaffLockdown(room));
   } else if (command.action === 'remove-member' || command.action === 'ban-member') {
     plan.targetMemberPatch = {
       status: 'removed',
@@ -361,27 +431,52 @@ function buildRoomCommandMutationPlan({ actorMembership, command, room, targetMe
       forceMuted: true,
       seatId: null,
     };
+    plan.liveKit = permissionSync(targetUid, false);
+    if (command.action === 'ban-member') {
+      plan.ban = { targetUid };
+    }
     plan.roomPatch.participantCount = Math.max(0, Number(room.participantCount || 0) - 1);
     plan.liveKit = { type: 'remove-participant', targetUid };
-    if (command.action === 'ban-member') plan.ban = { status: 'active', targetUid };
+    if (room?.activeDjUid === targetUid) {
+      plan.roomPatch.activeDjUid = null;
+      plan.roomPatch.activeMusicLeaseId = null;
+      plan.clearActiveMusicLease = true;
+    }
   } else if (command.action === 'assign-moderator') {
     plan.targetMemberPatch = upgradeMemberAuthority(targetMembership, 'moderator');
     plan.roomPatch.moderatorCount = Number(room.moderatorCount || 0) + 1;
   } else if (command.action === 'remove-moderator') {
     plan.targetMemberPatch = upgradeMemberAuthority(targetMembership, 'member');
     plan.roomPatch.moderatorCount = Math.max(0, Number(room.moderatorCount || 0) - 1);
-  } else if (command.action === 'grant-dj' || command.action === 'revoke-dj') {
+  } else if (command.action === 'grant-dj') {
     plan.targetMemberPatch = {
       privileges: {
-        canManageMusic: command.action === 'grant-dj',
+        ...(targetMembership?.privileges || {}),
+        canManageMusic: true,
       },
     };
+  } else if (command.action === 'revoke-dj') {
+    plan.targetMemberPatch = {
+      privileges: {
+        ...(targetMembership?.privileges || {}),
+        canManageMusic: false,
+      },
+    };
+    if (room?.activeDjUid && room.activeDjUid === command.targetUid) {
+      plan.roomPatch = {
+        ...(plan.roomPatch || {}),
+        activeDjUid: null,
+        activeMusicLeaseId: null,
+      };
+      plan.clearActiveMusicLease = true;
+    }
   } else if (command.action === 'transfer-ownership') {
     const actorKeepsAudio = typeof actorMembership?.seatId === 'string'
       && actorMembership.seatId.length > 0
       && actorMembership.canPublishAudio === true
       && actorMembership.forceMuted !== true
-      && room.audioLockdown !== true;
+      && room.audioLockdown !== true
+      && !hasActiveStaffLockdown(room);
     plan.roomPatch = {
       ...plan.roomPatch,
       ownerUid: targetUid,
@@ -409,13 +504,70 @@ function buildRoomCommandMutationPlan({ actorMembership, command, room, targetMe
   } else if (command.action === 'lock-audio' || command.action === 'unlock-audio') {
     plan.roomPatch.audioLockdown = command.action === 'lock-audio';
     plan.liveKit = command.action === 'lock-audio' ? { type: 'mute-all' } : { type: 'refresh-all' };
+  } else if (command.action === 'staff-lockdown' || command.action === 'kick-everyone') {
+    plan.roomPatch.audioLockdown = true;
+    plan.roomPatch.chatMode = 'off';
+    plan.roomPatch.effectsPolicy = 'off';
+    plan.roomPatch.giftsPaused = true;
+    plan.roomPatch.gamesPaused = true;
+    plan.roomPatch.musicPaused = true;
+    plan.roomPatch.seatRequestsPaused = true;
+    plan.roomPatch.activeGameSessionId = null;
+    plan.roomPatch.currentGameId = null;
+    plan.roomPatch.activeDjUid = null;
+    plan.roomPatch.activeMusicLeaseId = null;
+    plan.roomPatch.staffLockdown = {
+      atMs: Date.now(),
+      authority: command.actorAuthority,
+      byUid: command.actorUid,
+      previousState: {
+        audioLockdown: room.audioLockdown === true,
+        chatMode: room.chatMode || 'everyone',
+        effectsPolicy: room.effectsPolicy || 'full',
+        giftsPaused: room.giftsPaused === true,
+        gamesPaused: room.gamesPaused === true,
+        musicPaused: room.musicPaused === true,
+        seatRequestsPaused: room.seatRequestsPaused === true,
+      },
+      reason: command.reason,
+      reportId: command.reportId || '',
+      requestId: command.requestId,
+    };
+    plan.clearActiveGameSession = true;
+    plan.clearActiveMusicLease = true;
+    plan.liveKit = command.action === 'kick-everyone'
+      ? { type: 'close-room' }
+      : { type: 'mute-all' };
+  } else if (command.action === 'clear-staff-lockdown') {
+    const previousState = room.staffLockdown?.previousState || {};
+    plan.roomPatch.audioLockdown = previousState.audioLockdown === true;
+    plan.roomPatch.chatMode = typeof previousState.chatMode === 'string'
+      ? previousState.chatMode
+      : 'everyone';
+    plan.roomPatch.effectsPolicy = typeof previousState.effectsPolicy === 'string'
+      ? previousState.effectsPolicy
+      : 'full';
+    plan.roomPatch.giftsPaused = previousState.giftsPaused === true;
+    plan.roomPatch.gamesPaused = previousState.gamesPaused === true;
+    plan.roomPatch.musicPaused = previousState.musicPaused === true;
+    plan.roomPatch.seatRequestsPaused = previousState.seatRequestsPaused === true;
+    plan.roomPatch.staffLockdown = null;
+    plan.liveKit = plan.roomPatch.audioLockdown
+      ? { type: 'mute-all' }
+      : { type: 'refresh-all' };
   } else if (command.action === 'close-room') {
     plan.roomPatch.status = 'closed';
+    plan.roomPatch.activeDjUid = null;
+    plan.roomPatch.activeMusicLeaseId = null;
+    plan.clearActiveMusicLease = true;
     plan.liveKit = { type: 'close-room' };
   } else if (command.action === 'remove-room') {
     plan.roomPatch.status = 'closed';
     plan.roomPatch.availability = 'removed';
+    plan.roomPatch.activeDjUid = null;
+    plan.roomPatch.activeMusicLeaseId = null;
     plan.roomPatch.removalReason = command.reason;
+    plan.clearActiveMusicLease = true;
     plan.liveKit = { type: 'close-room' };
   } else if (command.action === 'update-room-settings') {
     Object.assign(plan.roomPatch, command.settings.value);
@@ -450,19 +602,61 @@ function deniedScope(error) {
   return { authority: null, denied: true, error };
 }
 
+function hasActiveStaffLockdown(room) {
+  return Boolean(room?.staffLockdown && typeof room.staffLockdown === 'object' && room.staffLockdown.byUid);
+}
+
+function isProtectedPlatformStaff(operatorProfile, uid) {
+  if (!operatorProfile || !uid) return false;
+  if (operatorProfile.status === 'revoked') return false;
+  return ['owner', 'super-moderator', 'moderator', 'support', 'catalog-manager', 'auditor'].includes(operatorProfile.role);
+}
+
+function isProtectedFromSuperModerator(operatorProfile, uid) {
+  return Boolean(
+    operatorProfile
+    && uid
+    && operatorProfile.status !== 'revoked'
+    && ['owner', 'super-moderator'].includes(operatorProfile.role)
+  );
+}
+
+function isRecentAuth(decodedToken, nowMs) {
+  const authTimeMs = Number(decodedToken?.auth_time) * 1000;
+  return Number.isFinite(authTimeMs)
+    && authTimeMs <= nowMs + 30_000
+    && nowMs - authTimeMs <= RECENT_AUTH_MAX_AGE_MS;
+}
+
+function isRoomEconomyPaused(room) {
+  return hasActiveStaffLockdown(room) || room?.giftsPaused === true;
+}
+
+function isRoomGamesPaused(room) {
+  return hasActiveStaffLockdown(room) || room?.gamesPaused === true;
+}
+
 function positiveInteger(value) {
   return Number.isInteger(value) && value >= 1;
 }
 
 module.exports = {
   AUTHORITY_ACTIONS,
+  RECENT_AUTH_MAX_AGE_MS,
   ROOM_COMMAND_ACTIONS,
   ROOM_COUNTRY_CODES,
+  SUPER_MODERATION_ACTIONS,
   buildRoomCommandFingerprint,
   buildRoomCommandMutationPlan,
+  hasActiveStaffLockdown,
   isActiveHostMembership,
   isActiveMembership,
   isCompleteProfile,
+  isProtectedPlatformStaff,
+  isProtectedFromSuperModerator,
+  isRecentAuth,
+  isRoomEconomyPaused,
+  isRoomGamesPaused,
   isValidRoomCommandAction,
   isValidRoomCommandRequestId,
   normalizeRoomCommandBody,

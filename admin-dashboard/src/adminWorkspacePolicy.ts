@@ -1,18 +1,29 @@
-export type UserWorkspaceSection = 'overview' | 'moderation' | 'economy' | 'social' | 'notes' | 'activity';
+export type UserWorkspaceSection = 'overview' | 'moderation' | 'economy' | 'representative' | 'social' | 'notes' | 'activity';
 
-export const userWorkspaceSections: readonly UserWorkspaceSection[] = ['overview', 'moderation', 'economy', 'social', 'notes', 'activity'];
+export const userWorkspaceSections: readonly UserWorkspaceSection[] = [
+  'overview',
+  'moderation',
+  'economy',
+  'representative',
+  'social',
+  'notes',
+  'activity',
+];
 
 export type UserWorkspaceCapabilities = {
   canAddNotes: boolean;
   canManageEconomy: boolean;
+  canManageRepresentative: boolean;
   canManageUsers: boolean;
 };
 
 export function getUserWorkspaceCapabilities(permissions: readonly string[]): UserWorkspaceCapabilities {
   const canManageUsers = permissions.includes('users:manage');
+  const canManageStore = permissions.includes('store:manage');
   return {
     canAddNotes: canManageUsers || permissions.includes('users:note'),
-    canManageEconomy: permissions.includes('store:manage'),
+    canManageEconomy: canManageStore,
+    canManageRepresentative: canManageStore,
     canManageUsers,
   };
 }

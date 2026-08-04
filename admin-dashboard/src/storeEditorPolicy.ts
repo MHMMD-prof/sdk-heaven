@@ -17,6 +17,18 @@ export function validateStoreCatalogDraft(item: StoreCatalogDraft, reason: strin
   if (item.category === 'custom-ids' && !/^[0-9]{7}$/.test(item.customId || '')) errors.push('المعرّف المخصص يجب أن يتكون من سبعة أرقام.');
   if (!hasThumbnail || !hasPreview) errors.push('الصورة المصغرة وصورة المعاينة مطلوبتان.');
   if (reason.trim().length < 2) errors.push('اكتب سببًا واضحًا للتغيير.');
+  const cosmeticCategories = ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects'];
+  if (item.cosmeticAsset && !cosmeticCategories.includes(item.category)) errors.push('Cosmetic asset references are only allowed for cosmetic equipment categories.');
+  if (item.cosmeticAsset && (!/^[a-z0-9][a-z0-9_-]{2,79}$/.test(item.cosmeticAsset.assetId) || !/^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(item.cosmeticAsset.assetVersionId))) errors.push('Select an exact immutable cosmetic asset version.');
+  if (item.category === 'stickers' && !item.stickerAsset) errors.push('Select an exact immutable sticker asset version.');
+  if (item.stickerAsset && item.category !== 'stickers') errors.push('Sticker asset references are only allowed for stickers.');
+  if (item.stickerAsset && (!/^[a-z0-9][a-z0-9_-]{2,79}$/.test(item.stickerAsset.assetId) || !/^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(item.stickerAsset.assetVersionId))) errors.push('Select an exact immutable sticker asset version.');
+  if (item.entryPresentation && item.category !== 'cars') errors.push('Entry presentations are only allowed for cars.');
+  if (item.entryPresentation?.animationEnabled) {
+    const references = [item.entryPresentation.visualAsset, item.entryPresentation.fallbackAsset];
+    if (references.some((reference) => !reference || !/^[a-z0-9][a-z0-9_-]{2,79}$/.test(reference.assetId) || !/^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(reference.assetVersionId))) errors.push('Select exact immutable visual and fallback entry-effect versions.');
+    if (item.entryPresentation.soundPolicy !== 'off' && !item.entryPresentation.audioAsset) errors.push('Entry sound requires an exact approved audio version.');
+  }
   return errors;
 }
 

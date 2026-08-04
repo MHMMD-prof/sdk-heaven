@@ -135,6 +135,19 @@ export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps
         />
       </GlassCard>
 
+      {__DEV__ ? (
+        <GlassCard style={styles.card}>
+          <Text style={styles.sectionTitle}>Cosmetics Wave 0 Lab</Text>
+          <Text style={styles.bodyText}>
+            Development-only native renderer, caching, audio-mixing, and lifecycle checks.
+          </Text>
+          <LuxuryButton
+            onPress={() => navigation.navigate('CosmeticsLab')}
+            title="Open cosmetics lab"
+          />
+        </GlassCard>
+      ) : null}
+
       <GlassCard style={[styles.card, styles.dangerCard]}>
         <Text style={styles.sectionTitle}>حذف الحساب</Text>
         <Text style={styles.bodyText}>

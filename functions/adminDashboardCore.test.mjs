@@ -23,6 +23,7 @@ const {
   normalizeAdminAuditLookup,
   normalizeAdminClientError,
   normalizeAdminFeatureFlagUpdate,
+  normalizeRoomGiftPolicyUpdate,
   normalizeAdministratorAction,
   normalizeAdminSettingsUpdate,
   normalizeAdminEconomyQuery,
@@ -47,6 +48,7 @@ const {
 
 const adminToken = {
   admin: true,
+  adminRole: 'owner',
   email: 'admin@example.com',
   email_verified: true,
   uid: 'admin-1',
@@ -202,14 +204,23 @@ describe('adminDashboardCore', () => {
     expect(resolveAdminDashboardRequest({ body: { action: 'report-action' }, decodedToken: moderator })).toMatchObject({ ok: true, value: { role: 'moderator' } });
     expect(resolveAdminDashboardRequest({ body: { action: 'store-catalog-upsert' }, decodedToken: moderator })).toMatchObject({ ok: false, status: 403 });
     expect(resolveAdminDashboardRequest({ body: { action: 'audit-export' }, decodedToken: auditor })).toMatchObject({ ok: true });
+    expect(resolveAdminDashboardRequest({ body: { action: 'attendance-shadow' }, decodedToken: auditor })).toMatchObject({ ok: true });
+    expect(resolveAdminDashboardRequest({ body: { action: 'attendance-outage-mutate' }, decodedToken: auditor })).toMatchObject({ ok: false, status: 403 });
+    expect(resolveAdminDashboardRequest({ body: { action: 'attendance-outage-mutate' }, decodedToken: adminToken })).toMatchObject({ ok: true });
     expect(resolveAdminDashboardRequest({ body: { action: 'administrator-action' }, decodedToken: auditor })).toMatchObject({ ok: true });
   });
 
   it('normalizes settings, administrator, and approved feature mutations', () => {
     expect(normalizeAdminSettingsUpdate({ density: 'compact', notifications: { flaggedRooms: false }, reduceMotion: true, requestId: 'settings_request_1234' })).toMatchObject({ ok: true, value: { density: 'compact', reduceMotion: true } });
     expect(normalizeAdministratorAction({ administratorAction: 'grant-role', email: ' Admin@Example.com ', reason: 'new operator', requestId: 'administrator_req_1', role: 'support' })).toMatchObject({ ok: true, value: { email: 'admin@example.com', role: 'support' } });
-    expect(normalizeAdminFeatureFlagUpdate({ enabled: true, flag: 'wallet', reason: 'release ready', requestId: 'feature_request_123' })).toMatchObject({ ok: true });
+    expect(normalizeAdminFeatureFlagUpdate({ enabled: true, expectedUpdatedAt: 'missing', flag: 'wallet', reason: 'release ready', requestId: 'feature_request_123' })).toMatchObject({ ok: true });
     expect(normalizeAdminFeatureFlagUpdate({ enabled: true, flag: 'unsafeFlag', reason: 'no', requestId: 'feature_request_123' })).toMatchObject({ ok: false, status: 400 });
+    expect(normalizeRoomGiftPolicyUpdate({
+      commissionBps: 1250,
+      expectedVersion: 3,
+      reason: 'Testing commission',
+      requestId: 'gift_policy_request_123',
+    })).toMatchObject({ ok: true, value: { commissionBps: 1250, expectedVersion: 3 } });
   });
 
   it('bounds client failure reports before operational logging', () => {
@@ -616,6 +627,7 @@ describe('adminDashboardCore', () => {
     ).toEqual({
       assignedTo: 'admin-1',
       contentExcerpt: 'original message',
+      countryCode: '',
       createdAt: '2026-07-08T02:00:00.000Z',
       evidence: [{ kind: 'screenshot', label: 'Capture', url: 'https://example.com/evidence.png' }],
       escalatedAt: '',
@@ -696,6 +708,7 @@ describe('adminDashboardCore', () => {
       status: 'resolved',
       targetUid: 'user-2',
       category: '',
+      countryCode: '',
       itemId: '',
     });
   });
