@@ -12,6 +12,10 @@ const {
   normalizeRepresentativePortalOrigin,
   normalizeRepresentativeTransferPolicy,
 } = require('./representativePortalCore');
+const {
+  buildRepresentativeRechargeOutbox,
+  buildRepresentativeReversalOutbox,
+} = require('./statusProgressionCore');
 
 async function getRepresentativeStatus({ clock = systemClock(), db, input, portalOrigin = '', uid }) {
   if (input !== undefined) return { errorCode: 'INVALID_REQUEST' };
@@ -172,6 +176,13 @@ async function transferRepresentativeFunds({
       recipient: { displayName: recipientProfile.data().displayName, publicId: recipientPublicId },
       recipientUid, transferId: refs.event.path.split('/').at(-1),
     };
+    const statusOutbox = buildRepresentativeRechargeOutbox({
+      amount,
+      currency,
+      recipientUid,
+      timestamp,
+      transferId: result.transferId,
+    });
     transaction.set(refs.senderWallet, buildWalletDocument(debit.value.wallet, { createdAt: createdAt(senderWallet, timestamp), updatedAt: timestamp }));
     transaction.set(refs.recipientWallet, buildWalletDocument(credit.value.wallet, { createdAt: createdAt(recipientWallet, timestamp), updatedAt: timestamp }));
     transaction.create(db.doc(`walletTransactions/representative_debit_${uid}_${requestId}`), buildWalletTransaction({ actorUid: uid, amount, balanceAfter: debit.value.balanceAfter, createdAt: timestamp, currency, referenceId: refs.event.path, source: 'representative-transfer', type: 'transfer', uid }));
@@ -193,6 +204,7 @@ async function transferRepresentativeFunds({
       representativeDisplayName: senderProfile.data().displayName, representativePublicId, representativeUid: uid,
       status: 'completed', transferId: result.transferId,
     });
+    if (statusOutbox) transaction.create(db.doc(`statusSourceOutbox/${statusOutbox.refId}`), statusOutbox.data);
     transaction.set(refs.proof, { ...verifiedProof, consumedAt: timestamp, consumedByRequestId: requestId, state: 'consumed' });
     transaction.set(refs.pin, { ...currentPin.data(), failedAttempts: 0, lockedUntil: null, updatedAt: timestamp });
     transaction.set(refs.dailyCounter, {
@@ -411,6 +423,13 @@ async function reverseRepresentativeTransfer({ clock = systemClock(), db, decode
       status: 'reversed',
       transferId,
     };
+    const statusOutbox = buildRepresentativeReversalOutbox({
+      amount,
+      currency,
+      recipientUid,
+      timestamp,
+      transferId,
+    });
     transaction.set(representativeWalletRef, buildWalletDocument(representativeCredit.value.wallet, {
       createdAt: createdAt(representativeWalletSnapshot, timestamp),
       updatedAt: timestamp,
@@ -491,6 +510,7 @@ async function reverseRepresentativeTransfer({ clock = systemClock(), db, decode
       status: 'reversed',
       transferId: eventId,
     });
+    if (statusOutbox) transaction.create(db.doc(`statusSourceOutbox/${statusOutbox.refId}`), statusOutbox.data);
     transaction.create(auditRef, {
       action: 'representative-reversal',
       actorEmail: decodedToken.email || '',

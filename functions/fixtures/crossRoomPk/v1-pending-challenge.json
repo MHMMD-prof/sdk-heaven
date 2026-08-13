@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "challengeId": "crpk_challenge_fixture_0001",
+  "mode": "cross-room",
+  "status": "pending",
+  "challengerRoomId": "room-red-1",
+  "opponentRoomId": "room-blue-1",
+  "challengerAuthorityUid": "host-red-1",
+  "durationMs": 180000,
+  "requestId": "cross_room_pk_request_0001",
+  "createdAtMs": 2000000000000,
+  "expiresAtMs": 2000000060000,
+  "challengerRoomSnapshot": {
+    "roomId": "room-red-1",
+    "roomTitle": "مجلس الياقوت",
+    "roomImageUrl": "https://cdn.example.test/rooms/red.png",
+    "authorityDisplayName": "مضيف الياقوت"
+  },
+  "opponentRoomSnapshot": {
+    "roomId": "room-blue-1",
+    "roomTitle": "مجلس النيل",
+    "roomImageUrl": "https://cdn.example.test/rooms/blue.png",
+    "authorityDisplayName": "مضيف النيل"
+  },
+  "purgeAfterMs": 2000604860000
+}

@@ -41,6 +41,245 @@ async function getAdminCosmeticsAssets({ db, input }) {
   };
 }
 
+async function getAdminPublishedCosmeticAssetOptions({ db, documentIdField = '__name__', input }) {
+  let query = db.collection('cosmeticAssets')
+    .where('category', '==', input.category)
+    .orderBy(documentIdField);
+  if (input.cursor) query = query.startAfter(input.cursor);
+  const snapshot = await query.limit(250).get();
+  const candidates = snapshot.docs
+    .map((document) => ({ id: document.id, ...document.data() }))
+    .filter((asset) => asset.id > input.cursor)
+    .filter((asset) => asset.category === input.category)
+    .filter((asset) => asset.moderationStatus === 'approved'
+      && asset.publicationStatus === 'published'
+      && asset.renderingEnabled === true
+      && typeof asset.publishedVersionId === 'string')
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const records = candidates.length
+    ? await getAllDocuments(db, candidates.flatMap((asset) => [
+      db.doc(`cosmeticAssets/${asset.id}/versions/${asset.publishedVersionId}`),
+      db.doc(`cosmeticAssetApprovals/${asset.id}__${asset.publishedVersionId}`),
+    ]))
+    : [];
+  const preliminarilyCompatible = candidates.flatMap((asset, index) => {
+    const version = records[index * 2];
+    const approval = records[(index * 2) + 1];
+    const data = version?.exists ? version.data() : undefined;
+    const approvalData = approval?.exists ? approval.data() : undefined;
+    if (!data
+      || data.assetId !== asset.id
+      || data.assetVersionId !== asset.publishedVersionId
+      || data.category !== input.category
+      || !input.formats.includes(data.format)
+      || asset.approvedVersionId !== data.assetVersionId
+      || asset.approvalId !== `${asset.id}__${data.assetVersionId}`
+      || approval?.id !== asset.approvalId
+      || approvalData?.assetId !== asset.id
+      || approvalData?.assetVersionId !== data.assetVersionId
+      || approvalData?.decision !== 'approved'
+      || approvalData?.checksum !== data.sha256
+      || (['nameplate', 'cosmetic-badge'].includes(data.category)
+        && (approvalData?.authoritySeparationPassed !== true || approvalData?.readableIdentityPassed !== true))
+      || !isPublishedOptionCompatible(data)) return [];
+    return [{ data, id: asset.id }];
+  });
+  const dependencies = preliminarilyCompatible.length
+    ? await getAllDocuments(db, preliminarilyCompatible.flatMap(({ data }) => dependencyReferences(db, data)))
+    : [];
+  let dependencyOffset = 0;
+  const compatible = preliminarilyCompatible.flatMap(({ data, id }) => {
+    const references = dependencyReferences(db, data);
+    const snapshots = dependencies.slice(dependencyOffset, dependencyOffset + references.length);
+    dependencyOffset += references.length;
+    if (!approvedDependencies(data, snapshots) || !isPublishedBundleCompatible(data, snapshots)) return [];
+    return [{ id, option: {
+      assetId: id,
+      assetVersionId: data.assetVersionId,
+      audioAssetId: typeof data.audioAssetId === 'string' ? data.audioAssetId : '',
+      audioAssetVersionId: typeof data.audioAssetVersionId === 'string' ? data.audioAssetVersionId : '',
+      byteSize: Number(data.byteSize || 0),
+      category: data.category,
+      durationMs: Number(data.durationMs || 0),
+      fallbackAssetId: typeof data.fallbackAssetId === 'string' ? data.fallbackAssetId : '',
+      fallbackAssetVersionId: typeof data.fallbackAssetVersionId === 'string' ? data.fallbackAssetVersionId : '',
+      format: data.format,
+      frameRate: Number(data.frameRate || 0),
+      height: Number(data.height || 0),
+      loop: data.loop === true,
+      performanceTier: typeof data.performanceTier === 'string' ? data.performanceTier : 'low',
+      storagePath: typeof data.storagePath === 'string' ? data.storagePath : '',
+      transparent: data.transparent === true,
+      width: Number(data.width || 0),
+    } }];
+  });
+  const optionWindow = compatible.slice(0, input.limit + 1);
+  const page = optionWindow.slice(0, input.limit);
+  const moreCompatible = optionWindow.length > input.limit;
+  const scanMayContinue = snapshot.docs.length === 250;
+  return {
+    items: page.map((record) => record.option),
+    pageInfo: {
+      hasNextPage: moreCompatible || scanMayContinue,
+      nextCursor: moreCompatible && page.length
+        ? page[page.length - 1].id
+        : scanMayContinue ? snapshot.docs[snapshot.docs.length - 1].id : '',
+    },
+  };
+}
+
+function dependencyReferences(db, version) {
+  const references = [];
+  if (isAnimatedAssetFormat(version.format) && version.fallbackAssetId && version.fallbackAssetVersionId) {
+    const fallback = referenceSet(db, version.fallbackAssetId, version.fallbackAssetVersionId);
+    references.push(fallback.summary, fallback.version, fallback.approval);
+  }
+  if (version.audioAssetId && version.audioAssetVersionId) {
+    const audio = referenceSet(db, version.audioAssetId, version.audioAssetVersionId);
+    references.push(audio.summary, audio.version, audio.approval);
+  }
+  return references;
+}
+
+function approvedDependencies(version, snapshots) {
+  if (isAnimatedAssetFormat(version.format)) {
+    if (!version.fallbackAssetId || !version.fallbackAssetVersionId || snapshots.length < 3) return false;
+    if (!isApprovedOptionDependency(snapshots.slice(0, 3), {
+      assetId: version.fallbackAssetId,
+      assetVersionId: version.fallbackAssetVersionId,
+      category: version.category,
+      formats: ['png', 'jpeg', 'legacy-webp'],
+      safetyAttestationsRequired: ['nameplate', 'cosmetic-badge'].includes(version.category),
+    })) return false;
+    snapshots = snapshots.slice(3);
+  }
+  const hasAnyAudioReference = Boolean(version.audioAssetId || version.audioAssetVersionId);
+  if (hasAnyAudioReference) {
+    if (!version.audioAssetId || !version.audioAssetVersionId || snapshots.length < 3) return false;
+    if (!isApprovedOptionDependency(snapshots.slice(0, 3), {
+      assetId: version.audioAssetId,
+      assetVersionId: version.audioAssetVersionId,
+      category: 'effect-audio',
+      formats: ['m4a-aac'],
+    })) return false;
+  }
+  return true;
+}
+
+function isApprovedOptionDependency([summary, version, approval], expected) {
+  const summaryData = summary?.exists ? summary.data() : undefined;
+  const versionData = version?.exists ? version.data() : undefined;
+  const approvalData = approval?.exists ? approval.data() : undefined;
+  return summaryData?.moderationStatus === 'approved'
+    && summaryData?.publicationStatus === 'published'
+    && summaryData?.renderingEnabled === true
+    && summaryData?.publishedVersionId === expected.assetVersionId
+    && summaryData?.approvedVersionId === expected.assetVersionId
+    && summaryData?.approvalId === `${expected.assetId}__${expected.assetVersionId}`
+    && versionData?.assetId === expected.assetId
+    && versionData?.assetVersionId === expected.assetVersionId
+    && versionData?.category === expected.category
+    && expected.formats.includes(versionData?.format)
+    && approval?.id === summaryData.approvalId
+    && approvalData?.assetId === expected.assetId
+    && approvalData?.assetVersionId === expected.assetVersionId
+    && approvalData?.decision === 'approved'
+    && approvalData?.checksum === versionData?.sha256
+    && (!expected.safetyAttestationsRequired
+      || (approvalData?.authoritySeparationPassed === true && approvalData?.readableIdentityPassed === true));
+}
+
+function isAnimatedAssetFormat(format) {
+  return format === 'lottie-json' || format === 'mp4';
+}
+
+function isPublishedOptionCompatible(version) {
+  if (['png', 'jpeg', 'legacy-webp'].includes(version.format)) return version.usage === 'static' && version.loop === false;
+  if (version.format === 'm4a-aac') return version.usage === 'one-shot' && version.loop === false;
+  if (version.category === 'gift-effect') {
+    return version.usage === 'one-shot'
+      && version.width === 1280 && version.height === 720
+      && version.durationMs >= 1500 && version.durationMs <= 6000;
+  }
+  if (version.category === 'entry-effect') {
+    return version.usage === 'one-shot'
+      && version.width === 1280 && version.height === 720
+      && version.durationMs >= 3000 && version.durationMs <= 5000;
+  }
+  if (version.category === 'room-theme') {
+    return version.usage === 'looping' && version.loop === true;
+  }
+  return version.format === 'lottie-json' ? version.usage === 'looping' && version.loop === true : true;
+}
+
+function isPublishedBundleCompatible(version, snapshots) {
+  const fallback = isAnimatedAssetFormat(version.format) ? snapshots[1]?.data?.() : undefined;
+  const audioOffset = isAnimatedAssetFormat(version.format) ? 3 : 0;
+  const audio = version.audioAssetId ? snapshots[audioOffset + 1]?.data?.() : undefined;
+  if (!['gift-effect', 'entry-effect'].includes(version.category)
+    && (version.audioAssetId !== undefined || version.audioAssetVersionId !== undefined)) return false;
+  if (version.category === 'gift-effect') {
+    return validPrimaryEffectProfile(version, 1500, 6000)
+      && validStaticEffectFallback(fallback, ['png', 'jpeg', 'legacy-webp'])
+      && validEffectAudio(audio, version.durationMs);
+  }
+  if (version.category === 'entry-effect') {
+    return validPrimaryEffectProfile(version, 3000, 5000)
+      && validStaticEffectFallback(fallback, ['png', 'legacy-webp'])
+      && validEffectAudio(audio, version.durationMs);
+  }
+  if (version.category === 'couple-effect' && version.format === 'lottie-json') {
+    return fallback?.format === 'png' && fallback.usage === 'static' && fallback.loop === false;
+  }
+  if (version.category === 'room-theme' && isAnimatedAssetFormat(version.format)) {
+    return version.audioCodec === ''
+      && version.audioAssetId === undefined && version.audioAssetVersionId === undefined
+      && validStaticEffectFallback(fallback, ['png', 'jpeg'], false);
+  }
+  if (version.format === 'lottie-json') {
+    return validStaticEffectFallback(fallback, ['png', 'legacy-webp'], false);
+  }
+  return true;
+}
+
+function validPrimaryEffectProfile(version, minimumDurationMs, maximumDurationMs) {
+  return version.width === 1280 && version.height === 720
+    && version.durationMs >= minimumDurationMs && version.durationMs <= maximumDurationMs
+    && version.frameRate > 0 && version.frameRate <= 30
+    && version.usage === 'one-shot' && version.loop === false
+    && (
+      (version.format === 'lottie-json' && version.transparent === true && version.audioCodec === '' && version.videoCodec === '')
+      || (version.format === 'mp4' && version.transparent === false && version.audioCodec === '' && version.videoCodec === 'h264')
+    );
+}
+
+function validStaticEffectFallback(version, formats, requireCanvas = true) {
+  return Boolean(version
+    && formats.includes(version.format)
+    && (!requireCanvas || (version.width === 1280 && version.height === 720))
+    && version.durationMs === 0
+    && version.usage === 'static'
+    && version.loop === false
+    && version.audioAssetId === undefined && version.audioAssetVersionId === undefined
+    && version.fallbackAssetId === undefined && version.fallbackAssetVersionId === undefined);
+}
+
+function validEffectAudio(version, maximumDurationMs) {
+  return !version || (version.format === 'm4a-aac'
+    && version.durationMs >= 1 && version.durationMs <= maximumDurationMs
+    && version.audioCodec === 'aac' && version.videoCodec === ''
+    && version.usage === 'one-shot' && version.loop === false);
+}
+
+async function getAllDocuments(db, references) {
+  const chunks = [];
+  for (let index = 0; index < references.length; index += 250) {
+    chunks.push(references.slice(index, index + 250));
+  }
+  const snapshots = await Promise.all(chunks.map((chunk) => db.getAll(...chunk)));
+  return snapshots.flat();
+}
+
 async function mutateAdminCosmeticsAsset({
   bucket,
   db,
@@ -587,6 +826,7 @@ function adminError(status, message) {
 module.exports = {
   cleanupExpiredCosmeticSubmissions,
   getAdminCosmeticsAssets,
+  getAdminPublishedCosmeticAssetOptions,
   mutateAdminCosmeticsAsset,
   reconcileCosmeticAssetRegistryBatch,
 };

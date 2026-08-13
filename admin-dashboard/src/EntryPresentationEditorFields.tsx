@@ -1,5 +1,8 @@
+import type { User } from 'firebase/auth';
 import type { AdminEntryPhysicalApproval, AdminEntryPresentation } from './adminDashboardApi';
 import { BottomEffectStagePreview } from './BottomEffectStagePreview';
+import { CosmeticAssetField } from './CosmeticAssetField';
+import { entryAssetRequirement } from './cosmeticAssetAuthoring';
 
 export const defaultEntryPresentation: AdminEntryPresentation = {
   animationEnabled: false,
@@ -21,21 +24,15 @@ export const defaultEntryPhysicalApproval: AdminEntryPhysicalApproval = {
   testedClientVersion: '',
 };
 
-export function EntryPresentationEditorFields({ approval, itemNameAr, onApprovalChange, onChange, value }: {
+export function EntryPresentationEditorFields({ approval, initialAssetId, itemNameAr, onApprovalChange, onChange, user, value }: {
   approval: AdminEntryPhysicalApproval;
+  initialAssetId?: string;
   itemNameAr: string;
   onApprovalChange: (value: AdminEntryPhysicalApproval) => void;
   onChange: (value: AdminEntryPresentation) => void;
+  user: User;
   value: AdminEntryPresentation;
 }) {
-  const setReference = (
-    kind: 'visualAsset' | 'fallbackAsset' | 'audioAsset',
-    field: 'assetId' | 'assetVersionId',
-    next: string,
-  ) => {
-    const current = value[kind] || { assetId: '', assetVersionId: '' };
-    onChange({ ...value, [kind]: { ...current, [field]: next.trim() } });
-  };
   return <>
     <label className="field span-2 economy-checkbox">
       <span>تفعيل حركة الدخول المعتمدة</span>
@@ -70,13 +67,6 @@ export function EntryPresentationEditorFields({ approval, itemNameAr, onApproval
       <input dir="ltr" disabled={!value.animationEnabled} pattern="[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}" value={value.minimumClientVersion} onChange={(event) => onChange({ ...value, minimumClientVersion: event.target.value })} />
     </label>
     <label className="field">
-      <span>صيغة العرض</span>
-      <select disabled={!value.animationEnabled} value={value.visualFormat || 'lottie-json'} onChange={(event) => onChange({ ...value, visualFormat: event.target.value as 'lottie-json' | 'mp4' })}>
-        <option value="lottie-json">Lottie JSON</option>
-        <option value="mp4">MP4 معتم</option>
-      </select>
-    </label>
-    <label className="field">
       <span>الصوت</span>
       <select disabled={!value.animationEnabled} value={value.soundPolicy} onChange={(event) => onChange({ ...value, soundPolicy: event.target.value as AdminEntryPresentation['soundPolicy'], ...(event.target.value === 'off' ? { audioAsset: undefined } : {}) })}>
         <option value="off">متوقف</option>
@@ -85,32 +75,22 @@ export function EntryPresentationEditorFields({ approval, itemNameAr, onApproval
       </select>
     </label>
     {value.animationEnabled ? <>
-      <label className="field">
-        <span>معرّف الأصل المرئي</span>
-        <input dir="ltr" required value={value.visualAsset?.assetId || ''} onChange={(event) => setReference('visualAsset', 'assetId', event.target.value)} />
-      </label>
-      <label className="field">
-        <span>إصدار الأصل المرئي</span>
-        <input dir="ltr" required value={value.visualAsset?.assetVersionId || ''} onChange={(event) => setReference('visualAsset', 'assetVersionId', event.target.value)} />
-      </label>
-      <label className="field">
-        <span>معرّف أصل الاحتياط</span>
-        <input dir="ltr" required value={value.fallbackAsset?.assetId || ''} onChange={(event) => setReference('fallbackAsset', 'assetId', event.target.value)} />
-      </label>
-      <label className="field">
-        <span>إصدار أصل الاحتياط</span>
-        <input dir="ltr" required value={value.fallbackAsset?.assetVersionId || ''} onChange={(event) => setReference('fallbackAsset', 'assetVersionId', event.target.value)} />
-      </label>
-      {value.soundPolicy !== 'off' ? <>
-        <label className="field">
-          <span>معرّف أصل الصوت</span>
-          <input dir="ltr" required value={value.audioAsset?.assetId || ''} onChange={(event) => setReference('audioAsset', 'assetId', event.target.value)} />
-        </label>
-        <label className="field">
-          <span>إصدار أصل الصوت</span>
-          <input dir="ltr" required value={value.audioAsset?.assetVersionId || ''} onChange={(event) => setReference('audioAsset', 'assetVersionId', event.target.value)} />
-        </label>
-      </> : null}
+      <CosmeticAssetField
+        initialAssetId={initialAssetId || 'entry-effect'}
+        onSelect={(bundle) => onChange({
+          ...value,
+          audioAsset: bundle.audio,
+          durationMs: bundle.durationMs || value.durationMs,
+          fallbackAsset: bundle.fallback,
+          performanceTier: bundle.performanceTier || value.performanceTier,
+          soundPolicy: bundle.audio ? (value.soundPolicy === 'off' ? 'soft' : value.soundPolicy) : 'off',
+          visualAsset: bundle.primary,
+          visualFormat: bundle.format as 'lottie-json' | 'mp4',
+        })}
+        reference={value.visualAsset}
+        requirement={entryAssetRequirement}
+        user={user}
+      />
       <div className="span-2 gift-presentation-preview">
         <strong>حزمة الدخول غير القابلة للتغيير</strong>
         <code dir="ltr">{value.visualAsset?.assetId || 'visual'} / {value.visualAsset?.assetVersionId || 'version'}</code>

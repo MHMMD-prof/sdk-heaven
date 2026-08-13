@@ -1,4 +1,5 @@
 import { AdminStoreCatalogItem } from './adminDashboardApi';
+import { requiresExplicitCosmeticAsset } from './cosmeticAssetAuthoring';
 
 export type StoreCatalogDraft = Omit<AdminStoreCatalogItem, 'createdAt' | 'lastEditorEmail' | 'lastEditorUid' | 'updatedAt'>;
 
@@ -20,7 +21,7 @@ export function validateStoreCatalogDraft(item: StoreCatalogDraft, reason: strin
   const cosmeticCategories = ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects', 'couple-effects'];
   if (item.cosmeticAsset && !cosmeticCategories.includes(item.category)) errors.push('Cosmetic asset references are only allowed for cosmetic equipment categories.');
   if (item.cosmeticAsset && (!/^[a-z0-9][a-z0-9_-]{2,79}$/.test(item.cosmeticAsset.assetId) || !/^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(item.cosmeticAsset.assetVersionId))) errors.push('Select an exact immutable cosmetic asset version.');
-  if (item.category === 'couple-effects' && !item.cosmeticAsset) errors.push('Select one exact approved couple-effect asset version.');
+  if (requiresExplicitCosmeticAsset(item.category) && item.category !== 'stickers' && !item.cosmeticAsset) errors.push('Select one exact approved cosmetic asset version.');
   if (item.category === 'couple-effects' && !item.coupleEffectPresentation) errors.push('Choose the profile, paired-border, and entrance presentation modes.');
   if (item.coupleEffectPresentation && item.category !== 'couple-effects') errors.push('Couple-effect presentations are only allowed for couple effects.');
   if (item.coupleEffectPresentation) {

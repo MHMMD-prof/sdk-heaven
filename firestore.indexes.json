@@ -1,6 +1,119 @@
 {
   "indexes": [
     {
+      "collectionGroup": "roomPkChallenges",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roomPkSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mode", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "endsAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roomPkSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mode", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roomPkSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "settleAfter", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roomPkReconciliations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "leaseExpiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roomPkReconciliations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rooms",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "visibility", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "giftEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pkContext.pkId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "statusPresentationJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "statusSourceOutbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vipContributions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "occurredAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "aristocracyEntitlements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "aristocracyTransactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vipAccounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "items",
       "queryScope": "COLLECTION",
       "fields": [
@@ -773,6 +886,72 @@
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "roomPkChallenges",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "roomPkSessions",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "roomPkGiftFacts",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "roomPkReconciliations",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "scoreShards",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gifters",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "crossRoomPkRoomRateLimits",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "crossRoomPkPairCooldowns",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "roomPkAuditEvents",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "roomPkRateLimits",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "pkCommandRequests",
+      "fieldPath": "purgeAfter",
+      "ttl": true,
+      "indexes": []
+    },
     {
       "collectionGroup": "seats",
       "fieldPath": "reservationExpiresAt",

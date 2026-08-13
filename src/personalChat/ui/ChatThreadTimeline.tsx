@@ -7,6 +7,8 @@ import { DirectChatAttachment } from '../DirectChatAttachment';
 import type { DirectChatUiMessage } from '../directChatModels';
 import type { ChatTimelineItem } from './buildMessageGroups';
 import { chatColors, chatMetrics, chatTypography } from './chatTheme';
+import type { StatusPresentation } from '../../status/statusPresentation';
+import { StatusBenefitAsset } from '../../components/status/StatusBenefitAsset';
 
 const ar = I18nManager.isRTL;
 const tr = (arabic: string, english: string) => ar ? arabic : english;
@@ -17,9 +19,11 @@ export function ChatTimelineRow({
   messages,
   onMessageAction,
   peerBubble,
+  peerStatus,
   peerName,
   peerReadSequence,
   selfBubble,
+  selfStatus,
   uid,
 }: {
   cosmetics: CosmeticsFeatureFlags;
@@ -27,9 +31,11 @@ export function ChatTimelineRow({
   messages: DirectChatUiMessage[];
   onMessageAction: (message: DirectChatUiMessage) => void;
   peerBubble?: EquipmentCosmeticProjection;
+  peerStatus?: StatusPresentation;
   peerName: string;
   peerReadSequence: number;
   selfBubble?: EquipmentCosmeticProjection;
+  selfStatus?: StatusPresentation;
   uid: string;
 }) {
   if (item.kind === 'date') return <DateSeparator dateKey={item.dateKey} />;
@@ -41,6 +47,7 @@ export function ChatTimelineRow({
       {item.messages.map((message, index) => (
         <MessageBubble
           bubble={mine ? selfBubble : peerBubble}
+          statusPresentation={mine ? selfStatus : peerStatus}
           cosmetics={cosmetics}
           isLast={index === item.messages.length - 1}
           key={message.id}
@@ -57,7 +64,7 @@ export function ChatTimelineRow({
   );
 }
 
-function MessageBubble({ bubble, cosmetics, isLast, message, messages, mine, onLongPress, peerName, peerReadSequence, uid }: {
+function MessageBubble({ bubble, cosmetics, isLast, message, messages, mine, onLongPress, peerName, peerReadSequence, statusPresentation, uid }: {
   bubble?: EquipmentCosmeticProjection;
   cosmetics: CosmeticsFeatureFlags;
   isLast: boolean;
@@ -67,6 +74,7 @@ function MessageBubble({ bubble, cosmetics, isLast, message, messages, mine, onL
   onLongPress: () => void;
   peerName: string;
   peerReadSequence: number;
+  statusPresentation?: StatusPresentation;
   uid: string;
 }) {
   const replied = message.replyToMessageId ? messages.find((candidate) => candidate.id === message.replyToMessageId) : undefined;
@@ -84,6 +92,7 @@ function MessageBubble({ bubble, cosmetics, isLast, message, messages, mine, onL
       style={({ pressed }) => [styles.bubble, mine ? styles.mine : styles.theirs, message.deliveryState === 'failed' && styles.failed, pressed && styles.pressed]}
     >
       <EquipmentCosmeticAsset category="chat-bubble" enabled={cosmetics.chatBubbles} flags={cosmetics} projection={bubble} style={styles.cosmetic} />
+      <StatusBenefitAsset flags={cosmetics} presentation={statusPresentation} slot="chatBubble" style={styles.statusCosmetic} />
       {message.replyToMessageId ? (
         <View style={styles.reply}>
           <Text numberOfLines={1} style={styles.replyLabel}>{replied ? (replied.senderUid === uid ? tr('أنت', 'You') : peerName) : tr('رسالة غير متاحة', 'Message unavailable')}</Text>
@@ -158,6 +167,7 @@ const styles = StyleSheet.create({
   boundaryText: { color: chatColors.textTertiary, fontSize: 11, fontWeight: '700' },
   bubble: { borderColor: chatColors.divider, borderRadius: 18, borderWidth: 1, gap: 6, maxWidth: chatMetrics.bubbleMaxWidth, minWidth: 92, overflow: 'hidden', paddingHorizontal: 13, paddingVertical: 9 },
   cosmetic: { bottom: 0, left: 0, opacity: 0.22, position: 'absolute', right: 0, top: 0 },
+  statusCosmetic: { bottom: 0, left: 0, opacity: 0.18, position: 'absolute', right: 0, top: 0 },
   delivery: { color: chatColors.goldBright, fontSize: 10, fontWeight: '700' },
   deliveryFailed: { color: chatColors.danger },
   failed: { borderColor: chatColors.danger },

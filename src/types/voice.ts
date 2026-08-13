@@ -1,4 +1,5 @@
 import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
+import type { StatusPresentation } from '../status/statusPresentation';
 
 export type VoiceRoomType = 'voice' | 'game';
 export type RoomCountryCode =
@@ -42,6 +43,7 @@ export type VoiceRoomMember = {
   avatarFrameItemId?: string;
   authorityRole?: 'owner' | 'moderator' | 'member';
   representativeBadgeActive?: boolean;
+  statusPresentation?: StatusPresentation;
   equipmentCosmetics?: EquipmentCosmetics;
   seatId?: string | null;
   privileges?: {

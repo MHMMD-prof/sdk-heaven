@@ -111,7 +111,7 @@ describe('adminStoreService', () => {
       stock: { kind: 'unlimited' },
     };
     const seed = {};
-    seedApprovedAsset(seed, reference, 'png', 'c'.repeat(64), { usage: 'static' }, 'couple-effect');
+    seedApprovedAsset(seed, reference, 'png', 'c'.repeat(64), { loop: false, usage: 'static' }, 'couple-effect');
     await executeAdminStoreCatalogUpsert({
       db: fakeDb(seed, writes),
       decodedToken: { email: 'admin@example.com', uid: 'admin-1' },
@@ -127,6 +127,66 @@ describe('adminStoreService', () => {
       decodedToken: { uid: 'admin-1' },
       fieldValue: { serverTimestamp: () => 'SERVER_TIME' },
       input: { expectedUpdatedAt: '', item: pair, reason: 'Forged approval', requestId: 'request_pair_000002' },
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('rejects an animated equipment cosmetic when its exact fallback is disabled', async () => {
+    const reference = { assetId: 'gold-frame', assetVersionId: 'v1-aaaaaaaaaaaa' };
+    const fallback = { assetId: 'gold-frame-static', assetVersionId: 'v1-bbbbbbbbbbbb' };
+    const frame = {
+      ...item, category: 'avatar-frames', cosmeticAsset: reference, customId: undefined,
+      itemId: 'gold-frame-item', stock: { kind: 'unlimited' },
+    };
+    const seed = {};
+    seedApprovedAsset(seed, reference, 'lottie-json', 'e'.repeat(64), {
+      fallbackAssetId: fallback.assetId, fallbackAssetVersionId: fallback.assetVersionId, loop: true, usage: 'looping',
+    }, 'avatar-frame');
+    seedApprovedAsset(seed, fallback, 'png', 'f'.repeat(64), { durationMs: 0, loop: false, usage: 'static' }, 'avatar-frame');
+    seed[`cosmeticAssets/${fallback.assetId}`].renderingEnabled = false;
+
+    await expect(executeAdminStoreCatalogUpsert({
+      db: fakeDb(seed, []), decodedToken: { uid: 'admin-1' }, fieldValue: { serverTimestamp: () => 'SERVER_TIME' },
+      input: { expectedUpdatedAt: '', item: frame, reason: 'Assign animated frame', requestId: 'request_frame_00001' },
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('rejects one-shot animation playback for persistent equipment cosmetics', async () => {
+    const reference = { assetId: 'burst-frame', assetVersionId: 'v1-aaaaaaaaaaaa' };
+    const fallback = { assetId: 'burst-frame-static', assetVersionId: 'v1-bbbbbbbbbbbb' };
+    const frame = {
+      ...item, category: 'avatar-frames', cosmeticAsset: reference, customId: undefined,
+      itemId: 'burst-frame-item', stock: { kind: 'unlimited' },
+    };
+    const seed = {};
+    seedApprovedAsset(seed, reference, 'lottie-json', '1'.repeat(64), {
+      fallbackAssetId: fallback.assetId, fallbackAssetVersionId: fallback.assetVersionId,
+      loop: false, usage: 'one-shot',
+    }, 'avatar-frame');
+    seedApprovedAsset(seed, fallback, 'png', '2'.repeat(64), { durationMs: 0, loop: false, usage: 'static' }, 'avatar-frame');
+
+    await expect(executeAdminStoreCatalogUpsert({
+      db: fakeDb(seed, []), decodedToken: { uid: 'admin-1' }, fieldValue: { serverTimestamp: () => 'SERVER_TIME' },
+      input: { expectedUpdatedAt: '', item: frame, reason: 'Assign one-shot frame', requestId: 'request_frame_00002' },
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('rejects one-shot animation playback for persistent stickers', async () => {
+    const reference = { assetId: 'burst-sticker', assetVersionId: 'v1-aaaaaaaaaaaa' };
+    const fallback = { assetId: 'burst-sticker-static', assetVersionId: 'v1-bbbbbbbbbbbb' };
+    const sticker = {
+      ...item, category: 'stickers', customId: undefined, itemId: 'burst-sticker-item',
+      stickerAsset: reference, stock: { kind: 'unlimited' },
+    };
+    const seed = {};
+    seedApprovedAsset(seed, reference, 'lottie-json', '3'.repeat(64), {
+      fallbackAssetId: fallback.assetId, fallbackAssetVersionId: fallback.assetVersionId,
+      loop: false, usage: 'one-shot',
+    }, 'room-reaction');
+    seedApprovedAsset(seed, fallback, 'png', '4'.repeat(64), { durationMs: 0, loop: false, usage: 'static' }, 'room-reaction');
+
+    await expect(executeAdminStoreCatalogUpsert({
+      db: fakeDb(seed, []), decodedToken: { uid: 'admin-1' }, fieldValue: { serverTimestamp: () => 'SERVER_TIME' },
+      input: { expectedUpdatedAt: '', item: sticker, reason: 'Assign one-shot sticker', requestId: 'request_sticker_001' },
     })).rejects.toMatchObject({ status: 409 });
   });
 });
@@ -157,8 +217,10 @@ function fakeDb(seed, writes) {
     collection(collection) { return { doc(id) { return makeRef(collection, id); } }; },
     doc(path) { return { path }; },
     async runTransaction(handler) {
+      const read = (ref) => ({ data: () => seed[ref.path], exists: Object.hasOwn(seed, ref.path), ref });
       return handler({
-        async getAll(...refs) { return refs.map((ref) => ({ data: () => seed[ref.path], exists: Object.hasOwn(seed, ref.path), ref })); },
+        async get(ref) { return read(ref); },
+        async getAll(...refs) { return refs.map(read); },
         create(ref, data) { writes.push({ kind: 'create', ref, data }); },
         set(ref, data) { writes.push({ kind: 'set', ref, data }); },
       });

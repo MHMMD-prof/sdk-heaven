@@ -5,6 +5,8 @@ import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
 import { ChatAvatar } from './ChatAvatar';
 import { ChatIcon } from './ChatIcon';
 import { chatColors, chatMetrics, chatTypography } from './chatTheme';
+import type { StatusPresentation } from '../../status/statusPresentation';
+import { StatusBadgeRow } from '../../components/status/StatusBadgeRow';
 
 export type ChatConversationRowPresentation = {
   accessibilityLabel: string;
@@ -16,6 +18,7 @@ export type ChatConversationRowPresentation = {
   muteLabel: string;
   online?: boolean;
   preview: string;
+  statusPresentation?: StatusPresentation;
   timestampLabel: string;
   unreadCount: number;
 };
@@ -55,7 +58,10 @@ export function ChatConversationRow({ flags, onArchive, onLongPress, onMute, onP
       />
       <View style={styles.copy}>
         <View style={styles.line}>
-          <Text maxFontSizeMultiplier={2} numberOfLines={1} style={[styles.name, unread && styles.unreadText]}>{presentation.displayName}</Text>
+          <View style={styles.identity}>
+            <Text maxFontSizeMultiplier={2} numberOfLines={1} style={[styles.name, unread && styles.unreadText]}>{presentation.displayName}</Text>
+            <StatusBadgeRow compact presentation={presentation.statusPresentation} />
+          </View>
           <Text maxFontSizeMultiplier={2} numberOfLines={1} style={styles.time}>{presentation.timestampLabel}</Text>
         </View>
         <View style={styles.line}>
@@ -73,6 +79,7 @@ const styles = StyleSheet.create({
   badgeText: { color: chatColors.textPrimary, fontSize: 11, fontWeight: '800' },
   copy: { flex: 1, gap: 5, minWidth: 0 },
   line: { alignItems: 'center', flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row', gap: 8, justifyContent: 'space-between' },
+  identity: { alignItems: 'center', flex: 1, flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row', gap: 5, minWidth: 0 },
   name: { ...chatTypography.name, color: chatColors.textPrimary, flex: 1, textAlign: I18nManager.isRTL ? 'right' : 'left' },
   pressed: { backgroundColor: chatColors.surfacePressed },
   preview: { color: chatColors.textSecondary, flex: 1, fontSize: 14, textAlign: I18nManager.isRTL ? 'right' : 'left', writingDirection: I18nManager.isRTL ? 'rtl' : 'ltr' },

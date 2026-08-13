@@ -8,8 +8,15 @@ const {
   MIN_DISTINCT_GIFTERS_FOR_VALID,
   MIN_DURATION_MS,
   applyPkGiftScore,
+  buildCrossRoomPkChallenge,
+  buildCrossRoomPkScoreShards,
+  buildCrossRoomPkSession,
   clampPkDurationMs,
+  createCrossRoomPkChallengeId,
+  createCrossRoomPkSessionId,
   createRoomPkSessionId,
+  isCrossRoomPkEligibleRoom,
+  isCrossRoomPkPairInRollout,
   isPkSessionActive,
   mapRoomPkSession,
   normalizeRoomPkBody,
@@ -161,4 +168,106 @@ describe('roomPkCore', () => {
     expect(first.startsWith('rpk_')).toBe(true);
     expect(first.length).toBeLessThanOrEqual(28);
   });
+
+  it('normalizes and validates every Wave 1 cross-room command shape', () => {
+    expect(validateRoomPkRequest(normalizeRoomPkBody({
+      action: 'challenge-cross-room-pk',
+      clientVersion: '1.0.0',
+      opponentRoomId: 'room-pk-2',
+      requestId,
+      roomId,
+    }))).toMatchObject({ ok: true, value: { mode: 'cross-room' } });
+    expect(validateRoomPkRequest(normalizeRoomPkBody({
+      action: 'challenge-cross-room-pk',
+      clientVersion: '1.0.0',
+      opponentRoomId: roomId,
+      requestId,
+      roomId,
+    })).code).toBe('SAME_ROOM_FORBIDDEN');
+    for (const action of ['accept-cross-room-pk', 'decline-cross-room-pk', 'cancel-cross-room-pk']) {
+      expect(validateRoomPkRequest(normalizeRoomPkBody({
+        action,
+        challengeId: 'crpkc_challenge_000001',
+        clientVersion: '1.0.0',
+        requestId,
+        roomId,
+      })).ok).toBe(true);
+    }
+    expect(validateRoomPkRequest(normalizeRoomPkBody({
+      action: 'surrender-cross-room-pk',
+      clientVersion: '1.0.0',
+      pkId: 'crpks_session_00000001',
+      requestId,
+      roomId,
+    })).ok).toBe(true);
+  });
+
+  it('builds deterministic challenge/session contracts and exactly 32 shards', () => {
+    const red = eligibleRoom('room-red-1', 'host-red-1', 'Red Room');
+    const blue = eligibleRoom('room-blue-1', 'host-blue-1', 'Blue Room');
+    const challenge = buildCrossRoomPkChallenge({
+      challengerAuthorityUid: 'host-red-1',
+      challengerRoom: red,
+      durationMs: 180_000,
+      nowMs,
+      opponentRoom: blue,
+      requestId,
+    });
+    expect(challenge.challengeId).toBe(createCrossRoomPkChallengeId(requestId, red.id, blue.id));
+    const session = buildCrossRoomPkSession({
+      acceptedByUid: 'host-blue-1',
+      blueAuthorityUid: 'host-blue-1',
+      challenge,
+      nowMs,
+      redAuthorityUid: 'host-red-1',
+    });
+    expect(session.pkId).toBe(createCrossRoomPkSessionId(challenge.challengeId));
+    expect(mapRoomPkSession(session)).toMatchObject({
+      mode: 'cross-room', roomIds: ['room-red-1', 'room-blue-1'], schemaVersion: 2,
+    });
+    const shards = buildCrossRoomPkScoreShards(session);
+    expect(shards).toHaveLength(32);
+    expect(new Set(shards.map((shard) => shard.shardId)).size).toBe(32);
+    expect(shards.every((shard) => shard.score === 0 && shard.giftCount === 0)).toBe(true);
+  });
+
+  it('fails room eligibility and rollout closed while keeping pair hashing symmetric', () => {
+    const red = eligibleRoom('room-red-1', 'host-red-1', 'Red Room');
+    const blue = eligibleRoom('room-blue-1', 'host-blue-1', 'Blue Room');
+    expect(isCrossRoomPkEligibleRoom(red)).toBe(true);
+    expect(isCrossRoomPkEligibleRoom({ ...red, visibility: 'private' })).toBe(false);
+    expect(isCrossRoomPkEligibleRoom({ ...red, activeWatchLeaseId: 'watch-1' })).toBe(false);
+    expect(isCrossRoomPkPairInRollout({
+      challengerAuthorityUid: 'host-red-1', challengerRoom: red,
+      opponentAuthorityUid: 'host-blue-1', opponentRoom: blue,
+      policy: { schemaVersion: 1, stage: 'dark' },
+    })).toBe(false);
+    const publicPolicy = { schemaVersion: 1, stage: 'public', percentageBasisPoints: 5_000 };
+    const forward = isCrossRoomPkPairInRollout({
+      challengerAuthorityUid: 'host-red-1', challengerRoom: red,
+      opponentAuthorityUid: 'host-blue-1', opponentRoom: blue, policy: publicPolicy,
+    });
+    const reverse = isCrossRoomPkPairInRollout({
+      challengerAuthorityUid: 'host-blue-1', challengerRoom: blue,
+      opponentAuthorityUid: 'host-red-1', opponentRoom: red, policy: publicPolicy,
+    });
+    expect(forward).toBe(reverse);
+  });
 });
+
+function eligibleRoom(id, ownerUid, title) {
+  return {
+    availability: 'active',
+    countryCode: 'IQ',
+    hostDisplayName: ownerUid,
+    hostId: ownerUid,
+    id,
+    ownerUid,
+    participantCount: 1,
+    schemaVersion: 2,
+    status: 'active',
+    title,
+    type: 'voice',
+    visibility: 'public',
+  };
+}

@@ -126,7 +126,14 @@ async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, in
         summary: summary.exists ? summary.data() : undefined,
         version: version.exists ? version.data() : undefined,
         versionId,
-      }).ok;
+      }).ok && validPersistentVisualPlayback(version.data());
+      if (approved && version.data()?.format === 'lottie-json' && item.category !== 'couple-effects') {
+        approved = await validateCatalogAssetDependencies(transaction, db, version.data(), {
+          category: version.data().category,
+          fallbackFormats: staticFormatsForCategory(version.data().category),
+          prohibitAudio: true,
+        });
+      }
       if (approved && item.category === 'couple-effects') {
         let fallback;
         if (version.data()?.format === 'lottie-json') {
@@ -160,7 +167,13 @@ async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, in
     }
     if (item.stickerAsset) {
       const [summary, version, approval, ...remaining] = collisionSnapshots;
-      if (!approvedStickerReference(item.stickerAsset, summary, version, approval)) {
+      const stickerVersion = version.exists ? version.data() : undefined;
+      const dependenciesValid = validPersistentVisualPlayback(stickerVersion) && (stickerVersion?.format === 'lottie-json'
+        ? await validateCatalogAssetDependencies(transaction, db, stickerVersion, {
+          category: 'room-reaction', fallbackFormats: ['png', 'legacy-webp'], prohibitAudio: true,
+        })
+        : stickerVersion?.audioAssetId === undefined && stickerVersion?.audioAssetVersionId === undefined);
+      if (!approvedStickerReference(item.stickerAsset, summary, version, approval) || !dependenciesValid) {
         const error = new Error('The sticker must reference an approved and published room-reaction asset version.');
         error.status = 409;
         throw error;
@@ -284,6 +297,57 @@ async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, in
     });
     return { eventId: auditRef.id, itemId: item.itemId, replayed: false };
   });
+}
+
+function validPersistentVisualPlayback(version) {
+  if (!version || version.audioAssetId !== undefined || version.audioAssetVersionId !== undefined) return false;
+  if (['png', 'jpeg', 'legacy-webp'].includes(version.format)) {
+    return version.usage === 'static'
+      && version.loop === false
+      && version.fallbackAssetId === undefined
+      && version.fallbackAssetVersionId === undefined;
+  }
+  return version.format === 'lottie-json' && version.usage === 'looping' && version.loop === true;
+}
+
+async function validateCatalogAssetDependencies(transaction, db, version, options) {
+  if (options.prohibitAudio && (version.audioAssetId || version.audioAssetVersionId)) return false;
+  if (!version.fallbackAssetId || !version.fallbackAssetVersionId) return false;
+  const [summary, fallback, approval] = await Promise.all([
+    transaction.get(db.doc(`cosmeticAssets/${version.fallbackAssetId}`)),
+    transaction.get(db.doc(`cosmeticAssets/${version.fallbackAssetId}/versions/${version.fallbackAssetVersionId}`)),
+    transaction.get(db.doc(`cosmeticAssetApprovals/${version.fallbackAssetId}__${version.fallbackAssetVersionId}`)),
+  ]);
+  const summaryData = summary.exists ? summary.data() : undefined;
+  const fallbackData = fallback.exists ? fallback.data() : undefined;
+  const approvalData = approval.exists ? approval.data() : undefined;
+  return summaryData?.moderationStatus === 'approved'
+    && summaryData?.publicationStatus === 'published'
+    && summaryData?.renderingEnabled === true
+    && summaryData?.publishedVersionId === version.fallbackAssetVersionId
+    && summaryData?.approvedVersionId === version.fallbackAssetVersionId
+    && summaryData?.approvalId === `${version.fallbackAssetId}__${version.fallbackAssetVersionId}`
+    && fallbackData?.assetId === version.fallbackAssetId
+    && fallbackData?.assetVersionId === version.fallbackAssetVersionId
+    && fallbackData?.category === options.category
+    && options.fallbackFormats.includes(fallbackData?.format)
+    && fallbackData?.usage === 'static'
+    && fallbackData?.loop === false
+    && fallbackData?.audioAssetId === undefined
+    && fallbackData?.audioAssetVersionId === undefined
+    && fallbackData?.fallbackAssetId === undefined
+    && fallbackData?.fallbackAssetVersionId === undefined
+    && approvalData?.assetId === version.fallbackAssetId
+    && approvalData?.assetVersionId === version.fallbackAssetVersionId
+    && approvalData?.decision === 'approved'
+    && approvalData?.checksum === fallbackData?.sha256
+    && (!['nameplate', 'cosmetic-badge'].includes(options.category)
+      || (approvalData?.authoritySeparationPassed === true && approvalData?.readableIdentityPassed === true));
+}
+
+function staticFormatsForCategory(category) {
+  if (category === 'profile-skin') return ['png', 'jpeg', 'legacy-webp'];
+  return ['png', 'legacy-webp'];
 }
 
 function buildEntryPhysicalApprovalReceipt({

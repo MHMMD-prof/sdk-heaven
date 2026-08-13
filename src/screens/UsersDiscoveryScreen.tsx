@@ -17,6 +17,8 @@ import {
 
 import { ScreenContainer } from '../components/ScreenContainer';
 import { RepresentativeBadge } from '../components/RepresentativeBadge';
+import { StatusBadgeRow } from '../components/status/StatusBadgeRow';
+import { useStatusFeatureFlags } from '../status/featureFlags';
 import { getRoomCountry, roomCountries } from '../data/roomCountries';
 import { requestUserDiscovery } from '../social/requestSocialCommand';
 import type { PublicUserProfile } from '../social/types';
@@ -34,6 +36,7 @@ type CountryFilter = 'all' | RoomCountryCode;
 export function UsersDiscoveryScreen({ navigation }: UsersDiscoveryScreenProps) {
   const flags = useSocialFeatureFlags();
   const cosmeticsFlags = useCosmeticsFeatureFlags();
+  const statusFlags = useStatusFeatureFlags();
   const { width } = useWindowDimensions();
   const countryRailRef = useRef<ScrollView>(null);
   const requestSequence = useRef(0);
@@ -212,6 +215,7 @@ export function UsersDiscoveryScreen({ navigation }: UsersDiscoveryScreenProps) 
             <UserCard
               badgeActive={activeBadges[item.uid] ?? item.representativeBadgeActive}
               cosmeticsFlags={cosmeticsFlags}
+              showStatus={statusFlags.statusPresentation}
               onPress={() => navigation.navigate('UserProfile', { uid: item.uid })}
               profile={item}
             />
@@ -223,11 +227,12 @@ export function UsersDiscoveryScreen({ navigation }: UsersDiscoveryScreenProps) 
   );
 }
 
-function UserCard({ badgeActive, cosmeticsFlags, onPress, profile }: {
+function UserCard({ badgeActive, cosmeticsFlags, onPress, profile, showStatus }: {
   badgeActive?: boolean;
   cosmeticsFlags: CosmeticsFeatureFlags;
   onPress: () => void;
   profile: PublicUserProfile;
+  showStatus: boolean;
 }) {
   const country = getRoomCountry(profile.countryCode);
   const avatarLabel = [...profile.displayName][0] || '؟';
@@ -255,6 +260,7 @@ function UserCard({ badgeActive, cosmeticsFlags, onPress, profile }: {
               <RepresentativeBadge active={badgeActive} />
             </View>
             <Text style={styles.userId}>ID: {profile.publicId}</Text>
+            {showStatus ? <StatusBadgeRow presentation={profile.statusPresentation} /> : null}
           </View>
         </View>
         <Text numberOfLines={2} style={[styles.userBio, !profile.bio && styles.emptyBio]}>

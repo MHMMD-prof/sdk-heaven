@@ -311,7 +311,7 @@ function GiftEditor({ editor, onClose, onSaved, user }: { editor: Extract<Editor
           </div>
           <small>storm يعزز العاصفة · lucky يفعل جدول الحظ · magic يطلب إطاراً معتمداً.</small>
         </div>
-        <GiftPresentationEditorFields approval={physicalApproval} itemNameAr={nameAr} onApprovalChange={setPhysicalApproval} onChange={updatePresentation} value={presentation} />
+        <GiftPresentationEditorFields approval={physicalApproval} initialAssetId={`${giftId || 'gift'}-effect`} itemNameAr={nameAr} onApprovalChange={setPhysicalApproval} onChange={updatePresentation} user={user} value={presentation} />
         <label className="span-2 required-reason">سبب التغيير<textarea minLength={2} required value={reason} onChange={(e) => setReason(e.target.value)} /></label>
       </div>
       <EditorFooter saving={saving} onClose={onClose} />

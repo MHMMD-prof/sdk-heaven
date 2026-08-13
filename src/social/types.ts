@@ -2,6 +2,7 @@ import type { RoomCountryCode } from '../types/voice';
 import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
 import type { CoupleEffectProjection } from '../cosmetics/coupleEffects';
 import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
+import type { StatusPresentation } from '../status/statusPresentation';
 
 export type ProfileGender = 'male' | 'female';
 export type ProfilePresentationUpdateInput = {
@@ -55,6 +56,7 @@ export type PublicUserProfile = {
   publicId: string;
   representativeBadgeActive?: boolean;
   specialId?: string;
+  statusPresentation?: StatusPresentation;
   uid: string;
   updatedAt?: unknown;
   vipTier?: {

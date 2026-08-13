@@ -2,7 +2,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, I18nManager, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenContainer } from '../components/ScreenContainer';
 import { requestSpecialIdPurchase, requestWalletStore } from '../social/requestSocialCommand';
@@ -59,6 +59,19 @@ export function WalletStoreScreen({ navigation }: Props) {
           <View style={styles.walletCopy}><Text style={styles.walletLabel}>رصيد الألماس</Text><Text style={styles.balance}>{formatCoins(data?.wallet.balances.diamonds || 0)}</Text></View>
           <Text style={styles.diamond}>◆</Text>
         </LinearGradient>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('StatusCenter', { initialTab: 'aristocracy' })}
+          style={styles.statusCenterLink}
+        >
+          <SymbolView name={{ ios: 'crown.fill', android: 'workspace_premium', web: 'workspace_premium' }} size={25} tintColor={colors.gold} />
+          <View style={styles.statusCenterCopy}>
+            <Text style={styles.statusCenterTitle}>{I18nManager.isRTL ? 'مركز الحالة' : 'Status Center'}</Text>
+            <Text style={styles.statusCenterHint}>{I18nManager.isRTL ? 'VIP وSVIP والرتب الأرستقراطية' : 'VIP, SVIP, and Aristocracy ranks'}</Text>
+          </View>
+          <SymbolView name={{ ios: I18nManager.isRTL ? 'chevron.left' : 'chevron.right', android: I18nManager.isRTL ? 'arrow_back' : 'arrow_forward', web: I18nManager.isRTL ? 'arrow_back' : 'arrow_forward' }} size={18} tintColor={colors.textMuted} />
+        </Pressable>
 
         {data?.ownedSpecialId ? (
           <View style={styles.ownedCard}>
@@ -119,6 +132,7 @@ const styles = StyleSheet.create({
   walletIcon: { alignItems: 'center', backgroundColor: colors.gold, borderRadius: radius.lg, height: 58, justifyContent: 'center', width: 58 },
   walletCopy: { alignItems: 'flex-end', flex: 1, minWidth: 105, paddingHorizontal: spacing.sm }, walletLabel: { color: colors.textMuted, fontWeight: typography.weights.bold, writingDirection: 'rtl' }, balance: { color: '#FFF0BE', fontSize: 25, fontWeight: typography.weights.black }, coin: { color: colors.gold, fontSize: 25 },
   diamond: { color: '#A8E8FF', fontSize: 23 },
+  statusCenterLink: { alignItems: 'center', backgroundColor: '#13090A', borderColor: 'rgba(232,190,97,.3)', borderRadius: radius.xl, borderWidth: 1, flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row', gap: spacing.md, minHeight: 76, padding: spacing.lg }, statusCenterCopy: { alignItems: I18nManager.isRTL ? 'flex-end' : 'flex-start', flex: 1 }, statusCenterTitle: { color: colors.text, fontSize: 17, fontWeight: typography.weights.black, writingDirection: I18nManager.isRTL ? 'rtl' : 'ltr' }, statusCenterHint: { color: colors.textMuted, fontSize: 12, writingDirection: I18nManager.isRTL ? 'rtl' : 'ltr' },
   ownedCard: { alignItems: 'center', backgroundColor: '#17090A', borderColor: colors.gold, borderRadius: radius.xl, borderWidth: 1, flexDirection: 'row-reverse', gap: spacing.md, padding: spacing.lg }, ownedCopy: { alignItems: 'flex-end', flex: 1 }, ownedLabel: { color: colors.textMuted, writingDirection: 'rtl' }, ownedId: { color: colors.goldSoft, fontSize: 25, fontWeight: typography.weights.black },
   sectionHeading: { alignItems: 'flex-end', gap: 3 }, sectionTitle: { color: colors.text, fontSize: 19, fontWeight: typography.weights.black, writingDirection: 'rtl' }, sectionHint: { color: colors.textSubtle, fontSize: 12, writingDirection: 'rtl' },
   rechargeCard: { backgroundColor: '#130708', borderColor: 'rgba(232,190,97,.25)', borderRadius: radius.xl, borderWidth: 1, padding: spacing.lg }, rechargeHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', paddingBottom: spacing.sm }, rechargeCount: { color: colors.gold, fontWeight: typography.weights.black }, rechargeEmpty: { color: colors.textMuted, paddingVertical: spacing.lg, textAlign: 'center', writingDirection: 'rtl' }, rechargeRow: { alignItems: 'center', borderTopColor: 'rgba(232,190,97,.14)', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', minHeight: 70, paddingVertical: spacing.sm }, rechargeAmount: { color: colors.goldSoft, fontSize: 16, fontWeight: typography.weights.black }, rechargeDate: { color: colors.textSubtle, fontSize: 11 }, rechargeAgent: { alignItems: 'flex-end' }, rechargeLabel: { color: colors.textMuted, fontSize: 11, writingDirection: 'rtl' }, rechargeId: { color: colors.text, fontSize: 17, fontWeight: typography.weights.bold },

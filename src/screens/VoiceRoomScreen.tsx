@@ -8,6 +8,8 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { useRepresentativeBadgeProjection } from '../social/useRepresentativeBadgeProjection';
 import { useAvatarFrameProjection } from '../social/useAvatarFrameProjection';
 import { useEquipmentCosmetics } from '../social/useEquipmentCosmetics';
+import { useStatusFeatureFlags } from '../status/featureFlags';
+import { useStatusPresentations } from '../status/useStatusPresentations';
 import { useSocialFeatureFlags } from '../social/useSocialFeatureFlags';
 import {
   RoomMicrophonesSheet,
@@ -136,6 +138,7 @@ function ResolvedVoiceRoomScreen({
   const socialFeatureFlags = useSocialFeatureFlags();
   const cosmeticsFeatureFlags = useCosmeticsFeatureFlags();
   const growthFeatureFlags = useGrowthFeatureFlags();
+  const statusFeatureFlags = useStatusFeatureFlags();
   const roomMediaControls = useRoomMediaControls(sourceRoom);
   const roomImageUrl = useRoomImageUrl(sourceRoom.activeRoomImagePath);
   const windowSize = useWindowDimensions();
@@ -226,6 +229,7 @@ function ResolvedVoiceRoomScreen({
   const activeBadges = useRepresentativeBadgeProjection(badgeUids);
   const avatarFrames = useAvatarFrameProjection(badgeUids);
   const equipmentCosmetics = useEquipmentCosmetics(badgeUids);
+  const statusPresentations = useStatusPresentations(badgeUids, statusFeatureFlags.statusPresentation);
   const speakers = useMemo(
     () => sourceSpeakers.map((participant) => ({
       ...participant,
@@ -235,8 +239,9 @@ function ResolvedVoiceRoomScreen({
       avatarFrameItemId: avatarFrames[participant.id]?.itemId,
       representativeBadgeActive: activeBadges[participant.id] === true,
       equipmentCosmetics: equipmentCosmetics[participant.id],
+      statusPresentation: statusPresentations[participant.id],
     })),
-    [activeBadges, avatarFrames, equipmentCosmetics, sourceSpeakers],
+    [activeBadges, avatarFrames, equipmentCosmetics, sourceSpeakers, statusPresentations],
   );
   const listeners = useMemo(
     () => sourceListeners.map((participant) => ({
@@ -247,8 +252,9 @@ function ResolvedVoiceRoomScreen({
       avatarFrameItemId: avatarFrames[participant.id]?.itemId,
       representativeBadgeActive: activeBadges[participant.id] === true,
       equipmentCosmetics: equipmentCosmetics[participant.id],
+      statusPresentation: statusPresentations[participant.id],
     })),
-    [activeBadges, avatarFrames, equipmentCosmetics, sourceListeners],
+    [activeBadges, avatarFrames, equipmentCosmetics, sourceListeners, statusPresentations],
   );
   const room = useMemo(() => ({
     ...sourceRoom,
@@ -260,6 +266,7 @@ function ResolvedVoiceRoomScreen({
       avatarFrameItemId: avatarFrames[member.id]?.itemId,
       representativeBadgeActive: activeBadges[member.id] === true,
       equipmentCosmetics: equipmentCosmetics[member.id],
+      statusPresentation: statusPresentations[member.id],
     })),
     localMember: sourceRoom.localMember ? {
       ...sourceRoom.localMember,
@@ -269,6 +276,7 @@ function ResolvedVoiceRoomScreen({
       avatarFrameItemId: avatarFrames[sourceRoom.localMember.id]?.itemId,
       representativeBadgeActive: activeBadges[sourceRoom.localMember.id] === true,
       equipmentCosmetics: equipmentCosmetics[sourceRoom.localMember.id],
+      statusPresentation: statusPresentations[sourceRoom.localMember.id],
     } : undefined,
     speakers: sourceRoom.speakers.map((member) => ({
       ...member,
@@ -278,8 +286,9 @@ function ResolvedVoiceRoomScreen({
       avatarFrameItemId: avatarFrames[member.id]?.itemId,
       representativeBadgeActive: activeBadges[member.id] === true,
       equipmentCosmetics: equipmentCosmetics[member.id],
+      statusPresentation: statusPresentations[member.id],
     })),
-  }), [activeBadges, avatarFrames, equipmentCosmetics, sourceRoom]);
+  }), [activeBadges, avatarFrames, equipmentCosmetics, sourceRoom, statusPresentations]);
   const ownershipTransfer = useRoomOwnershipTransfer(
     room,
     voiceRoomFeatureFlags.ownershipTransfer,

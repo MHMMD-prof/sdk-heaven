@@ -13,6 +13,7 @@ export type RootStackParamList = {
   AccountSettings: undefined;
   CosmeticsLab: undefined;
   MeProfile: undefined;
+  StatusCenter: { initialTab?: 'vip' | 'aristocracy' } | undefined;
   Friends: undefined;
   Following: { tab?: 'following' | 'followers'; uid?: string } | undefined;
   BlockedUsers: undefined;

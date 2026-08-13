@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthProvider';
 import { useCosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import { useStatusFeatureFlags } from '../status/featureFlags';
 import { clearDirectChatDraft, readDirectChatDraft, writeDirectChatDraft } from '../personalChat/directChatDrafts';
 import { DirectChatReportSheet } from '../personalChat/DirectChatReportSheet';
 import { DIRECT_CHAT_MAX_REPORT_MESSAGES, type DirectChatReportCategory } from '../personalChat/directChatContract';
@@ -56,6 +57,7 @@ export function DirectChatScreenModernRoyal({ navigation, route }: Props) {
   const inbox = useDirectChats();
   const insets = useSafeAreaInsets();
   const cosmetics = useCosmeticsFeatureFlags();
+  const statusFlags = useStatusFeatureFlags();
   const profileState = usePublicProfile(route.params.targetUid);
   const selfProfileState = usePublicProfile(user?.uid);
   const thread = useDirectChatThread(route.params.targetUid);
@@ -324,9 +326,11 @@ export function DirectChatScreenModernRoyal({ navigation, route }: Props) {
                   messages={thread.messages}
                   onMessageAction={setSelected}
                   peerBubble={profileState.profile?.equippedCosmetics?.chatBubble}
+                  peerStatus={statusFlags.statusPresentation ? profileState.profile?.statusPresentation : undefined}
                   peerName={displayName}
                   peerReadSequence={thread.peerReadSequence}
                   selfBubble={selfProfileState.profile?.equippedCosmetics?.chatBubble}
+                  selfStatus={statusFlags.statusPresentation ? selfProfileState.profile?.statusPresentation : undefined}
                   uid={user?.uid || ''}
                 />
               )}

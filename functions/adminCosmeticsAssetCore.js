@@ -57,6 +57,25 @@ function normalizeAdminCosmeticsAssetQuery(body = {}) {
   };
 }
 
+function normalizeAdminCosmeticsAssetOptionsQuery(body = {}) {
+  const category = readString(body.category);
+  const cursor = readString(body.cursor).slice(0, 80);
+  const formats = Array.isArray(body.formats)
+    ? [...new Set(body.formats.map(readString).filter(Boolean))]
+    : [];
+  const limit = Number.isSafeInteger(body.limit) ? Math.min(50, Math.max(1, body.limit)) : 20;
+  const categories = [
+    'avatar-frame', 'profile-skin', 'chat-bubble', 'nameplate',
+    'cosmetic-badge', 'entry-effect', 'seat-effect', 'gift-effect',
+    'room-theme', 'room-reaction', 'couple-effect', 'effect-audio',
+  ];
+  const allowedFormats = ['png', 'jpeg', 'legacy-webp', 'lottie-json', 'mp4', 'm4a-aac'];
+  if (!categories.includes(category) || formats.length < 1 || formats.some((format) => !allowedFormats.includes(format))) {
+    return invalid('A valid category and at least one compatible format are required.');
+  }
+  return { ok: true, value: { category, cursor, formats, limit } };
+}
+
 function normalizeAdminCosmeticsAssetMutation(body = {}) {
   const operation = readString(body.operation);
   if ([
@@ -253,6 +272,7 @@ function invalid(error) {
 module.exports = {
   COSMETICS_ASSET_OPERATIONS: OPERATIONS,
   normalizeAdminCosmeticsAssetMutation,
+  normalizeAdminCosmeticsAssetOptionsQuery,
   normalizeAdminCosmeticsAssetQuery,
   transitionCosmeticAssetSummary,
 };

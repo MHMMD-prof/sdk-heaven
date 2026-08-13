@@ -207,6 +207,31 @@ describe('socialProfileCore', () => {
     });
   });
 
+  it('preserves only a sanitized Wave 1 status projection during profile repair', () => {
+    const base = {
+      schemaVersion: 1,
+      visibility: 'public',
+      vip: {
+        accentColor: '#22A978', band: 'svip', catalogVersion: 'vip-2026-01', id: 'svip-1',
+        level: 1, nameAr: 'SVIP 1', nameEn: 'SVIP 1', order: 11, assets: {},
+      },
+    };
+    const profile = buildPublicProfileDocument({
+      existing: { statusPresentation: base },
+      privateProfile: { uid: 'u1', displayName: 'Ali', email: 'a@b.c', avatarLabel: 'A' },
+      publicId: '1234567',
+      timestamp: { toMillis: () => 2 },
+    });
+    expect(profile.statusPresentation).toEqual(base);
+    const malformed = buildPublicProfileDocument({
+      existing: { statusPresentation: { ...base, priceCoins: 10 } },
+      privateProfile: { uid: 'u1', displayName: 'Ali', email: 'a@b.c', avatarLabel: 'A' },
+      publicId: '1234567',
+      timestamp: { toMillis: () => 2 },
+    });
+    expect(malformed.statusPresentation).toBeUndefined();
+  });
+
   it('requires the complete public schema and an owned permanent reservation', () => {
     const timestamp = { __serverTimestamp: true };
     const profile = buildPublicProfileDocument({

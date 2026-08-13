@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "pkId": "rpk_in_room_fixture_0001",
+  "mode": "in-room-teams",
+  "status": "active",
+  "roomId": "room-internal-1",
+  "hostUid": "host-internal-1",
+  "durationMs": 180000,
+  "startedAtMs": 2000000000000,
+  "endsAtMs": 2000000180000,
+  "teams": {
+    "red": {
+      "labelAr": "الأحمر",
+      "memberUids": ["host-internal-1"],
+      "score": 125
+    },
+    "blue": {
+      "labelAr": "الأزرق",
+      "memberUids": ["member-blue-1"],
+      "score": 75
+    }
+  },
+  "distinctGifters": ["gifter-1", "gifter-2"],
+  "giftEventIds": ["gift-event-1", "gift-event-2"],
+  "winner": null,
+  "winnerReason": ""
+}

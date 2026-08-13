@@ -133,6 +133,45 @@ function resolveEntryEffectAnnouncement({
     return { ok: true, value: { skipped: true, reason: 'ROOM_EFFECTS_DISABLED' } };
   }
 
+  const statusEntry = resolveStatusEntryEffect(publicProfile);
+  if (statusEntry && cosmeticsFlags?.cosmetics_asset_registry === true && cosmeticsFlags?.cosmetics_shared_renderer === true) {
+    const eventId = createEntryEffectEventId(command.roomId, senderUid, command.sessionId);
+    return {
+      ok: true,
+      value: {
+        skipped: false,
+        effect: {
+          animationEnabled: false,
+          audioEnabled: false,
+          canonicalSlot: 'entry-effect',
+          cosmeticAsset: statusEntry.asset,
+          copy: buildStatusEntryCopySnapshot(publicProfile.displayName, statusEntry),
+          displayName: publicProfile.displayName,
+          durationMs: DEFAULT_DURATION_MS,
+          eventId,
+          expiresAtMs: nowMs + EFFECT_TTL_MS,
+          fallbackArtworkUrl: '',
+          height: 720,
+          itemId: statusEntry.id,
+          itemNameAr: statusEntry.nameAr,
+          itemNameEn: statusEntry.nameEn,
+          minimumClientVersion: '0.0.0',
+          occurredAtMs: nowMs,
+          performanceTier: 'low',
+          priority: 30,
+          roomEffectsPolicy: ['full', 'reduced', 'off'].includes(room.effectsPolicy) ? room.effectsPolicy : 'full',
+          roomId: command.roomId,
+          senderUid,
+          soundPolicy: 'off',
+          statusSource: true,
+          thumbnailUrl: '',
+          type: 'room-entry',
+          width: 1280,
+        },
+      },
+    };
+  }
+
   const customProjection = readCustomEntryProjection(equipment);
   if (customProjection && cosmeticsFlags?.cosmetics_custom_rendering === true) {
     const customResolution = resolveCustomEntryEffectAnnouncement({
@@ -270,6 +309,38 @@ function resolveEntryEffectAnnouncement({
         width: metadata.width,
       },
     },
+  };
+}
+
+function resolveStatusEntryEffect(publicProfile) {
+  const presentation = publicProfile?.statusPresentation;
+  if (!presentation || presentation.schemaVersion !== 1 || presentation.visibility !== 'public') return undefined;
+  const source = presentation.aristocracy || presentation.vip;
+  const asset = source?.assets?.entryEffect;
+  if (!source || !asset || !mapStatusAssetReference(asset)) return undefined;
+  return {
+    asset: mapStatusAssetReference(asset),
+    id: source.id,
+    nameAr: source.nameAr,
+    nameEn: source.nameEn,
+  };
+}
+
+function mapStatusAssetReference(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !['assetId', 'assetVersionId'].includes(key))) return undefined;
+  const assetId = typeof value.assetId === 'string' ? value.assetId.trim() : '';
+  const assetVersionId = typeof value.assetVersionId === 'string' ? value.assetVersionId.trim() : '';
+  return /^[a-z0-9][a-z0-9_-]{2,79}$/.test(assetId) && /^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(assetVersionId)
+    ? { assetId, assetVersionId }
+    : undefined;
+}
+
+function buildStatusEntryCopySnapshot(displayName, status) {
+  return {
+    entrantDisplayNames: [displayName],
+    itemName: { ar: status.nameAr, en: status.nameEn },
+    kind: 'entry',
+    schemaVersion: 1,
   };
 }
 
@@ -718,6 +789,7 @@ module.exports = {
   createEntryEffectEventId,
   entryEffectError,
   mapCarEntryEffectMetadata,
+  resolveStatusEntryEffect,
   normalizeRoomEntryEffectBody,
   inspectCustomEntryFallback,
   readCustomEntryProjection,

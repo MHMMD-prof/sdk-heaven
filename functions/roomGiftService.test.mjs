@@ -96,6 +96,34 @@ describe('roomGiftService', () => {
     expect([...db.documents.keys()].filter((path) => path.startsWith('platformEconomyTransactions/'))).toHaveLength(1);
   });
 
+  it('snapshots the active cross-room PK context into the committed gift event', async () => {
+    const db = seededDb();
+    const pkId = 'crpks_gift_binding_0001';
+    db.documents.set('rooms/room-1', {
+      ...db.read('rooms/room-1'), activePkSessionId: pkId,
+    });
+    db.documents.set(`roomPkSessions/${pkId}`, {
+      endsAt: timestamp(nowMs + 60_000),
+      mode: 'cross-room',
+      pkId,
+      startedAt: timestamp(nowMs - 60_000),
+      status: 'active',
+    });
+    const quote = await quoteGift(db, 'quote_request_pk_binding');
+    const request = sendBody(quote.result.quote.quoteId, 'send_request_pk_binding01');
+    const result = await executeRoomGiftCommand({
+      body: request, clock, db, decodedToken: { uid: 'sender-1' }, fieldValue,
+    });
+    expect(result.ok).toBe(true);
+    const eventId = createRoomGiftEventId(request.requestId, request.roomId);
+    expect(db.read(`rooms/room-1/giftEvents/${eventId}`)).toMatchObject({
+      createdAtMs: nowMs,
+      pkContext: { mode: 'cross-room', pkId },
+      priceCoins: 200,
+      status: 'committed',
+    });
+  });
+
   it('serializes simultaneous sends and never overdraws the sender', async () => {
     const db = seededDb();
     db.documents.set('walletSummaries/sender-1', wallet('sender-1', 250));

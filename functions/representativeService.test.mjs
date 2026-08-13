@@ -15,8 +15,9 @@ const {
   utcDayBucket,
   utcHourBucket,
 } = require('./representativeService');
+const { processStatusSourceEvent, processStatusSourceOutbox } = require('./statusProgressionService');
 
-const fieldValue = { serverTimestamp: () => timestamp(9_999) };
+const fieldValue = { delete: () => '__delete__', serverTimestamp: () => timestamp(9_999) };
 const nowMillis = 1_000_000;
 const portalOrigin = 'https://representative.example.com';
 const portalSessionId = 'a'.repeat(64);
@@ -48,6 +49,9 @@ describe('representativeService hardened transfer', () => {
     });
     expect(db.read('walletRechargeReceipts/recipient/items/sender_representative_transfer_1')).toMatchObject({
       amount: 20, balanceAfter: 30, balanceBefore: 10, publicReference: 'RPT-0123456789ABCDEF', representativeDisplayName: 'sender',
+    });
+    expect(db.read('statusSourceOutbox/representative_sender_representative_transfer_1')).toMatchObject({
+      amount: 20, currency: 'coins', sourceKind: 'representative-recharge', state: 'queued', uid: 'recipient',
     });
     expect([...db.documents.keys()].filter((path) => path.startsWith('representativeTransfers/'))).toHaveLength(1);
 
@@ -319,6 +323,112 @@ describe('representativeService status and administration', () => {
       note: 'Duplicate external settlement',
       status: 'completed',
     });
+    expect(db.read('statusSourceOutbox/representative_reversal_sender_representative_transfer_1')).toMatchObject({
+      reversalOf: 'representative_sender_representative_transfer_1',
+      sourceKind: 'representative-reversal',
+      state: 'queued',
+      uid: 'recipient',
+    });
+  });
+
+  it('awards a recharge exactly once and demotes from only its linked reversal', async () => {
+    const db = representativeDb();
+    db.documents.set('appConfig/statusFeatures', {
+      schemaVersion: 1, vipProgression: true, aristocracyShop: false, statusPresentation: false,
+      statusProjectionRepair: false, statusAnnouncements: false, statusAnimations: false,
+    });
+    db.documents.set('statusCatalogPointers/vip-svip', {
+      schemaVersion: 1, kind: 'vip-svip', activeCatalogVersion: 'vip-wave2-test',
+    });
+    db.documents.set('vipTierCatalogVersions/vip-wave2-test', vipCatalog());
+
+    await transferRepresentativeFunds(transferArgs(db));
+    const first = await processStatusSourceOutbox({ clock: testClock(), db, fieldValue });
+    expect(first).toMatchObject({ processed: 1, promoted: 1, replayed: 0 });
+    expect(db.read('vipAccounts/recipient')).toMatchObject({ points: 20, levelId: 'vip-1', highestLevelOrder: 1 });
+    expect(db.read('vipContributions/representative_sender_representative_transfer_1')).toMatchObject({
+      pointDelta: 20, settlementState: 'settled', uid: 'recipient',
+    });
+    await expect(processStatusSourceOutbox({ clock: testClock(), db, fieldValue })).resolves.toMatchObject({ processed: 0 });
+
+    await reverseRepresentativeTransfer(reversalArgs(db));
+    const reversed = await processStatusSourceOutbox({ clock: testClock(), db, fieldValue });
+    expect(reversed).toMatchObject({ processed: 1, demoted: 1 });
+    expect(db.read('vipAccounts/recipient')).toMatchObject({ points: 0, levelId: null, highestLevelOrder: 1 });
+    expect(db.read('vipContributions/representative_reversal_sender_representative_transfer_1')).toMatchObject({
+      pointDelta: -20,
+      reversalOf: 'representative_sender_representative_transfer_1',
+      settlementState: 'reversed',
+    });
+    expect([...db.documents.keys()].filter((path) => path.startsWith('vipContributions/'))).toHaveLength(2);
+  });
+
+  it('can drain verified migration evidence while public VIP progression remains dark', async () => {
+    const db = representativeDb();
+    db.documents.set('appConfig/statusFeatures', {
+      schemaVersion: 1, vipProgression: false, aristocracyShop: false, statusPresentation: false,
+      statusProjectionRepair: true, statusAnnouncements: false, statusAnimations: false,
+    });
+    db.documents.set('statusCatalogPointers/vip-svip', {
+      schemaVersion: 1, kind: 'vip-svip', activeCatalogVersion: 'vip-wave2-test',
+    });
+    db.documents.set('vipTierCatalogVersions/vip-wave2-test', vipCatalog());
+    await transferRepresentativeFunds(transferArgs(db));
+    await expect(processStatusSourceOutbox({ clock: testClock(), db, fieldValue }))
+      .resolves.toMatchObject({ processed: 1, promoted: 1 });
+    expect(db.read('vipAccounts/recipient')).toMatchObject({ points: 20, levelId: 'vip-1' });
+  });
+
+  it('serializes concurrent worker replays and writes one immutable contribution', async () => {
+    const db = statusEnabledRepresentativeDb();
+    await transferRepresentativeFunds(transferArgs(db));
+    const eventId = 'representative_sender_representative_transfer_1';
+    const event = db.read(`statusSourceOutbox/${eventId}`);
+    const [left, right] = await Promise.all([
+      processStatusSourceEvent({ clock: testClock(), db, event, fieldValue }),
+      processStatusSourceEvent({ clock: testClock(), db, event, fieldValue }),
+    ]);
+    expect([left.replayed, right.replayed].sort()).toEqual([false, true]);
+    expect(db.read('vipAccounts/recipient').points).toBe(20);
+    expect([...db.documents.keys()].filter((path) => path.startsWith('vipContributions/'))).toHaveLength(1);
+  });
+
+  it('dead-letters evidence that no longer matches its authoritative transfer', async () => {
+    const db = statusEnabledRepresentativeDb();
+    await transferRepresentativeFunds(transferArgs(db));
+    db.documents.set('representativeTransfers/sender_representative_transfer_1', {
+      ...db.read('representativeTransfers/sender_representative_transfer_1'), amount: 21,
+    });
+    const result = await processStatusSourceOutbox({ clock: testClock(), db, fieldValue });
+    expect(result.failures).toEqual([{ eventId: 'representative_sender_representative_transfer_1', errorCode: 'SOURCE_MISMATCH' }]);
+    expect(db.read('statusSourceOutbox/representative_sender_representative_transfer_1')).toMatchObject({
+      attempts: 1, lastError: 'SOURCE_MISMATCH', state: 'dead-letter',
+    });
+    expect(db.read('vipAccounts/recipient')).toBeUndefined();
+  });
+
+  it('retries an out-of-order reversal until its original contribution settles', async () => {
+    const db = statusEnabledRepresentativeDb();
+    await transferRepresentativeFunds(transferArgs(db));
+    await reverseRepresentativeTransfer(reversalArgs(db));
+    const rechargePath = 'statusSourceOutbox/representative_sender_representative_transfer_1';
+    const reversalPath = 'statusSourceOutbox/representative_reversal_sender_representative_transfer_1';
+    db.documents.set(rechargePath, { ...db.read(rechargePath), nextAttemptAt: timestamp(nowMillis + 600_000) });
+
+    const early = await processStatusSourceOutbox({ clock: testClock(), db, fieldValue });
+    expect(early.failures).toEqual([{
+      eventId: 'representative_reversal_sender_representative_transfer_1',
+      errorCode: 'ORIGINAL_CONTRIBUTION_PENDING',
+    }]);
+    expect(db.read(reversalPath)).toMatchObject({ attempts: 1, state: 'queued' });
+    expect(db.read('vipAccounts/recipient')).toBeUndefined();
+
+    db.documents.set(rechargePath, { ...db.read(rechargePath), nextAttemptAt: timestamp(nowMillis) });
+    await processStatusSourceOutbox({ clock: testClock(), db, fieldValue });
+    expect(db.read('vipAccounts/recipient').points).toBe(20);
+    await processStatusSourceOutbox({ clock: testClock(nowMillis + 120_000), db, fieldValue });
+    expect(db.read('vipAccounts/recipient').points).toBe(0);
+    expect(db.read(reversalPath).state).toBe('completed');
   });
 
   it('makes a reversal request idempotent and signals a second reversal request', async () => {
@@ -448,12 +558,44 @@ function representativeDb() {
   });
 }
 
+function statusEnabledRepresentativeDb() {
+  const db = representativeDb();
+  db.documents.set('appConfig/statusFeatures', {
+    schemaVersion: 1, vipProgression: true, aristocracyShop: false, statusPresentation: false,
+    statusProjectionRepair: false, statusAnnouncements: false, statusAnimations: false,
+  });
+  db.documents.set('statusCatalogPointers/vip-svip', {
+    schemaVersion: 1, kind: 'vip-svip', activeCatalogVersion: 'vip-wave2-test',
+  });
+  db.documents.set('vipTierCatalogVersions/vip-wave2-test', vipCatalog());
+  return db;
+}
+
 function policy(coins = {}) {
   return {
     limits: {
       coins: { maxPerDay: 1_000_000, maxPerTransfer: 100_000, maxTransfersPerHour: 20, ...coins },
       diamonds: { maxPerDay: 100_000, maxPerTransfer: 10_000, maxTransfersPerHour: 10 },
     },
+  };
+}
+function vipCatalog() {
+  return {
+    schemaVersion: 1,
+    catalogVersion: 'vip-wave2-test',
+    kind: 'vip-svip',
+    state: 'published',
+    authoredBy: 'economy-admin',
+    approvedBy: 'platform-owner',
+    reason: 'Wave 2 integration test',
+    pointPolicy: {
+      currency: 'coins', eligibleSources: ['representative-transfer'], pointsPerCoinNumerator: 1,
+      pointsPerCoinDenominator: 1, reversalMode: 'linked-net', spendingMode: 'no-effect',
+    },
+    tiers: [
+      { id: 'vip-1', band: 'vip', level: 1, order: 1, minPoints: 10, name: { ar: 'VIP 1', en: 'VIP 1' }, accentColor: '#D4AF37', benefits: [], assets: {} },
+      { id: 'svip-1', band: 'svip', level: 1, order: 2, minPoints: 100, name: { ar: 'SVIP 1', en: 'SVIP 1' }, accentColor: '#22A978', benefits: [], assets: {} },
+    ],
   };
 }
 function pinDocument() {
@@ -531,11 +673,20 @@ class FakeQuery {
     let rows = [...this.db.documents.entries()].filter(([path]) => path.startsWith(`${this.path}/`) && !path.slice(this.path.length + 1).includes('/'));
     rows = rows.filter(([, data]) => this.filters.every(({ field, operator, value }) => {
       const actual = field.split('.').reduce((current, key) => current?.[key], data);
-      return operator === '==' && actual === value;
+      if (operator === '==') return actual === value;
+      if (operator === '<=') {
+        const left = typeof actual?.toMillis === 'function' ? actual.toMillis() : actual;
+        const right = typeof value?.toMillis === 'function' ? value.toMillis() : value;
+        return left <= right;
+      }
+      return false;
     }));
     rows.sort((left, right) => (left[1].createdAt?.toMillis() || 0) - (right[1].createdAt?.toMillis() || 0));
     if (this.descending) rows.reverse();
-    const docs = rows.slice(0, this.limitCount).map(([path, data]) => snapshot(path, data));
+    const docs = rows.slice(0, this.limitCount).map(([path, data]) => ({
+      ...snapshot(path, data),
+      ref: this.db.doc(path),
+    }));
     return { docs, size: docs.length };
   }
 }

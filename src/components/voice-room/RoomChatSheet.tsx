@@ -18,6 +18,9 @@ import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
 import { AvatarPresentation } from '../AvatarPresentation';
 import { EquipmentCosmeticAsset } from '../EquipmentCosmeticAsset';
 import { useEquipmentCosmetics } from '../../social/useEquipmentCosmetics';
+import { useStatusFeatureFlags } from '../../status/featureFlags';
+import { useStatusPresentations } from '../../status/useStatusPresentations';
+import { StatusBadgeRow } from '../status/StatusBadgeRow';
 import type { EquipmentCosmetics } from '../../cosmetics/equipmentCosmetics';
 import { RoomSheet } from './VoiceRoomSheets';
 
@@ -71,6 +74,8 @@ export function RoomChatSheet({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const equipmentByUid = useEquipmentCosmetics(messages.map((message) => message.senderUid));
+  const statusFlags = useStatusFeatureFlags();
+  const statusByUid = useStatusPresentations(messages.map((message) => message.senderUid), statusFlags.statusPresentation);
   const pinnedMessage = useMemo(
     () => messages.find((message) => message.id === pinnedMessageId && message.status === 'active'),
     [messages, pinnedMessageId],
@@ -135,6 +140,7 @@ export function RoomChatSheet({
               key={message.id}
               message={message}
               equipment={equipmentByUid[message.senderUid]}
+              statusPresentation={statusByUid[message.senderUid]}
               onBlock={() => onBlock(message)}
               onDelete={() => onDelete(message)}
               onOpenProfile={() => onOpenProfile(message.senderUid)}
@@ -212,6 +218,7 @@ function MessageRow({
   onRetry,
   pinned,
   safetyEnabled,
+  statusPresentation,
 }: {
   canDelete: boolean;
   canManage: boolean;
@@ -227,6 +234,7 @@ function MessageRow({
   onRetry: () => void;
   pinned: boolean;
   safetyEnabled: boolean;
+  statusPresentation?: import('../../status/statusPresentation').StatusPresentation;
 }) {
   const isOwn = message.senderUid === currentUid;
   const isNotice = message.kind === 'moderation' || message.kind === 'system';
@@ -249,6 +257,7 @@ function MessageRow({
         <Text numberOfLines={1} style={styles.sender}>
           {isNotice ? 'إشعار الغرفة' : message.senderDisplayName || 'عضو'}
         </Text>
+          {!isNotice ? <StatusBadgeRow compact presentation={statusPresentation} /> : null}
           {!isNotice ? <EquipmentCosmeticAsset category="cosmetic-badge" enabled={cosmeticsFlags.cosmeticBadges} flags={cosmeticsFlags} projection={equipment?.cosmeticBadge} style={styles.senderCosmeticBadge} /> : null}
         </View>
         {!isNotice ? (

@@ -25,6 +25,7 @@ import { firebaseAuth } from './firebase';
 
 const SettingsPanel = lazy(() => import('./SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
 const StoreCatalogPanel = lazy(() => import('./StoreCatalogPanel').then((module) => ({ default: module.StoreCatalogPanel })));
+const StatusOperationsPanel = lazy(() => import('./StatusOperationsPanel').then((module) => ({ default: module.StatusOperationsPanel })));
 const CosmeticsAssetRegistryPanel = lazy(() => import('./CosmeticsAssetRegistryPanel').then((module) => ({ default: module.CosmeticsAssetRegistryPanel })));
 const AuditWorkspace = lazy(() => import('./AuditPanel').then((module) => ({ default: module.AuditWorkspace })));
 const ReportsPanel = lazy(() => import('./ReportsPanel').then((module) => ({ default: module.ReportsPanel })));
@@ -324,6 +325,8 @@ export function App() {
             <ReportsPanel user={authState.user} />
           ) : activeRoute.key === 'store' ? (
             <StoreCatalogPanel permissions={authState.session.permissions} user={authState.user} />
+          ) : activeRoute.key === 'status' ? (
+            <StatusOperationsPanel permissions={authState.session.permissions} role={authState.session.role} user={authState.user} />
           ) : activeRoute.key === 'cosmetics' ? (
             <CosmeticsAssetRegistryPanel permissions={authState.session.permissions} user={authState.user} />
           ) : activeRoute.key === 'incentives' ? (
@@ -365,6 +368,7 @@ function NavIcon({ routeKey }: { routeKey: string }) {
     rooms: <><path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h7v18M14 8h5v13" /><path d="M9 9h1M9 13h1M9 17h1" /></>,
     reports: <><path d="M5 22V4a2 2 0 0 1 2-2h8l4 4v16" /><path d="M14 2v5h5M9 12h6M9 16h6" /></>,
     store: <><path d="M3 9h18l-1 12H4L3 9Z" /><path d="M7 9a5 5 0 0 1 10 0M8 13v4M16 13v4" /></>,
+    status: <><path d="M4 20h16M6 16l3-5 3 2 3-7 3 4" /><circle cx="18" cy="10" r="2" /></>,
     cosmetics: <><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>,
     incentives: <><path d="M12 2c3 3 5 6 5 10a5 5 0 0 1-10 0c0-2 1-4 3-6 0 3 1 4 2 5 1-2 1-5 0-9Z" /><path d="M8 20h8M10 16h4" /></>,
     representatives: <><path d="M4 7h16M7 4l-3 3 3 3M17 14h3v6H4v-6h3" /><circle cx="12" cy="10" r="3" /><path d="M8 17a4 4 0 0 1 8 0" /></>,
@@ -381,7 +385,7 @@ function NavIcon({ routeKey }: { routeKey: string }) {
 function canAccessAdminRoute(session: AdminDashboardSession, routeKey: string) {
   const permissionByRoute: Record<string, string> = {
     overview: 'overview', users: 'users:view', rooms: 'rooms:view', reports: 'reports:view',
-    store: 'store:view', cosmetics: 'store:view', incentives: 'incentives:view', representatives: 'store:view', notifications: 'flags:manage', audit: 'audit:view', settings: 'settings:manage',
+    store: 'store:view', status: 'status:view', cosmetics: 'store:view', incentives: 'incentives:view', representatives: 'store:view', notifications: 'flags:manage', audit: 'audit:view', settings: 'settings:manage',
   };
   return session.permissions.includes(permissionByRoute[routeKey] || 'overview');
 }

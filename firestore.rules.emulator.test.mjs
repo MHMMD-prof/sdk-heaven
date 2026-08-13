@@ -188,6 +188,118 @@ describe('firestore.rules auth waves', () => {
     await assertFails(getDoc(doc(userDb('uid-2', 'layla@example.com'), 'publicProfiles', 'uid-1')));
   });
 
+  it('admits bounded legacy VIP and Wave 1 status projections on public profiles', async () => {
+    await seedPublicProfile('uid-1', {
+      vipTier: { accentColor: '#D4AF37', id: 'gold', nameAr: 'ذهبي', rank: 3 },
+      statusPresentation: {
+        schemaVersion: 1,
+        visibility: 'public',
+        vip: {
+          accentColor: '#22A978',
+          band: 'svip',
+          catalogVersion: 'vip-2026-01',
+          id: 'svip-1',
+          level: 1,
+          nameAr: 'SVIP 1',
+          nameEn: 'SVIP 1',
+          order: 11,
+          assets: {},
+        },
+        aristocracy: {
+          accentColor: '#D4AF37',
+          catalogVersion: 'noble-2026-01',
+          id: 'knight',
+          nameAr: 'فارس',
+          nameEn: 'Knight',
+          order: 1,
+          assets: {},
+        },
+      },
+    });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await assertSucceeds(getDoc(doc(userDb('uid-2', 'dana@example.com'), 'publicProfiles', 'uid-1')));
+    await seedPublicProfile('uid-1', {
+      statusPresentation: {
+        schemaVersion: 1,
+        visibility: 'public',
+        vip: {
+          accentColor: '#22A978', assets: { badge: { assetId: 'svip-badge', assetVersionId: 'v1-123456789abc' } },
+          band: 'svip', catalogVersion: 'vip-2026-01', id: 'svip-1', level: 1,
+          nameAr: 'SVIP 1', nameEn: 'SVIP 1', order: 11,
+        },
+      },
+    });
+    await assertSucceeds(getDoc(doc(userDb('uid-2', 'dana@example.com'), 'publicProfiles', 'uid-1')));
+    await seedPublicProfile('uid-1', { vipTier: null });
+    await assertSucceeds(getDoc(doc(userDb('uid-2', 'dana@example.com'), 'publicProfiles', 'uid-1')));
+  });
+
+  it('rejects malformed or leaking Wave 1 public status projections', async () => {
+    await seedPublicProfile('uid-1', {
+      statusPresentation: {
+        schemaVersion: 1,
+        visibility: 'hidden',
+        vip: {
+          accentColor: '#22A978', band: 'svip', catalogVersion: 'vip-2026-01',
+          id: 'svip-1', level: 1, nameAr: 'SVIP 1', nameEn: 'SVIP 1', order: 11, assets: {},
+        },
+      },
+    });
+    await assertFails(getDoc(doc(userDb('uid-1', 'salem@example.com'), 'publicProfiles', 'uid-1')));
+    await seedPublicProfile('uid-1', {
+      statusPresentation: {
+        schemaVersion: 1,
+        visibility: 'public',
+        aristocracy: {
+          accentColor: '#D4AF37', catalogVersion: 'noble-2026-01', expiresAt: now,
+          id: 'knight', nameAr: 'فارس', nameEn: 'Knight', order: 1,
+        },
+      },
+    });
+    await assertFails(getDoc(doc(userDb('uid-1', 'salem@example.com'), 'publicProfiles', 'uid-1')));
+    await seedPublicProfile('uid-1', {
+      statusPresentation: {
+        schemaVersion: 1,
+        visibility: 'public',
+        vip: {
+          accentColor: '#22A978', band: 'vip', catalogVersion: 'vip-2026-01',
+          id: 'svip-1', level: 1, nameAr: 'SVIP 1', nameEn: 'SVIP 1', order: 11, assets: {},
+        },
+      },
+    });
+    await assertFails(getDoc(doc(userDb('uid-1', 'salem@example.com'), 'publicProfiles', 'uid-1')));
+  });
+
+  it('keeps every Wave 1-3 status authority, economy, job, and command document server-only', async () => {
+    const db = userDb('uid-1', 'salem@example.com');
+    const paths = [
+      ['vipTierCatalogVersions', 'vip-2026-01'],
+      ['aristocracyCatalogVersions', 'noble-2026-01'],
+      ['statusCatalogPointers', 'vip-svip'],
+      ['vipAccounts', 'uid-1'],
+      ['vipContributions', 'representative-transfer-1'],
+      ['aristocracyEntitlements', 'uid-1'],
+      ['aristocracyTransactions', 'transaction-1'],
+      ['statusSourceOutbox', 'event-1'],
+      ['statusPresentationJobs', 'job-1'],
+      ['statusVisibility', 'uid-1'],
+      ['statusAdminProposals', 'proposal-1'],
+      ['statusOperations', 'reconciliation'],
+      ['statusReconciliationRuns', 'run-1'],
+      ['statusOpsAlerts', 'alert-1'],
+    ];
+    for (const segments of paths) {
+      const reference = doc(db, ...segments);
+      await assertFails(getDoc(reference));
+      await assertFails(setDoc(reference, { schemaVersion: 1, uid: 'uid-1' }));
+    }
+    await assertFails(getDoc(doc(db, 'vipTransitions', 'uid-1', 'items', 'transition-1')));
+    await assertFails(getDoc(doc(db, 'aristocracyQuotes', 'uid-1', 'items', 'quote-1')));
+    await assertFails(getDoc(doc(db, 'statusCommandRequests', 'uid-1', 'requests', 'request-1')));
+    await assertFails(getDoc(doc(db, 'statusRateLimits', 'uid-1', 'hours', '2026-08-13T00')));
+    await assertFails(setDoc(doc(db, 'statusRateLimits', 'uid-1', 'hours', '2026-08-13T00'), { aristocracyQuotes: 0 }));
+  });
+
   it('denies direct public identity and reserved social collection writes', async () => {
     const db = userDb('uid-1', 'salem@example.com');
 
@@ -1202,6 +1314,76 @@ describe('firestore.rules auth waves', () => {
         createdAt: now,
       }),
     );
+  });
+
+  it('authorizes cross-room PK reads to either room membership, including closed-room results', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedProfile('uid-3', 'omar@example.com', 'Omar', 'O');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedPublicProfile('uid-2', { displayName: 'Dana', normalizedName: 'dana', publicId: '8765432' });
+    await seedPublicProfile('uid-3', { displayName: 'Omar', normalizedName: 'omar', publicId: '3456789' });
+    await seedRoom('pk-red', { status: 'closed' });
+    await seedRoom('pk-blue', { status: 'active' });
+    await seedMember('pk-red', 'uid-1', 'Salem', 'S', 'listener', false);
+    await seedMember('pk-blue', 'uid-2', 'Dana', 'D', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'roomPkSessions', 'pk-v2'), {
+        blueRoomId: 'pk-blue', mode: 'cross-room', redRoomId: 'pk-red', roomId: 'pk-red',
+        roomIds: ['pk-red', 'pk-blue'], schemaVersion: 2, status: 'ended',
+      });
+      await setDoc(doc(db, 'roomPkSessions', 'pk-v2', 'scoreShards', 'red_00'), {
+        pkId: 'pk-v2', score: 10, shard: 0, side: 'red',
+      });
+      await setDoc(doc(db, 'roomPkChallenges', 'challenge-v1'), {
+        challengerRoomId: 'pk-red', mode: 'cross-room', opponentRoomId: 'pk-blue',
+        schemaVersion: 1, status: 'accepted',
+      });
+    });
+
+    for (const db of [userDb('uid-1', 'salem@example.com'), userDb('uid-2', 'dana@example.com')]) {
+      await assertSucceeds(getDoc(doc(db, 'roomPkSessions', 'pk-v2')));
+      await assertSucceeds(getDoc(doc(db, 'roomPkSessions', 'pk-v2', 'scoreShards', 'red_00')));
+      await assertSucceeds(getDoc(doc(db, 'roomPkChallenges', 'challenge-v1')));
+    }
+    const outsider = userDb('uid-3', 'omar@example.com');
+    await assertFails(getDoc(doc(outsider, 'roomPkSessions', 'pk-v2')));
+    await assertFails(getDoc(doc(outsider, 'roomPkSessions', 'pk-v2', 'scoreShards', 'red_00')));
+    await assertFails(getDoc(doc(outsider, 'roomPkChallenges', 'challenge-v1')));
+  });
+
+  it('denies every client write to cross-room PK authority paths and fails closed on malformed V2', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await seedRoom('pk-red');
+    await seedMember('pk-red', 'uid-1', 'Salem', 'S', 'listener', false);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'roomPkSessions', 'pk-malformed'), {
+        blueRoomId: 'pk-red', mode: 'cross-room', redRoomId: 'pk-red', roomId: 'pk-red',
+        roomIds: ['pk-red', 'pk-red'], schemaVersion: 2, status: 'active',
+      });
+      await setDoc(doc(context.firestore(), 'roomPkSessions', 'pk-malformed', 'scoreShards', 'red_00'), {
+        pkId: 'pk-malformed', score: 1, shard: 0, side: 'red',
+      });
+    });
+    const db = userDb('uid-1', 'salem@example.com');
+    await assertFails(getDoc(doc(db, 'roomPkSessions', 'pk-malformed')));
+    await assertFails(getDoc(doc(db, 'roomPkSessions', 'pk-malformed', 'scoreShards', 'red_00')));
+    for (const path of [
+      ['roomPkSessions', 'forged'],
+      ['roomPkSessions', 'forged', 'scoreShards', 'red_00'],
+      ['roomPkSessions', 'forged', 'gifters', 'red_uid-1'],
+      ['roomPkChallenges', 'forged'],
+      ['roomPkGiftFacts', 'forged'],
+      ['roomPkReconciliations', 'forged'],
+      ['roomPkReconciliations', 'forged', 'gifters', 'red_uid-1'],
+      ['crossRoomPkRoomRateLimits', 'pk-red'],
+      ['crossRoomPkPairCooldowns', 'pair-1'],
+      ['roomPkAuditEvents', 'event-1'],
+    ]) {
+      await assertFails(setDoc(doc(db, ...path), { forged: true }));
+    }
   });
 
   it('exposes ownership offers only to the owner and selected recipient', async () => {

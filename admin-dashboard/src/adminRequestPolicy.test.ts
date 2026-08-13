@@ -14,6 +14,8 @@ describe('admin request policy', () => {
     expect(shouldRetryAdminRequest('daily-login-campaign-mutate', 0, 503)).toBe(false);
     expect(shouldRetryAdminRequest('cosmetic-assets', 0, 503)).toBe(true);
     expect(shouldRetryAdminRequest('cosmetic-assets-mutate', 0, 503)).toBe(false);
+    expect(shouldRetryAdminRequest('status-operations', 0, 503)).toBe(true);
+    expect(shouldRetryAdminRequest('status-operation-propose', 0, 503)).toBe(false);
   });
 
   it('provides consistent Arabic operational errors', () => {

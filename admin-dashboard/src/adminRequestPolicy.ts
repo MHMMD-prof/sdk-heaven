@@ -2,12 +2,12 @@ export const ADMIN_REQUEST_TIMEOUT_MS = 20_000;
 
 const readOnlyActions = new Set([
   'admin-settings', 'administrators', 'audit-detail', 'audit-events', 'audit-export', 'audit-summary',
-  'cosmetic-assets', 'cosmetic-custom-eligibility', 'cosmetic-custom-submissions', 'economy-history', 'gift-catalog', 'overview', 'report-detail', 'report-summary', 'reports',
+  'cosmetic-assets', 'cosmetic-asset-options', 'cosmetic-custom-eligibility', 'cosmetic-custom-submissions', 'economy-history', 'gift-catalog', 'overview', 'report-detail', 'report-summary', 'reports',
   'daily-login-campaign',
   'ops-events',
   'push-audience-estimate', 'push-campaigns-list',
   'room-detail', 'room-summary', 'rooms', 'session', 'special-id-catalog', 'store-catalog',
-  'store-summary', 'user-detail', 'user-history', 'user-summary', 'users',
+  'status-operations', 'status-user-inspect', 'store-summary', 'user-detail', 'user-history', 'user-summary', 'users',
 ]);
 
 export function isReadOnlyAdminAction(action: string) {

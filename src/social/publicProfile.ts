@@ -2,6 +2,7 @@ import { isRoomCountryCode } from '../voice/roomProfile';
 import { readAvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
 import { readCoupleEffectProjection } from '../cosmetics/coupleEffects';
 import { readEquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
+import { mapStatusPresentation } from '../status/statusPresentation';
 import type {
   ProfileGender,
   PublicProfilePresentationInput,
@@ -52,6 +53,7 @@ export function mapPublicUserProfile(data: unknown, expectedUid?: string): Publi
   const equippedAvatarFrame = readAvatarFrameProjection(candidate);
   const equippedCosmetics = readEquipmentCosmetics(candidate);
   const coupleEffect = readCoupleEffectProjection(candidate.coupleEffect);
+  const statusPresentation = mapStatusPresentation(candidate.statusPresentation);
   return {
     avatarModerationStatus,
     avatarUrl: readBoundedString(candidate.avatarUrl, 2048),
@@ -77,6 +79,7 @@ export function mapPublicUserProfile(data: unknown, expectedUid?: string): Publi
       && (candidate.representativeBadge as Record<string, unknown>).active === true
     ),
     ...(specialId ? { specialId } : {}),
+    ...(statusPresentation ? { statusPresentation } : {}),
     uid,
     updatedAt: candidate.updatedAt,
     ...(readVipTierProjection(candidate.vipTier) ? { vipTier: readVipTierProjection(candidate.vipTier)! } : {}),

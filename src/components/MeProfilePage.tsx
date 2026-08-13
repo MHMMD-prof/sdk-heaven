@@ -43,6 +43,10 @@ import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmeti
 import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
 import { EquipmentCosmeticAsset } from './EquipmentCosmeticAsset';
 import { CoupleEffectPresentation } from './CoupleEffectPresentation';
+import { StatusCardRow } from './status/StatusCardRow';
+import { StatusBadgeRow } from './status/StatusBadgeRow';
+import { StatusBenefitAsset } from './status/StatusBenefitAsset';
+import { useStatusFeatureFlags } from '../status/featureFlags';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -67,6 +71,8 @@ type MeProfilePageProps = {
   onOpenRepresentativeTransfer?: () => void;
   onOpenSettings: () => void;
   onOpenStore: () => void;
+  onOpenAristocracy?: () => void;
+  onOpenVip?: () => void;
   onOpenWallet?: () => void;
   onRetry: () => void;
   onRefresh: () => void;
@@ -106,6 +112,8 @@ export function MeProfilePage({
   onOpenRepresentativeTransfer,
   onOpenSettings,
   onOpenStore,
+  onOpenAristocracy,
+  onOpenVip,
   onOpenWallet,
   onRetry,
   onRefresh,
@@ -118,6 +126,7 @@ export function MeProfilePage({
   representativeError = '',
 }: MeProfilePageProps) {
   const cosmeticsFlags = useCosmeticsFeatureFlags();
+  const statusFlags = useStatusFeatureFlags();
   const { width } = useWindowDimensions();
   const compact = width < 390;
   const [editorVisible, setEditorVisible] = useState(false);
@@ -298,6 +307,7 @@ export function MeProfilePage({
                         active={profile.representativeBadgeActive}
                         variant="full"
                       />
+                      {statusFlags.statusPresentation ? <StatusBadgeRow presentation={profile.statusPresentation} /> : null}
                       {profile.vipTier ? (
                         <View style={[styles.vipChip, { borderColor: profile.vipTier.accentColor }]}>
                           <Text style={[styles.vipChipText, { color: profile.vipTier.accentColor }]}>
@@ -350,9 +360,17 @@ export function MeProfilePage({
                   compact={compact}
                   flags={cosmeticsFlags}
                   frame={profile.equippedAvatarFrame}
+                  statusPresentation={statusFlags.statusPresentation ? profile.statusPresentation : undefined}
                 />
               </Pressable>
             </View>
+
+            <StatusCardRow
+              flags={statusFlags}
+              onOpenAristocracy={onOpenAristocracy}
+              onOpenVip={onOpenVip}
+              presentation={profile.statusPresentation}
+            />
 
             <Text style={styles.sectionLabel}>الوصول السريع</Text>
             <View style={styles.quickGrid}>
@@ -468,12 +486,13 @@ function HeaderAction({ accessibilityLabel, disabled = false, icon, onPress }: {
   );
 }
 
-function Avatar({ avatarLabel, avatarUrl, compact, flags, frame }: {
+function Avatar({ avatarLabel, avatarUrl, compact, flags, frame, statusPresentation }: {
   avatarLabel: string;
   avatarUrl: string;
   compact: boolean;
   flags: CosmeticsFeatureFlags;
   frame?: AvatarFrameProjection;
+  statusPresentation?: import('../status/statusPresentation').StatusPresentation;
 }) {
   const size = compact ? 108 : 124;
   return (
@@ -495,6 +514,7 @@ function Avatar({ avatarLabel, avatarUrl, compact, flags, frame }: {
       <View style={[styles.avatarSideJewel, styles.avatarSideJewelRight]} />
       <View style={styles.avatarJewel} />
       <AvatarFrameLayer flags={flags} frame={frame} />
+      <StatusBenefitAsset flags={flags} presentation={statusPresentation} slot="frame" style={styles.statusAvatarFrame} />
     </View>
   );
 }
@@ -1127,6 +1147,7 @@ const styles = StyleSheet.create({
   balancePill: { alignItems: 'center', borderColor: 'rgba(226,183,91,0.44)', borderRadius: radius.full, borderWidth: 1, flexDirection: 'row-reverse', gap: 6, minHeight: 35, minWidth: 78, paddingHorizontal: spacing.sm, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.24, shadowRadius: 8 },
   balanceValue: { color: '#FFF1CC', fontSize: 14, fontWeight: typography.weights.black },
   avatarFrame: { backgroundColor: '#120405', borderColor: 'rgba(255,231,164,0.26)', borderRadius: radius.full, borderWidth: 1, padding: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.58, shadowRadius: 18 },
+  statusAvatarFrame: { bottom: -8, left: -8, position: 'absolute', right: -8, top: -8 },
   avatarBorder: { borderRadius: radius.full, flex: 1, padding: 3 },
   avatarInner: { alignItems: 'center', backgroundColor: '#170607', borderColor: '#5C3112', borderRadius: radius.full, borderWidth: 1, flex: 1, justifyContent: 'center', overflow: 'hidden' },
   avatarImage: { height: '100%', resizeMode: 'cover', width: '100%' },

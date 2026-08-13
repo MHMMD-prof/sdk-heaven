@@ -14,7 +14,11 @@ import {
   validateRoomThemeEditorManifest,
 } from './roomThemeEditorModel';
 
-const source = (path: string) => readFileSync(resolve(process.cwd(), 'admin-dashboard', 'src', path), 'utf8');
+const source = (path: string) => readFileSync(resolve(
+  process.cwd(),
+  process.cwd().endsWith('admin-dashboard') ? 'src' : 'admin-dashboard/src',
+  path,
+), 'utf8');
 
 describe('roomThemeEditorModel', () => {
   it('upgrades legacy layouts into independent compact, standard and tall profiles', () => {

@@ -31,6 +31,9 @@ import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmeti
 import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
 import { EquipmentCosmeticAsset } from './EquipmentCosmeticAsset';
 import { CoupleEffectPresentation } from './CoupleEffectPresentation';
+import { StatusBadgeRow } from './status/StatusBadgeRow';
+import { StatusBenefitAsset } from './status/StatusBenefitAsset';
+import { useStatusFeatureFlags } from '../status/featureFlags';
 
 type PublicProfilePageProps = {
   bottomNavigation?: ReactNode;
@@ -106,6 +109,7 @@ export function PublicProfilePage({
   status,
 }: PublicProfilePageProps) {
   const cosmeticsFlags = useCosmeticsFeatureFlags();
+  const statusFlags = useStatusFeatureFlags();
   const { width } = useWindowDimensions();
   const [editorVisible, setEditorVisible] = useState(false);
   const compact = width < 390;
@@ -162,6 +166,7 @@ export function PublicProfilePage({
               compact={compact}
               flags={cosmeticsFlags}
               frame={profile?.equippedAvatarFrame}
+              statusPresentation={statusFlags.statusPresentation ? profile?.statusPresentation : undefined}
             />
             <View style={styles.identityCopy}>
               <View style={styles.nameRow}>
@@ -176,6 +181,7 @@ export function PublicProfilePage({
                 active={profile?.representativeBadgeActive}
                 variant="full"
               />
+              {statusFlags.statusPresentation ? <StatusBadgeRow presentation={profile?.statusPresentation} /> : null}
               {profile?.family ? (
                 <View style={[styles.familyChip, { borderColor: profile.family.badgeColor }]}>
                   <Text style={[styles.familyChipText, { color: profile.family.badgeColor }]}>
@@ -452,12 +458,13 @@ export function PublicProfilePage({
   );
 }
 
-function Avatar({ avatarLabel, avatarUrl, compact, flags, frame }: {
+function Avatar({ avatarLabel, avatarUrl, compact, flags, frame, statusPresentation }: {
   avatarLabel: string;
   avatarUrl: string;
   compact: boolean;
   flags: CosmeticsFeatureFlags;
   frame?: AvatarFrameProjection;
+  statusPresentation?: import('../status/statusPresentation').StatusPresentation;
 }) {
   const size = compact ? 96 : 112;
   return (
@@ -472,6 +479,7 @@ function Avatar({ avatarLabel, avatarUrl, compact, flags, frame }: {
         </View>
       </LinearGradient>
       <AvatarFrameLayer flags={flags} frame={frame} />
+      <StatusBenefitAsset flags={flags} presentation={statusPresentation} slot="frame" style={styles.statusAvatarFrame} />
     </View>
   );
 }
@@ -736,6 +744,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.76, transform: [{ scale: 0.97 }] },
   identity: { alignItems: 'center', flexDirection: 'row-reverse', gap: spacing.xl, justifyContent: 'center', marginTop: spacing.xl },
   avatarFrame: { borderRadius: radius.full, shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.5, shadowRadius: 20 },
+  statusAvatarFrame: { bottom: -8, left: -8, position: 'absolute', right: -8, top: -8 },
   avatarBorder: { borderRadius: radius.full, flex: 1, padding: 3 },
   avatarInner: { alignItems: 'center', backgroundColor: '#160607', borderRadius: radius.full, flex: 1, justifyContent: 'center', overflow: 'hidden' },
   avatarImage: { height: '100%', resizeMode: 'cover', width: '100%' },

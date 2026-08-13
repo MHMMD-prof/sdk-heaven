@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const {
   normalizeAdminCosmeticsAssetMutation,
+  normalizeAdminCosmeticsAssetOptionsQuery,
   normalizeAdminCosmeticsAssetQuery,
   transitionCosmeticAssetSummary,
 } = require('./adminCosmeticsAssetCore');
@@ -77,6 +78,14 @@ describe('admin cosmetics asset input', () => {
       publicationStatus: 'published',
     })).toMatchObject({ ok: true, value: { limit: 50 } });
     expect(normalizeAdminCosmeticsAssetQuery({ category: 'script-effect' }).ok).toBe(false);
+  });
+
+  it('normalizes paginated compatible-option filters', () => {
+    expect(normalizeAdminCosmeticsAssetOptionsQuery({
+      category: 'gift-effect', cursor: 'gift-100', formats: ['mp4', 'lottie-json'], limit: 500,
+    })).toMatchObject({ ok: true, value: { cursor: 'gift-100', limit: 50 } });
+    expect(normalizeAdminCosmeticsAssetOptionsQuery({ category: 'gift-effect', formats: ['gif'] }).ok).toBe(false);
+    expect(normalizeAdminCosmeticsAssetOptionsQuery({ category: 'unknown', formats: ['png'] }).ok).toBe(false);
   });
 
   it('rejects unsupported couple-effect format, audio, and fallback shapes', () => {

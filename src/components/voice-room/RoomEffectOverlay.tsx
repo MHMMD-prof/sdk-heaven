@@ -41,10 +41,14 @@ export function RoomEffectOverlay({ bottomStageEnabled, effect, flags, onComplet
   const customEntryAllowed = effect.kind !== 'room-entry'
     || effect.customSource !== true
     || flags.customRendering === true;
+  const statusEntryAllowed = effect.kind !== 'room-entry'
+    || effect.statusSource !== true
+    || (flags.assetRegistry && flags.sharedRenderer);
   const canonicalLookupEnabled = Boolean(
     flags.assetRegistry
     && flags.sharedRenderer
     && customEntryAllowed
+    && statusEntryAllowed
     && effect.assetId
     && effect.assetVersionId,
   );

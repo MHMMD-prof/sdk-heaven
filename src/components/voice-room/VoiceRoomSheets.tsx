@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, radius, spacing, typography } from '../../theme';
 import { RepresentativeBadge } from '../RepresentativeBadge';
+import { StatusBadgeRow } from '../status/StatusBadgeRow';
 import { RoomAuthorityRole } from '../../voice/roomV2Contract';
 import { hasRoomCommandCenterCapability } from '../../voice/roomCommandCenterModel';
 import { VoiceParticipant } from '../../voice/types';
@@ -307,6 +308,7 @@ function ParticipantRow({ cosmeticsFlags, onChat, onPress, participant }: { cosm
         <View style={styles.participantNameRow}>
           <Text numberOfLines={1} style={styles.rowName}>{participant.displayName}</Text>
           <RepresentativeBadge active={participant.representativeBadgeActive} />
+          <StatusBadgeRow compact presentation={participant.statusPresentation} />
         </View>
         <Text style={styles.rowMeta}>
           {participant.role === 'listener' ? 'مستمع' : participant.isMuted ? 'الميكروفون مكتوم' : 'على الميكروفون'}

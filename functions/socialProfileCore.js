@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const { readPublicAvatarFrameProjection } = require('./avatarFrameProjectionCore');
 const { readPublicEquipmentCosmetics } = require('./equipmentCosmeticsCore');
 const { mapPublicCoupleEffectProjection } = require('./coupleEffectsCore');
+const { mapStatusPresentation } = require('./statusMembershipCore');
 
 const DEFAULT_COUNTRY_CODE = 'IQ';
 const PUBLIC_ID_MAX = 9999999;
@@ -375,6 +376,9 @@ function buildPublicProfileDocument({ existing = {}, privateProfile, publicId, t
       ...(existing.vipTier.unlockedAt != null ? { unlockedAt: existing.vipTier.unlockedAt } : {}),
     };
   }
+
+  const statusPresentation = mapStatusPresentation(existing.statusPresentation);
+  if (statusPresentation) document.statusPresentation = statusPresentation;
 
   if (
     existing.family

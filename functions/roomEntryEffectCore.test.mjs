@@ -12,6 +12,7 @@ const {
   normalizeRoomEntryEffectBody,
   resolveEntryEffectAnnouncement,
   resolveCoupleEntryEffect,
+  resolveStatusEntryEffect,
   validateRoomEntryEffectRequest,
 } = require('./roomEntryEffectCore');
 
@@ -28,6 +29,23 @@ const catalogItem = {
 };
 
 describe('roomEntryEffectCore', () => {
+  it('selects only bounded canonical public status entry assets', () => {
+    expect(resolveStatusEntryEffect({
+      statusPresentation: {
+        schemaVersion: 1,
+        visibility: 'public',
+        vip: {
+          id: 'svip-1', nameAr: 'SVIP 1', nameEn: 'SVIP 1',
+          assets: { entryEffect: { assetId: 'svip-entry', assetVersionId: 'v1-123456789abc' } },
+        },
+      },
+    })).toEqual({
+      asset: { assetId: 'svip-entry', assetVersionId: 'v1-123456789abc' },
+      id: 'svip-1', nameAr: 'SVIP 1', nameEn: 'SVIP 1',
+    });
+    expect(resolveStatusEntryEffect({ statusPresentation: { schemaVersion: 1, visibility: 'hidden' } })).toBeUndefined();
+    expect(resolveStatusEntryEffect({ statusPresentation: { schemaVersion: 1, visibility: 'public', vip: { assets: { entryEffect: { url: 'https://evil.test' } } } } })).toBeUndefined();
+  });
   it('validates announce commands', () => {
     expect(validateRoomEntryEffectRequest(normalizeRoomEntryEffectBody({
       action: 'announce-entry-effect',

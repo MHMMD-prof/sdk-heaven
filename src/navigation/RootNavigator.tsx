@@ -109,6 +109,7 @@ function MainAppStack() {
           <Stack.Navigator screenOptions={stackScreenOptions}>
         <Stack.Screen name="Main" component={MainScreenEntry} />
         <Stack.Screen name="MeProfile" component={MeProfileScreenEntry} />
+        <Stack.Screen name="StatusCenter" component={StatusCenterScreenEntry} />
         <Stack.Screen name="Friends" component={FriendsScreenEntry} />
         <Stack.Screen name="Following" component={FollowingScreenEntry} />
         <Stack.Screen name="BlockedUsers" component={BlockedUsersScreenEntry} />
@@ -161,6 +162,11 @@ function MeProfileScreenEntry(props: RootStackScreenProps<'MeProfile'>) {
   const { MeProfileScreen } = require('../screens/MeProfileScreen') as typeof import('../screens/MeProfileScreen');
 
   return <MeProfileScreen {...props} />;
+}
+
+function StatusCenterScreenEntry(props: RootStackScreenProps<'StatusCenter'>) {
+  const { StatusCenterScreen } = require('../screens/StatusCenterScreen') as typeof import('../screens/StatusCenterScreen');
+  return <StatusCenterScreen {...props} />;
 }
 
 function FriendsScreenEntry(props: RootStackScreenProps<'Friends'>) {

@@ -3,12 +3,12 @@ const ADMIN_ROLE_CLAIM = 'adminRole';
 const ADMIN_ROLES = ['owner', 'super-moderator', 'moderator', 'support', 'catalog-manager', 'auditor'];
 
 const ADMIN_ROLE_PERMISSIONS = Object.freeze({
-  owner: ['overview', 'users:view', 'users:manage', 'deletions:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'reports:evidence', 'store:view', 'store:manage', 'audit:view', 'audit:export', 'admins:view', 'admins:manage', 'settings:manage', 'flags:manage', 'incentives:view', 'incentives:manage', 'payroll:view', 'payroll:manage'],
+  owner: ['overview', 'users:view', 'users:manage', 'deletions:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'reports:evidence', 'store:view', 'store:manage', 'status:view', 'status:manage', 'audit:view', 'audit:export', 'admins:view', 'admins:manage', 'settings:manage', 'flags:manage', 'incentives:view', 'incentives:manage', 'payroll:view', 'payroll:manage'],
   'super-moderator': ['overview', 'users:view', 'users:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'reports:evidence', 'audit:view', 'admins:view'],
   moderator: ['overview', 'users:view', 'users:manage', 'rooms:view', 'rooms:manage', 'reports:view', 'reports:manage', 'audit:view', 'admins:view', 'settings:manage'],
-  support: ['overview', 'users:view', 'users:note', 'rooms:view', 'reports:view', 'reports:manage', 'admins:view', 'settings:manage'],
-  'catalog-manager': ['overview', 'store:view', 'store:manage', 'audit:view', 'admins:view', 'settings:manage'],
-  auditor: ['overview', 'users:view', 'rooms:view', 'reports:view', 'store:view', 'audit:view', 'audit:export', 'admins:view', 'settings:manage', 'incentives:view', 'payroll:view'],
+  support: ['overview', 'users:view', 'users:note', 'rooms:view', 'reports:view', 'reports:manage', 'status:view', 'admins:view', 'settings:manage'],
+  'catalog-manager': ['overview', 'store:view', 'store:manage', 'status:view', 'status:manage', 'audit:view', 'admins:view', 'settings:manage'],
+  auditor: ['overview', 'users:view', 'rooms:view', 'reports:view', 'store:view', 'status:view', 'audit:view', 'audit:export', 'admins:view', 'settings:manage', 'incentives:view', 'payroll:view'],
 });
 
 const ADMIN_ACTION_PERMISSIONS = Object.freeze({
@@ -48,7 +48,14 @@ const ADMIN_ACTION_PERMISSIONS = Object.freeze({
   'economy-export': 'store:view',
   'store-item-detail': 'store:view',
   'store-summary': 'store:view',
+  'status-operations': 'status:view',
+  'status-user-inspect': 'status:view',
+  'status-operation-propose': 'status:manage',
+  'status-operation-approve': 'status:manage',
+  'status-emergency-freeze': 'status:manage',
+  'status-reconcile': ['status:manage', 'audit:view'],
   'cosmetic-assets': 'store:view',
+  'cosmetic-asset-options': 'store:manage',
   'cosmetic-assets-mutate': 'store:manage',
   'cosmetic-custom-eligibility': 'store:view',
   'cosmetic-custom-submission-preview': 'store:manage',

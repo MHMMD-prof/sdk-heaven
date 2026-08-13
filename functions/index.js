@@ -97,11 +97,13 @@ const {
 const { getAdminRoomTheme, mutateAdminRoomTheme } = require('./adminRoomThemeService');
 const {
   normalizeAdminCosmeticsAssetMutation,
+  normalizeAdminCosmeticsAssetOptionsQuery,
   normalizeAdminCosmeticsAssetQuery,
 } = require('./adminCosmeticsAssetCore');
 const {
   cleanupExpiredCosmeticSubmissions,
   getAdminCosmeticsAssets,
+  getAdminPublishedCosmeticAssetOptions,
   mutateAdminCosmeticsAsset,
   reconcileCosmeticAssetRegistryBatch,
 } = require('./adminCosmeticsAssetService');
@@ -209,6 +211,18 @@ const {
   finalizeExpiredRoomPkSessions,
   forceFinalizeRoomPkOnFlagOff,
 } = require('./roomPkService');
+const {
+  beginCrossRoomPkSettlement,
+  processCrossRoomPkReconciliations,
+  projectCrossRoomPkGift,
+} = require('./crossRoomPkSettlementService');
+const {
+  cleanupExpiredCrossRoomPkRecentPointers,
+  drainCrossRoomPkOnFlagOff,
+  expireCrossRoomPkChallenges,
+  processCrossRoomPkRoomLifecycle,
+  resolveCrossRoomPkRoomInvalidation,
+} = require('./crossRoomPkLifecycleService');
 const {
   applyRoomMusicLiveKit,
   cleanupExpiredRoomMusicRecords,
@@ -378,6 +392,32 @@ const {
   getVipStatus,
   processLeaderboardRefreshQueue,
 } = require('./growthLeaderboardService');
+const { normalizeStatusCommandRequest } = require('./statusMembershipCore');
+const {
+  getStatusCenter,
+  getStatusOverview,
+  processStatusProjectionJobs,
+  updateStatusVisibility,
+} = require('./statusMembershipService');
+const { processStatusSourceOutbox, reconcileVipProgression } = require('./statusProgressionService');
+const {
+  approveAristocracyAdminOperation,
+  expireAristocracyEntitlements,
+  inspectAdminAristocracy,
+  proposeAristocracyAdminOperation,
+  purchaseAristocracy,
+  quoteAristocracy,
+  reconcileAristocracyEconomy,
+  setAristocracyShopAvailability,
+} = require('./aristocracyEconomyService');
+const {
+  approveAnyStatusOperation,
+  emergencyFreezeStatus,
+  getStatusOperationsOverview,
+  inspectStatusUser,
+  proposeAnyStatusOperation,
+  runStatusReconciliation,
+} = require('./statusOperationsService');
 const {
   isTimestampLike,
   isValidPublicId,
@@ -637,6 +677,89 @@ exports.projectRepresentativeBadge = onSchedule(
   },
 );
 
+exports.reconcileStatusProjections = onSchedule(
+  { region: 'us-central1', schedule: 'every 10 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await processStatusProjectionJobs({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.reconcileStatusProjections] complete', result);
+  },
+);
+
+exports.processVipProgression = onSchedule(
+  { region: 'us-central1', schedule: 'every 1 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await processStatusSourceOutbox({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.processVipProgression] complete', result);
+  },
+);
+
+exports.auditVipProgression = onSchedule(
+  { region: 'us-central1', schedule: 'every day 04:15', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await reconcileVipProgression({ db: admin.firestore() });
+    console.info('[functions.auditVipProgression] complete', result);
+  },
+);
+
+exports.expireAristocracyStatus = onSchedule(
+  { region: 'us-central1', schedule: 'every 5 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await expireAristocracyEntitlements({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.expireAristocracyStatus] complete', result);
+  },
+);
+
+exports.auditAristocracyEconomy = onSchedule(
+  { region: 'us-central1', schedule: 'every day 04:45', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await reconcileAristocracyEconomy({ db: admin.firestore() });
+    console.info('[functions.auditAristocracyEconomy] complete', result);
+  },
+);
+
+exports.monitorStatusIntegrity = onSchedule(
+  { region: 'us-central1', schedule: 'every day 05:15', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const now = Date.now();
+    const baghdadDate = new Intl.DateTimeFormat('en-CA', { dateStyle: 'short', timeZone: 'Asia/Baghdad' })
+      .format(new Date(now)).replace(/[^0-9]/g, '');
+    const requestId = `scheduled_${baghdadDate}`;
+    const result = await runStatusReconciliation({
+      clock: { nowMillis: () => now },
+      db: admin.firestore(),
+      decodedToken: { admin: true, adminRole: 'auditor', uid: 'system-status-monitor' },
+      documentIdField: admin.firestore.FieldPath.documentId(),
+      fieldValue: admin.firestore.FieldValue,
+      input: { reason: 'scheduled production integrity audit', requestId },
+    });
+    if (result.errorCode) throw new Error(result.errorCode);
+    const log = { runId: requestId, dirty: result.result.dirty, alert: result.result.alert };
+    if (result.result.alert.create) console.error('[functions.monitorStatusIntegrity] critical', log);
+    else console.info('[functions.monitorStatusIntegrity] complete', log);
+  },
+);
+
 exports.projectRoomGiftSupport = onDocumentCreated(
   {
     document: 'rooms/{roomId}/giftEvents/{eventId}',
@@ -652,6 +775,17 @@ exports.projectRoomGiftSupport = onDocumentCreated(
       },
       db: admin.firestore(),
       event: event.data.data(),
+      fieldValue: admin.firestore.FieldValue,
+      roomId: event.params.roomId,
+    });
+    const crossRoomPk = await projectCrossRoomPkGift({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+      event: event.data.data(),
+      eventId: event.params.eventId,
       fieldValue: admin.firestore.FieldValue,
       roomId: event.params.roomId,
     });
@@ -684,10 +818,40 @@ exports.projectRoomGiftSupport = onDocumentCreated(
       skipped: result.skipped === true,
       targetExcluded: target.excluded === true,
       targetReplayed: target.replayed === true,
+      crossRoomPkDuplicate: crossRoomPk.duplicate === true,
+      crossRoomPkSkipped: crossRoomPk.skipped === true,
     });
     if (result.errorCode) throw new Error(`Room support projection failed: ${result.errorCode}`);
     if (rocket.errorCode) throw new Error(`Room Rocket projection failed: ${rocket.errorCode}`);
     if (target.errorCode) throw new Error(`Room Target projection failed: ${target.errorCode}`);
+    if (crossRoomPk.errorCode) throw new Error(`Cross-room PK projection failed: ${crossRoomPk.errorCode}`);
+  },
+);
+
+exports.processCrossRoomPkRoomLifecycle = onDocumentWritten(
+  {
+    document: 'rooms/{roomId}',
+    region: 'us-central1',
+    retry: true,
+  },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    const reason = resolveCrossRoomPkRoomInvalidation(before, after);
+    if (!reason) return;
+    const result = await processCrossRoomPkRoomLifecycle({
+      activePkSessionId: before?.activePkSessionId || '',
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      pendingPkChallengeId: before?.pendingPkChallengeId || '',
+      reason,
+      roomId: event.params.roomId,
+    });
+    console.info('[functions.processCrossRoomPkRoomLifecycle] complete', {
+      reason,
+      roomId: event.params.roomId,
+      ...result,
+    });
   },
 );
 
@@ -901,6 +1065,95 @@ exports.accountLifecycleCommand = onCall(
     if (result.errorCode === 'RECENT_LOGIN_REQUIRED') throw new HttpsError('failed-precondition', 'RECENT_LOGIN_REQUIRED');
     if (result.errorCode) throw new HttpsError('failed-precondition', result.errorCode);
     return { ok: true, result: result.result };
+  },
+);
+
+exports.statusCommand = onCall(
+  {
+    cors: true,
+    enforceAppCheck: true,
+    region: 'us-central1',
+  },
+  async (request) => {
+    const command = normalizeStatusCommandRequest({ auth: request.auth, data: request.data });
+    if (!command.ok) {
+      throw new HttpsError(command.code === 'AUTH_REQUIRED' ? 'unauthenticated' : 'invalid-argument', command.code);
+    }
+    if (request.auth?.token?.accountDeletionPending === true) {
+      throw new HttpsError('permission-denied', 'PERMISSION_DENIED');
+    }
+    const clock = {
+      nowMillis: () => Date.now(),
+      timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+    };
+    const serviceArgs = {
+      clock,
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      input: command.value.payload,
+      requestId: command.value.requestId,
+      uid: command.value.uid,
+    };
+    const result = command.value.action === 'quote-aristocracy'
+      ? await quoteAristocracy(serviceArgs)
+      : command.value.action === 'purchase-aristocracy'
+        ? await purchaseAristocracy(serviceArgs)
+        : command.value.action === 'update-status-visibility'
+          ? await updateStatusVisibility(serviceArgs)
+          : command.value.action === 'get-status-center'
+            ? await getStatusCenter({ clock, db: serviceArgs.db, uid: command.value.uid })
+            : await getStatusOverview({ clock, db: serviceArgs.db, uid: command.value.uid });
+    if (result.errorCode) throw new HttpsError('failed-precondition', result.errorCode, { code: result.errorCode });
+    return { ok: true, result: result.result };
+  },
+);
+
+exports.statusAdminCommand = onCall(
+  { cors: true, enforceAppCheck: true, region: 'us-central1' },
+  async (request) => {
+    const token = request.auth?.token;
+    if (!request.auth?.uid || token?.admin !== true) throw new HttpsError('permission-denied', 'PERMISSION_DENIED');
+    const data = request.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)
+      || Object.keys(data).some((key) => !['action', 'payload', 'requestId', 'version'].includes(key))
+      || data.version !== 1
+      || !/^[A-Za-z0-9_-]{16,80}$/.test(data.requestId || '')) throw new HttpsError('invalid-argument', 'INVALID_REQUEST');
+    const decodedToken = { ...token, uid: request.auth.uid };
+    const adminProfileSnapshot = await admin.firestore().doc(`adminProfiles/${request.auth.uid}`).get();
+    const adminProfile = adminProfileSnapshot.data();
+    if (!adminProfileSnapshot.exists || adminProfile?.uid !== request.auth.uid || adminProfile?.status !== 'active'
+      || adminProfile?.role !== decodedToken.adminRole) throw new HttpsError('permission-denied', 'PERMISSION_DENIED');
+    let response;
+    if (data.action === 'inspect-aristocracy') {
+      if (!['owner', 'catalog-manager', 'auditor'].includes(decodedToken.adminRole)
+        || !data.payload || Object.keys(data.payload).length !== 1
+        || typeof data.payload.targetUid !== 'string') throw new HttpsError('permission-denied', 'PERMISSION_DENIED');
+      response = await inspectAdminAristocracy({ db: admin.firestore(), targetUid: data.payload.targetUid });
+    } else if (data.action === 'propose-aristocracy-operation') {
+      if (data.payload?.requestId !== data.requestId) throw new HttpsError('invalid-argument', 'INVALID_REQUEST');
+      response = await proposeAristocracyAdminOperation({
+        db: admin.firestore(), decodedToken, fieldValue: admin.firestore.FieldValue, input: data.payload,
+      });
+    } else if (data.action === 'approve-aristocracy-operation') {
+      if (!data.payload || Object.keys(data.payload).length !== 1 || typeof data.payload.proposalId !== 'string') {
+        throw new HttpsError('invalid-argument', 'INVALID_REQUEST');
+      }
+      response = await approveAristocracyAdminOperation({
+        clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+        db: admin.firestore(), decodedToken, fieldValue: admin.firestore.FieldValue,
+        requestId: data.payload?.proposalId,
+      });
+    } else if (data.action === 'set-aristocracy-shop-availability') {
+      if (!data.payload || Object.keys(data.payload).some((key) => !['enabled', 'reason'].includes(key))) {
+        throw new HttpsError('invalid-argument', 'INVALID_REQUEST');
+      }
+      response = await setAristocracyShopAvailability({
+        db: admin.firestore(), decodedToken, enabled: data.payload.enabled,
+        fieldValue: admin.firestore.FieldValue, reason: data.payload.reason, requestId: data.requestId,
+      });
+    } else throw new HttpsError('invalid-argument', 'INVALID_REQUEST');
+    if (response.errorCode) throw new HttpsError('failed-precondition', response.errorCode);
+    return { ok: true, result: response.result };
   },
 );
 
@@ -3703,6 +3956,7 @@ exports.roomPkCommand = onRequest(
         },
         db: admin.firestore(),
         decodedToken,
+        documentIdField: admin.firestore.FieldPath.documentId(),
         fieldValue: admin.firestore.FieldValue,
       });
       if (!result.ok) {
@@ -3763,14 +4017,37 @@ exports.finalizeExpiredRoomPkSessions = onSchedule(
         limit: 20,
       });
       console.info('[functions.finalizeExpiredRoomPkSessions] flag-off finalize', forced);
-      return;
+    } else {
+      const result = await finalizeExpiredRoomPkSessions({
+        db,
+        fieldValue: admin.firestore.FieldValue,
+        limit: 20,
+      });
+      console.info('[functions.finalizeExpiredRoomPkSessions] complete', result);
     }
-    const result = await finalizeExpiredRoomPkSessions({
+    const challenges = flags.roomPk === true && flags.crossRoomPk === true
+      ? await expireCrossRoomPkChallenges({ db, fieldValue: admin.firestore.FieldValue, limit: 50 })
+      : { expired: 0, scanned: 0, skipped: true };
+    const rollback = flags.roomPk === true && flags.crossRoomPk === true
+      ? { challenges: { cancelled: 0, scanned: 0 }, sessions: { scanned: 0, skipped: true, started: 0 } }
+      : await drainCrossRoomPkOnFlagOff({ db, fieldValue: admin.firestore.FieldValue, limit: 50 });
+    const settling = flags.roomPk === true && flags.crossRoomPk === true
+      ? await beginCrossRoomPkSettlement({ db, fieldValue: admin.firestore.FieldValue, limit: 20 })
+      : rollback.sessions;
+    const reconciled = await processCrossRoomPkReconciliations({
+      db,
+      documentIdField: admin.firestore.FieldPath.documentId(),
+      fieldValue: admin.firestore.FieldValue,
+      jobLimit: 10,
+    });
+    const recent = await cleanupExpiredCrossRoomPkRecentPointers({
       db,
       fieldValue: admin.firestore.FieldValue,
-      limit: 20,
+      limit: 100,
     });
-    console.info('[functions.finalizeExpiredRoomPkSessions] complete', result);
+    console.info('[functions.finalizeExpiredRoomPkSessions] cross-room complete', {
+      challenges, recent, reconciled, rollback, settling,
+    });
   },
 );
 
@@ -4517,6 +4794,85 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'status-operations') {
+      try {
+        const result = await getStatusOperationsOverview({
+          clock: { nowMillis: () => Date.now() },
+          db: dashboardDb,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, operations: result.result });
+      } catch (error) {
+        console.error('Failed to resolve status operations:', error);
+        response.status(500).json({ error: 'Failed to resolve status operations.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'status-user-inspect') {
+      try {
+        const result = await inspectStatusUser({
+          clock: { nowMillis: () => Date.now() }, db: dashboardDb, input: { targetUid: request.body?.targetUid },
+        });
+        if (result.errorCode) response.status(400).json({ code: result.errorCode, error: result.errorCode });
+        else response.json({ ok: true, action: dashboardRequest.value.action, inspection: result.result });
+      } catch (error) {
+        console.error('Failed to inspect status user:', error);
+        response.status(500).json({ error: 'Failed to inspect status user.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'status-operation-propose') {
+      const result = await proposeAnyStatusOperation({
+        db: dashboardDb, decodedToken, fieldValue: admin.firestore.FieldValue,
+        input: Object.fromEntries(Object.entries({
+          operation: request.body?.operation, targetUid: request.body?.targetUid, pointDelta: request.body?.pointDelta,
+          catalogKind: request.body?.catalogKind, catalogVersion: request.body?.catalogVersion, flags: request.body?.flags,
+          signoffs: request.body?.signoffs, migration: request.body?.migration, rankId: request.body?.rankId, durationDays: request.body?.durationDays,
+          reason: request.body?.reason, evidenceRef: request.body?.evidenceRef, requestId: request.body?.requestId,
+        }).filter(([, value]) => value !== undefined)),
+      });
+      if (result.errorCode) response.status(result.errorCode === 'PERMISSION_DENIED' ? 403 : 400).json({ code: result.errorCode, error: result.errorCode });
+      else response.json({ ok: true, action: dashboardRequest.value.action, ...result.result });
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'status-operation-approve') {
+      const result = await approveAnyStatusOperation({
+        clock: { nowMillis: () => Date.now() }, db: dashboardDb, decodedToken,
+        fieldValue: admin.firestore.FieldValue, requestId: request.body?.proposalId,
+      });
+      if (result.errorCode) response.status(result.errorCode === 'PERMISSION_DENIED' || result.errorCode === 'SELF_APPROVAL_FORBIDDEN' ? 403 : 409).json({ code: result.errorCode, error: result.errorCode });
+      else response.json({ ok: true, action: dashboardRequest.value.action, result: result.result });
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'status-emergency-freeze') {
+      const result = await emergencyFreezeStatus({
+        db: dashboardDb, decodedToken, fieldValue: admin.firestore.FieldValue,
+        input: { flags: request.body?.flags, reason: request.body?.reason, requestId: request.body?.requestId },
+      });
+      if (result.errorCode) response.status(result.errorCode === 'PERMISSION_DENIED' ? 403 : 400).json({ code: result.errorCode, error: result.errorCode });
+      else response.json({ ok: true, action: dashboardRequest.value.action, result: result.result });
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'status-reconcile') {
+      try {
+        const result = await runStatusReconciliation({
+          clock: { nowMillis: () => Date.now() }, db: dashboardDb, decodedToken,
+          documentIdField: admin.firestore.FieldPath.documentId(), fieldValue: admin.firestore.FieldValue,
+          input: { reason: request.body?.reason, requestId: request.body?.requestId },
+        });
+        if (result.errorCode) response.status(result.errorCode === 'PERMISSION_DENIED' ? 403 : 400).json({ code: result.errorCode, error: result.errorCode });
+        else response.json({ ok: true, action: dashboardRequest.value.action, reconciliation: result.result });
+      } catch (error) {
+        console.error('Failed to reconcile status systems:', error);
+        response.status(500).json({ error: 'Failed to reconcile status systems.' });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'audit-events') {
       try {
         const auditPage = await resolveAdminAuditEvents(dashboardDb, request.body, operatorScope);
@@ -5116,6 +5472,29 @@ exports.adminDashboard = onRequest(
       } catch (error) {
         console.error('Failed to load cosmetics asset registry:', error);
         response.status(500).json({ error: 'Failed to load cosmetics asset registry.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'cosmetic-asset-options') {
+      const query = normalizeAdminCosmeticsAssetOptionsQuery(request.body);
+      if (!query.ok) {
+        response.status(query.status).json({ error: query.error });
+        return;
+      }
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          ...(await getAdminPublishedCosmeticAssetOptions({
+            db: admin.firestore(),
+            documentIdField: admin.firestore.FieldPath.documentId(),
+            input: query.value,
+          })),
+        });
+      } catch (error) {
+        console.error('Failed to load compatible cosmetic assets:', error);
+        response.status(500).json({ error: 'Failed to load compatible cosmetic assets.' });
       }
       return;
     }

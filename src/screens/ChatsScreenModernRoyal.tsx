@@ -34,6 +34,7 @@ import { ChatTopBar } from '../personalChat/ui/ChatTopBar';
 import { triggerChatSelectionFeedback } from '../personalChat/ui/chatFeedback';
 import { chatColors, chatMetrics } from '../personalChat/ui/chatTheme';
 import type { RootStackParamList } from '../types/navigation';
+import { useStatusFeatureFlags } from '../status/featureFlags';
 
 const COPY = directChatCopy(I18nManager.isRTL ? 'ar' : 'en');
 
@@ -46,6 +47,7 @@ export function ChatsScreenModernRoyal({ bottomNavigation, navigation }: ChatsSc
   const { user } = useAuth();
   const chat = useDirectChats();
   const cosmetics = useCosmeticsFeatureFlags();
+  const statusFlags = useStatusFeatureFlags();
   const reducedMotion = useReducedMotion();
   const [filter, setFilter] = useState<ChatInboxFilter>('all');
   const [search, setSearch] = useState('');
@@ -162,6 +164,7 @@ export function ChatsScreenModernRoyal({ bottomNavigation, navigation }: ChatsSc
               onPress: () => openPeerChat(item.item.peerUid),
               profiles,
               reducedMotion,
+              showStatus: statusFlags.statusPresentation,
               row: item,
             })}
             showsVerticalScrollIndicator={false}
@@ -181,13 +184,14 @@ export function ChatsScreenModernRoyal({ bottomNavigation, navigation }: ChatsSc
   );
 }
 
-function renderConversation({ chat, cosmetics, onPress, profiles, reducedMotion, row }: {
+function renderConversation({ chat, cosmetics, onPress, profiles, reducedMotion, row, showStatus }: {
   chat: ReturnType<typeof useDirectChats>;
   cosmetics: ReturnType<typeof useCosmeticsFeatureFlags>;
   onPress: () => void;
   profiles: ReturnType<typeof useDirectChatProfiles>;
   reducedMotion: boolean;
   row: ChatInboxRowModel;
+  showStatus: boolean;
 }) {
   const item = row.item;
   const profile = profiles[item.peerUid];
@@ -202,6 +206,7 @@ function renderConversation({ chat, cosmetics, onPress, profiles, reducedMotion,
     muted: item.muted,
     muteLabel: item.muted ? COPY.unmute : COPY.mute,
     preview: formatPreview(row),
+    statusPresentation: showStatus ? profile?.statusPresentation : undefined,
     timestampLabel: formatModernChatTime(item.updatedAtMs),
     unreadCount: item.unreadCount,
   };

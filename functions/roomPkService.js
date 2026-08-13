@@ -2,6 +2,7 @@
 
 const { mapGrowthFeatures } = require('./growthRolloutCore');
 const { resolveSlidingWindowRateLimit } = require('./voiceRoomRateLimitCore');
+const { executeCrossRoomPkCommand } = require('./crossRoomPkService');
 const {
   COOLDOWN_MS,
   MAX_CONCURRENT_PER_ROOM,
@@ -51,6 +52,7 @@ async function executeRoomPkCommand({
   clock = systemClock,
   db,
   decodedToken,
+  documentIdField = '__name__',
   fieldValue,
 }) {
   const validation = validateRoomPkRequest(normalizeRoomPkBody(body));
@@ -59,12 +61,7 @@ async function executeRoomPkCommand({
   const fingerprint = buildRoomPkFingerprint(decodedToken.uid, command);
 
   if (isCrossRoomRequest(command)) {
-    return roomPkError(
-      'FEATURE_DISABLED',
-      503,
-      'Cross-room PK is not enabled.',
-      { feature: 'crossRoomPk' },
-    );
+    return executeCrossRoomPkCommand({ body, clock, db, decodedToken, documentIdField, fieldValue });
   }
 
   return db.runTransaction(async (transaction) => {
@@ -170,7 +167,8 @@ async function executeRoomPkCommand({
     }
 
     // Auto-finalize expired active sessions before handling most commands.
-    if (activeSession && activeSession.status === 'active' && !isPkSessionActive(activeSession, nowMs)) {
+    if (activeSession?.mode !== 'cross-room'
+      && activeSession && activeSession.status === 'active' && !isPkSessionActive(activeSession, nowMs)) {
       const patch = buildFinalizePatch({ nowMs, session: activeSession, status: 'ended' });
       transaction.update(activeSessionRef, {
         endedAt: clock.timestampFromMillis(patch.endedAtMs),
@@ -203,9 +201,9 @@ async function executeRoomPkCommand({
       if (!isActiveMembership(membership, decodedToken.uid)) {
         return deny(roomPkError('MEMBERSHIP_REQUIRED', 403, 'Active room membership is required.'));
       }
-      const liveSession = activeSession && isPkSessionActive(activeSession, nowMs)
+      const liveSession = activeSession?.mode === 'cross-room'
         ? activeSession
-        : null;
+        : (activeSession && isPkSessionActive(activeSession, nowMs) ? activeSession : null);
       const response = {
         ok: true,
         result: {
@@ -236,6 +234,13 @@ async function executeRoomPkCommand({
       });
       if (!authority.ok) {
         return deny(roomPkError('FORBIDDEN', 403, 'Only the host or owner can start PK.'));
+      }
+      if (typeof roomData?.pendingPkChallengeId === 'string' && roomData.pendingPkChallengeId.trim()) {
+        return deny(roomPkError(
+          'ROOM_ALREADY_RESERVED',
+          409,
+          'The room has a pending cross-room PK challenge.',
+        ));
       }
       if (
         activeSession
@@ -316,6 +321,9 @@ async function executeRoomPkCommand({
       if (!activeSession || !activeSessionRef || !isPkSessionActive(activeSession, nowMs)) {
         return deny(roomPkError('SESSION_NOT_ACTIVE', 409, 'There is no active PK session to join.'));
       }
+      if (activeSession.mode === 'cross-room') {
+        return deny(roomPkError('INVALID_REQUEST', 400, 'Cross-room PK assigns sides by room.'));
+      }
       if (!ROOM_PK_TEAMS.includes(command.team)) {
         return deny(roomPkError('INVALID_REQUEST', 400, 'A valid PK team (red or blue) is required.'));
       }
@@ -384,6 +392,9 @@ async function executeRoomPkCommand({
       }
       if (!activeSession || !activeSessionRef) {
         return deny(roomPkError('SESSION_NOT_FOUND', 404, 'No PK session was found for this room.'));
+      }
+      if (activeSession.mode === 'cross-room') {
+        return deny(roomPkError('INVALID_REQUEST', 400, 'Use surrender for an active cross-room PK.'));
       }
       if (!['active', 'lobby'].includes(activeSession.status) && activeSession.winner != null) {
         const response = {
@@ -514,6 +525,9 @@ async function applyRoomPkGiftContribution({
       return { ok: true, skipped: true, reason: 'session_missing' };
     }
     const session = mapRoomPkSession({ pkId: activePkId, ...sessionSnapshot.data() });
+    if (!session || session.mode === 'cross-room') {
+      return { ok: true, skipped: true, reason: 'cross_room_uses_durable_projection' };
+    }
     if (!isPkSessionActive(session, nowMs)) {
       return { ok: true, skipped: true, reason: 'session_inactive' };
     }
@@ -599,7 +613,7 @@ async function finalizeExpiredRoomPkSessions({
       const sessionSnapshot = await transaction.get(sessionRef);
       if (!sessionSnapshot.exists) return false;
       const session = mapRoomPkSession({ pkId: sessionRef.id, ...sessionSnapshot.data() });
-      if (session.status !== 'active') return false;
+      if (!session || session.mode === 'cross-room' || session.status !== 'active') return false;
       const endsAtMs = session.endsAtMs || timestampToMillis(sessionSnapshot.data()?.endsAt);
       if (endsAtMs > nowMs) return false;
 
@@ -656,7 +670,7 @@ async function forceFinalizeRoomPkOnFlagOff({
       const sessionSnapshot = await transaction.get(sessionRef);
       if (!sessionSnapshot.exists) return false;
       const session = mapRoomPkSession({ pkId: sessionRef.id, ...sessionSnapshot.data() });
-      if (session.status !== 'active') return false;
+      if (!session || session.mode === 'cross-room' || session.status !== 'active') return false;
 
       const roomRef = db.doc(`rooms/${session.roomId}`);
       const roomSnapshot = await transaction.get(roomRef);

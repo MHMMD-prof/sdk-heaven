@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "pkId": "crpk_session_fixture_0001",
+  "mode": "cross-room",
+  "status": "active",
+  "roomId": "room-red-1",
+  "redRoomId": "room-red-1",
+  "blueRoomId": "room-blue-1",
+  "roomIds": ["room-red-1", "room-blue-1"],
+  "createdByUid": "host-red-1",
+  "acceptedByUid": "host-blue-1",
+  "challengeId": "crpk_challenge_fixture_0001",
+  "startedAtMs": 2000000000000,
+  "endsAtMs": 2000000180000,
+  "settleAfterMs": 2000000195000,
+  "durationMs": 180000,
+  "teams": {
+    "red": {
+      "roomId": "room-red-1",
+      "roomTitle": "مجلس الياقوت",
+      "roomImageUrl": "https://cdn.example.test/rooms/red.png",
+      "authorityUid": "host-red-1",
+      "score": 0,
+      "distinctGifterCount": 0
+    },
+    "blue": {
+      "roomId": "room-blue-1",
+      "roomTitle": "مجلس النيل",
+      "roomImageUrl": "https://cdn.example.test/rooms/blue.png",
+      "authorityUid": "host-blue-1",
+      "score": 0,
+      "distinctGifterCount": 0
+    }
+  },
+  "scoreShardCount": 16,
+  "distinctGifterCount": 0,
+  "winner": null,
+  "winnerReason": "",
+  "purgeAfterMs": 2000604980000
+}

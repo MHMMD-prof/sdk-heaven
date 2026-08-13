@@ -1,4 +1,4 @@
-export type AdminRouteKey = 'overview' | 'users' | 'rooms' | 'reports' | 'store' | 'cosmetics' | 'incentives' | 'representatives' | 'notifications' | 'audit' | 'settings';
+export type AdminRouteKey = 'overview' | 'users' | 'rooms' | 'reports' | 'store' | 'status' | 'cosmetics' | 'incentives' | 'representatives' | 'notifications' | 'audit' | 'settings';
 
 export type DashboardRoute = {
   detail: string;
@@ -11,6 +11,15 @@ export type DashboardRoute = {
 };
 
 export const adminRoutes: readonly DashboardRoute[] = [
+  {
+    detail: 'مراقبة VIP وSVIP والأرستقراطية والتدقيق والتفعيل الآمن.',
+    key: 'status',
+    label: 'الحالة والرتب',
+    navigation: 'primary',
+    path: '/status',
+    subtitle: 'VIP وSVIP والأرستقراطية',
+    title: 'مركز عمليات الحالة',
+  },
   {
     detail: 'لا توجد ملخصات تشغيلية محمّلة.',
     key: 'overview',
@@ -114,11 +123,13 @@ export const adminRoutes: readonly DashboardRoute[] = [
 
 export const primaryAdminRoutes = adminRoutes.filter((route) => route.navigation === 'primary');
 
+const overviewRoute = adminRoutes.find((route) => route.key === 'overview') as DashboardRoute;
+
 export function getAdminRouteByKey(key: AdminRouteKey): DashboardRoute {
-  return adminRoutes.find((route) => route.key === key) ?? adminRoutes[0] as DashboardRoute;
+  return adminRoutes.find((route) => route.key === key) ?? overviewRoute;
 }
 
 export function getAdminRouteFromPath(pathname: string): DashboardRoute {
   const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
-  return adminRoutes.find((route) => route.path === normalizedPath) ?? adminRoutes[0] as DashboardRoute;
+  return adminRoutes.find((route) => route.path === normalizedPath) ?? overviewRoute;
 }

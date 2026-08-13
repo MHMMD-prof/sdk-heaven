@@ -13,6 +13,12 @@ import {
   requestAdminRoomTheme,
 } from './adminDashboardApi';
 import { firebaseStorage } from './firebase';
+import { CosmeticAssetField } from './CosmeticAssetField';
+import {
+  roomThemeAmbientRequirement,
+  roomThemeBackgroundRequirement,
+  type CosmeticAssetReference,
+} from './cosmeticAssetAuthoring';
 import {
   ROOM_THEME_EDITOR_COUNTS,
   ROOM_THEME_INCENTIVE_PREVIEWS,
@@ -191,20 +197,18 @@ export function RoomThemeManifestEditor({ themeId, user }: { themeId: string; us
     setManifest({ ...manifest, layouts });
   }
 
-  function setBackgroundMotion(field: 'assetId' | 'assetVersionId', value: string) {
-    const current = motion.background || { assetId: '', assetVersionId: '' };
-    const background = { ...current, [field]: value.trim() };
+  function setBackgroundMotion(background?: CosmeticAssetReference) {
     setManifest({
       ...manifest,
       manifestVersion: manifest.manifestVersion === 3 ? 3 : 2,
       motion: {
         ...motion,
-        background: background.assetId || background.assetVersionId ? background : null,
+        background: background || null,
       },
     });
   }
 
-  function setAmbientMotion(index: number, field: 'assetId' | 'assetVersionId', value: string) {
+  function setAmbientMotion(index: number, asset?: CosmeticAssetReference) {
     const ambient = [...motion.ambient];
     const current = ambient[index] || {
       id: `ambient-${index + 1}`,
@@ -214,7 +218,7 @@ export function RoomThemeManifestEditor({ themeId, user }: { themeId: string; us
       width: 0.3,
       height: 0.25,
     };
-    ambient[index] = { ...current, asset: { ...current.asset, [field]: value.trim() } };
+    ambient[index] = { ...current, asset: asset || { assetId: '', assetVersionId: '' } };
     setManifest({
       ...manifest,
       manifestVersion: manifest.manifestVersion === 3 ? 3 : 2,
@@ -268,21 +272,24 @@ export function RoomThemeManifestEditor({ themeId, user }: { themeId: string; us
       </div>
 
       <div className="economy-form-grid" style={{ marginTop: 14 }}>
-        <label>خلفية MP4 · Asset ID
-          <input dir="ltr" value={motion.background?.assetId || ''} onChange={(event) => setBackgroundMotion('assetId', event.target.value)} />
-        </label>
-        <label>خلفية MP4 · Version ID
-          <input dir="ltr" value={motion.background?.assetVersionId || ''} onChange={(event) => setBackgroundMotion('assetVersionId', event.target.value)} />
-        </label>
+        <CosmeticAssetField
+          initialAssetId={`${themeId}-background-motion`}
+          onClear={() => setBackgroundMotion()}
+          onSelect={(bundle) => setBackgroundMotion(bundle.primary)}
+          reference={motion.background || undefined}
+          requirement={roomThemeBackgroundRequirement}
+          user={user}
+        />
         {[0, 1].map((index) => (
-          <div className="span-2" key={index} style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' }}>
-            <label>Lottie ambient {index + 1} · Asset ID
-              <input dir="ltr" value={motion.ambient[index]?.asset.assetId || ''} onChange={(event) => setAmbientMotion(index, 'assetId', event.target.value)} />
-            </label>
-            <label>Lottie ambient {index + 1} · Version ID
-              <input dir="ltr" value={motion.ambient[index]?.asset.assetVersionId || ''} onChange={(event) => setAmbientMotion(index, 'assetVersionId', event.target.value)} />
-            </label>
-          </div>
+          <CosmeticAssetField
+            initialAssetId={`${themeId}-ambient-${index + 1}`}
+            key={index}
+            onClear={() => setAmbientMotion(index)}
+            onSelect={(bundle) => setAmbientMotion(index, bundle.primary)}
+            reference={motion.ambient[index]?.asset.assetId ? motion.ambient[index]?.asset : undefined}
+            requirement={{ ...roomThemeAmbientRequirement, label: `${roomThemeAmbientRequirement.label} ${index + 1}` }}
+            user={user}
+          />
         ))}
         <small className="span-2">يقبل النشر مراجع room-theme منشورة فقط: MP4 صامت للخلفية وLottie للمؤثرات، مع fallback ثابت معتمد.</small>
       </div>

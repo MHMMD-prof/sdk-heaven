@@ -119,6 +119,8 @@ export function MeProfileScreen({ bottomNavigation, navigation }: MeProfileScree
       onOpenLeaderboards={growthFlags.leaderboards ? () => navigation.navigate('Leaderboards') : undefined}
       onOpenWallet={flags.wallet ? () => navigation.navigate('WalletStore') : undefined}
       onOpenStore={() => navigation.navigate('Store')}
+      onOpenVip={() => navigation.navigate('StatusCenter', { initialTab: 'vip' })}
+      onOpenAristocracy={() => navigation.navigate('StatusCenter', { initialTab: 'aristocracy' })}
       onOpenMyItems={() => navigation.navigate('MyItems')}
       onOpenRepresentativeTransfer={canOpenRepresentativeTransfer
         ? () => navigation.navigate('RepresentativeTransfer')

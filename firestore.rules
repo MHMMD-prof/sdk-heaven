@@ -177,6 +177,112 @@ service cloud.firestore {
         || countryCode == 'KM';
     }
 
+    function validLegacyVipTier(value) {
+      return value is map
+        && value.keys().hasOnly(['accentColor', 'id', 'nameAr', 'rank', 'unlockedAt'])
+        && value.keys().hasAll(['accentColor', 'id', 'nameAr', 'rank'])
+        && value.accentColor is string
+        && value.accentColor.matches('^#[A-Fa-f0-9]{6}$')
+        && value.id is string
+        && value.id.matches('^[a-z0-9][a-z0-9_-]{2,39}$')
+        && value.nameAr is string
+        && value.nameAr.size() >= 1
+        && value.nameAr.size() <= 40
+        && value.rank is int
+        && value.rank >= 1
+        && value.rank <= 99
+        && (!('unlockedAt' in value) || value.unlockedAt is timestamp);
+    }
+
+    function validStatusVipProjection(value) {
+      return value is map
+        && value.keys().hasOnly(['catalogVersion', 'id', 'band', 'level', 'order', 'nameAr', 'nameEn', 'accentColor', 'assets'])
+        && value.keys().hasAll(['catalogVersion', 'id', 'band', 'level', 'order', 'nameAr', 'nameEn', 'accentColor', 'assets'])
+        && value.catalogVersion is string
+        && value.catalogVersion.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && value.id is string
+        && (
+          (value.band == 'vip' && value.id.matches('^vip-([1-9]|1[0-9]|20)$'))
+          || (value.band == 'svip' && value.id.matches('^svip-([1-9]|1[0-9]|20)$'))
+        )
+        && value.level is int
+        && value.level >= 1
+        && value.level <= 20
+        && value.order is int
+        && value.order >= 1
+        && value.order <= 40
+        && value.nameAr is string
+        && value.nameAr.size() >= 1
+        && value.nameAr.size() <= 40
+        && value.nameEn is string
+        && value.nameEn.size() >= 1
+        && value.nameEn.size() <= 40
+        && value.accentColor is string
+        && value.accentColor.matches('^#[A-Fa-f0-9]{6}$')
+        && validStatusAssets(value.assets);
+    }
+
+    function validStatusAristocracyProjection(value) {
+      return value is map
+        && value.keys().hasOnly(['catalogVersion', 'id', 'order', 'nameAr', 'nameEn', 'accentColor', 'assets'])
+        && value.keys().hasAll(['catalogVersion', 'id', 'order', 'nameAr', 'nameEn', 'accentColor', 'assets'])
+        && value.catalogVersion is string
+        && value.catalogVersion.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && value.id is string
+        && value.id.matches('^[a-z0-9][a-z0-9_-]{2,39}$')
+        && value.order is int
+        && value.order >= 1
+        && value.order <= 20
+        && value.nameAr is string
+        && value.nameAr.size() >= 1
+        && value.nameAr.size() <= 40
+        && value.nameEn is string
+        && value.nameEn.size() >= 1
+        && value.nameEn.size() <= 40
+        && value.accentColor is string
+        && value.accentColor.matches('^#[A-Fa-f0-9]{6}$')
+        && validStatusAssets(value.assets);
+    }
+
+    function validStatusAssetReference(value) {
+      return value is map
+        && value.keys().hasOnly(['assetId', 'assetVersionId'])
+        && value.keys().hasAll(['assetId', 'assetVersionId'])
+        && value.assetId is string
+        && value.assetId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && value.assetVersionId is string
+        && value.assetVersionId.matches('^v[1-9][0-9]{0,8}-[a-f0-9]{12}$');
+    }
+
+    function validStatusAssets(value) {
+      return value is map
+        && value.keys().hasOnly(['badge', 'frame', 'nameplate', 'chatBubble', 'entryEffect'])
+        && (
+          value.size() == 0
+          || (
+            (!('badge' in value) || validStatusAssetReference(value.badge))
+            && (!('frame' in value) || validStatusAssetReference(value.frame))
+            && (!('nameplate' in value) || validStatusAssetReference(value.nameplate))
+            && (!('chatBubble' in value) || validStatusAssetReference(value.chatBubble))
+            && (!('entryEffect' in value) || validStatusAssetReference(value.entryEffect))
+          )
+        );
+    }
+
+    function validStatusPresentation(value) {
+      return value is map
+        && value.keys().hasOnly(['schemaVersion', 'visibility', 'vip', 'aristocracy'])
+        && value.keys().hasAll(['schemaVersion', 'visibility'])
+        && value.schemaVersion == 1
+        && (value.visibility == 'public' || value.visibility == 'hidden')
+        && (
+          value.visibility == 'public'
+          || (!('vip' in value) && !('aristocracy' in value))
+        )
+        && (!('vip' in value) || validStatusVipProjection(value.vip))
+        && (!('aristocracy' in value) || validStatusAristocracyProjection(value.aristocracy));
+    }
+
     function validPublicProfile(userId, data) {
       return data.keys().hasOnly([
           'uid',
@@ -194,6 +300,8 @@ service cloud.firestore {
           'followingCount',
           'coupleLevel',
           'coupleEffect',
+          'vipTier',
+          'statusPresentation',
           'equippedAvatarFrame',
           'equippedCosmetics',
           'moderationStatus',
@@ -242,6 +350,8 @@ service cloud.firestore {
         && data.coupleLevel is int
         && data.coupleLevel >= 0
         && (!('coupleEffect' in data) || validCoupleEffectProjection(data.coupleEffect))
+        && (!('vipTier' in data) || data.vipTier == null || validLegacyVipTier(data.vipTier))
+        && (!('statusPresentation' in data) || validStatusPresentation(data.statusPresentation))
         && (
           !('equippedAvatarFrame' in data)
           || (
@@ -415,6 +525,7 @@ service cloud.firestore {
           || configId == 'personalChatsFrontendRollout'
           || configId == 'cosmeticsFeatures'
           || configId == 'growthFeatures'
+          || configId == 'statusFeatures'
           || configId == 'voiceRoomFeatures'
           || configId == 'voiceRoomLaunch'
           || configId == 'roomRocketPublic'
@@ -888,6 +999,80 @@ service cloud.firestore {
     }
 
     match /storeCatalog/{itemId} {
+      allow read, write: if false;
+    }
+
+    // Wave 1 status authority and catalog documents are server-only. Clients
+    // receive sanitized data through the App Check-protected status callable.
+    match /vipTierCatalogVersions/{versionId} {
+      allow read, write: if false;
+    }
+
+    match /aristocracyCatalogVersions/{versionId} {
+      allow read, write: if false;
+    }
+
+    match /statusCatalogPointers/{catalogId} {
+      allow read, write: if false;
+    }
+
+    match /vipAccounts/{userId} {
+      allow read, write: if false;
+    }
+
+    match /vipContributions/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /vipTransitions/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /aristocracyEntitlements/{userId} {
+      allow read, write: if false;
+    }
+
+    match /aristocracyTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+
+    match /aristocracyQuotes/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /statusSourceOutbox/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /statusPresentationJobs/{jobId} {
+      allow read, write: if false;
+    }
+
+    match /statusVisibility/{userId} {
+      allow read, write: if false;
+    }
+
+    match /statusCommandRequests/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /statusRateLimits/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /statusAdminProposals/{proposalId} {
+      allow read, write: if false;
+    }
+
+    match /statusOperations/{operationId} {
+      allow read, write: if false;
+    }
+
+    match /statusReconciliationRuns/{runId} {
+      allow read, write: if false;
+    }
+
+    match /statusOpsAlerts/{alertId} {
       allow read, write: if false;
     }
 
@@ -1531,6 +1716,63 @@ service cloud.firestore {
         && get(memberPath(roomId, request.auth.uid)).data.status == 'active';
     }
 
+    function hasActiveRoomMembership(roomId) {
+      return hasCompleteProfile()
+        && roomId is string
+        && roomId.size() >= 1
+        && roomId.size() <= 128
+        && exists(memberPath(roomId, request.auth.uid))
+        && get(memberPath(roomId, request.auth.uid)).data.uid == request.auth.uid
+        && get(memberPath(roomId, request.auth.uid)).data.status == 'active';
+    }
+
+    function validCrossRoomPkIdentity(data) {
+      return data.schemaVersion == 2
+        && data.mode == 'cross-room'
+        && data.redRoomId is string
+        && data.blueRoomId is string
+        && data.redRoomId != data.blueRoomId
+        && data.roomId == data.redRoomId
+        && data.roomIds is list
+        && data.roomIds.size() == 2
+        && data.roomIds[0] == data.redRoomId
+        && data.roomIds[1] == data.blueRoomId;
+    }
+
+    function canReadCrossRoomPkData(data) {
+      return validCrossRoomPkIdentity(data)
+        && (
+          hasActiveRoomMembership(data.redRoomId)
+          || hasActiveRoomMembership(data.blueRoomId)
+        );
+    }
+
+    function canReadRoomPkSession() {
+      return signedIn()
+        && (
+          (
+            resource.data.schemaVersion == 1
+            && resource.data.mode != 'cross-room'
+            && resource.data.roomId is string
+            && canReadPresence(resource.data.roomId)
+          )
+          || canReadCrossRoomPkData(resource.data)
+        );
+    }
+
+    function canReadRoomPkChallenge() {
+      return signedIn()
+        && resource.data.schemaVersion == 1
+        && resource.data.mode == 'cross-room'
+        && resource.data.challengerRoomId is string
+        && resource.data.opponentRoomId is string
+        && resource.data.challengerRoomId != resource.data.opponentRoomId
+        && (
+          hasActiveRoomMembership(resource.data.challengerRoomId)
+          || hasActiveRoomMembership(resource.data.opponentRoomId)
+        );
+    }
+
     function voiceRoomFeaturePath() {
       return /databases/$(database)/documents/appConfig/voiceRoomFeatures;
     }
@@ -2012,9 +2254,34 @@ service cloud.firestore {
     }
 
     match /roomPkSessions/{pkId} {
-      allow read: if signedIn()
-        && resource.data.roomId is string
-        && canReadPresence(resource.data.roomId);
+      allow read: if canReadRoomPkSession();
+      allow write: if false;
+
+      match /scoreShards/{shardId} {
+        allow read: if signedIn()
+          && exists(/databases/$(database)/documents/roomPkSessions/$(pkId))
+          && (
+            (
+              get(/databases/$(database)/documents/roomPkSessions/$(pkId)).data.schemaVersion == 1
+              && get(/databases/$(database)/documents/roomPkSessions/$(pkId)).data.mode != 'cross-room'
+              && canReadPresence(get(/databases/$(database)/documents/roomPkSessions/$(pkId)).data.roomId)
+            )
+            || (
+              canReadCrossRoomPkData(
+                get(/databases/$(database)/documents/roomPkSessions/$(pkId)).data
+              )
+            )
+          );
+        allow write: if false;
+      }
+
+      match /gifters/{gifterId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /roomPkChallenges/{challengeId} {
+      allow read: if canReadRoomPkChallenge();
       allow write: if false;
     }
 
@@ -2023,6 +2290,26 @@ service cloud.firestore {
     }
 
     match /roomPkRateLimits/{uid} {
+      allow read, write: if false;
+    }
+
+    match /roomPkReconciliations/{pkId} {
+      allow read, write: if false;
+
+      match /gifters/{gifterId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /crossRoomPkRoomRateLimits/{roomId} {
+      allow read, write: if false;
+    }
+
+    match /crossRoomPkPairCooldowns/{pairId} {
+      allow read, write: if false;
+    }
+
+    match /roomPkAuditEvents/{eventId} {
       allow read, write: if false;
     }
   }

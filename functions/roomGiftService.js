@@ -561,6 +561,30 @@ async function sendRoomGiftCommand({
       presentationTier: delivery.presentationTier,
       tags: catalogTheater.tags,
     });
+    const activePkSessionId = typeof roomSnapshot.data()?.activePkSessionId === 'string'
+      ? roomSnapshot.data().activePkSessionId.trim()
+      : '';
+    let pkContext;
+    const giftCommittedAtMs = clock.nowMillis();
+    if (activePkSessionId) {
+      const pkSessionSnapshot = await transaction.get(db.doc(`roomPkSessions/${activePkSessionId}`));
+      const pkSession = pkSessionSnapshot.exists ? pkSessionSnapshot.data() : undefined;
+      const startedAtMs = typeof pkSession?.startedAt?.toMillis === 'function'
+        ? pkSession.startedAt.toMillis()
+        : Number(pkSession?.startedAtMs) || 0;
+      const endsAtMs = typeof pkSession?.endsAt?.toMillis === 'function'
+        ? pkSession.endsAt.toMillis()
+        : Number(pkSession?.endsAtMs) || 0;
+      if (
+        pkSession?.pkId === activePkSessionId
+        && ['in-room-teams', 'cross-room'].includes(pkSession.mode)
+        && pkSession.status === 'active'
+        && startedAtMs <= giftCommittedAtMs
+        && giftCommittedAtMs <= endsAtMs
+      ) {
+        pkContext = { mode: pkSession.mode, pkId: activePkSessionId };
+      }
+    }
     const senderWallet = mapWalletSummary(
       senderWalletSnapshot.exists ? senderWalletSnapshot.data() : undefined,
       decodedToken.uid,
@@ -679,6 +703,7 @@ async function sendRoomGiftCommand({
       comboWindowId: combo.comboWindowId,
       commissionBps: quote.commissionBps,
       createdAt: timestamp,
+      createdAtMs: giftCommittedAtMs,
       currency: quote.currency,
       eventId,
       giftId: quote.giftId,
@@ -692,6 +717,8 @@ async function sendRoomGiftCommand({
       presentationDelivery: delivery,
       presentationTier: quote.presentationTier,
       price: quote.price,
+      priceCoins: quote.price,
+      ...(pkContext ? { pkContext } : {}),
       quantity: quote.quantity,
       quoteId: command.quoteId,
       recipientCredit: quote.recipientCredit,

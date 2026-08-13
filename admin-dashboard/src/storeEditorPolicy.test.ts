@@ -5,6 +5,7 @@ import { StoreCatalogDraft, buildStoreAssetPath, parseManagedStoreAssetPath, val
 const validDraft: StoreCatalogDraft = {
   availability: 'available',
   category: 'avatar-frames',
+  cosmeticAsset: { assetId: 'gold-frame', assetVersionId: 'v1-aaaaaaaaaaaa' },
   description: { ar: 'وصف عربي', en: 'English description' },
   duration: { kind: 'permanent' },
   featured: false,
@@ -32,6 +33,11 @@ describe('store editor policy', () => {
     expect(validateStoreCatalogDraft({ ...validDraft, availability: 'disabled', featured: true }, 'Hide item', true, true)).toContain('لا يمكن عرض عنصر متوقف كبطاقة مميّزة في واجهة المتجر.');
   });
 
+  it('requires an explicit asset for every dashboard-authored cosmetic', () => {
+    expect(validateStoreCatalogDraft({ ...validDraft, cosmeticAsset: undefined }, 'New cosmetic', true, true))
+      .toContain('Select one exact approved cosmetic asset version.');
+  });
+
   it('requires exact couple-effect authoring with at least one enabled surface', () => {
     const couple: StoreCatalogDraft = {
       ...validDraft,
@@ -47,7 +53,7 @@ describe('store editor policy', () => {
     expect(validateStoreCatalogDraft({
       ...couple,
       cosmeticAsset: undefined,
-    }, 'Wave 8 review', true, true)).toContain('Select one exact approved couple-effect asset version.');
+    }, 'Wave 8 review', true, true)).toContain('Select one exact approved cosmetic asset version.');
   });
 
   it('creates isolated immutable asset paths', () => {

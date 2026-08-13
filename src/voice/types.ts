@@ -1,5 +1,6 @@
 import { VoiceRoom } from '../types/voice';
 import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
+import type { StatusPresentation } from '../status/statusPresentation';
 import type { RoomReactionEnvelope } from './roomAmbientReactions';
 
 export type VoiceConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -18,6 +19,7 @@ export type VoiceParticipant = {
   avatarFrameAssetVersionId?: string;
   avatarFrameItemId?: string;
   representativeBadgeActive?: boolean;
+  statusPresentation?: StatusPresentation;
   equipmentCosmetics?: EquipmentCosmetics;
 };
 

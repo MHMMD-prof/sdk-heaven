@@ -58,6 +58,7 @@ export type QueuedRoomEffect = {
   animationEnabled?: boolean;
   audioEnabled?: boolean;
   customSource?: boolean;
+  statusSource?: boolean;
   soundUrl?: string;
   theaterKind?: 'standard' | 'combo' | 'storm' | 'lucky' | 'magic';
   thumbnailUrl?: string;
@@ -442,6 +443,7 @@ export function mapRoomEventDocument(
     audioEnabled: payload.audioEnabled === true,
     ...(copy ? { copy } : {}),
     ...(payload.customSource === true ? { customSource: true } : {}),
+    ...(payload.statusSource === true ? { statusSource: true } : {}),
     durationMs,
     eventId,
     expiresAtMs,

@@ -12,6 +12,30 @@ export type AdminDashboardSession = {
 
 export type AdminRole = 'owner' | 'super-moderator' | 'moderator' | 'support' | 'catalog-manager' | 'auditor';
 
+export type AdminStatusOperations = {
+  generatedAtMillis: number;
+  flags: Record<string, boolean>;
+  catalogs: { vip: string; aristocracy: string };
+  queues: { deadLetterCount: number; oldestQueuedAgeMs: number; projectionDeadLetters: number; projectionQueued: number; sourceDeadLetters: number; sourceQueued: number; sampled: boolean };
+  authority: { vipAccountsSampled: number; aristocracyEntitlementsSampled: number; sampleLimit: number; vipDistribution: Record<string, number>; aristocracyDistribution: Record<string, number> };
+  pendingProposals: Array<{ proposalId: string; kind: string; operation: string; initiatedBy: string; targetUid: string; createdAtMillis: number }>;
+  alerts: Array<{ alertId: string; code: string; severity: string; state: string; createdAtMillis: number }>;
+  reconciliation: { dirty: boolean; consecutiveDriftRuns: number; completedAtMillis: number; vip: unknown; aristocracy: unknown };
+  migration: { assessed: boolean; required: boolean; verified: boolean; userCount: number; snapshotHash: string; catalogVersion: string };
+  signoffs: Record<'product' | 'economy' | 'security' | 'support' | 'qa', boolean>;
+  readiness: { blockers: string[]; canActivate: boolean; directActivationEligible: boolean; publicFeaturesCurrentlyOff: boolean };
+};
+
+export type AdminStatusInspection = {
+  uid: string;
+  profile: null | { displayName: string; moderationStatus: string; publicId: string; statusPresentation: unknown };
+  wallet: { coins: number; diamonds: number };
+  vip: null | Record<string, unknown>;
+  aristocracy: null | Record<string, unknown>;
+  visibility: 'public' | 'hidden';
+  histories: Record<'contributions' | 'transitions' | 'aristocracy' | 'commands' | 'quotes', Array<Record<string, unknown>>>;
+};
+
 export type AdminPageInfo = {
   hasNextPage: boolean | null;
   limit: number;
@@ -240,6 +264,7 @@ export type AdminCosmeticAssetVersion = {
   id: string;
   assetId: string;
   assetVersionId: string;
+  audioCodec?: string;
   audioAssetId?: string;
   audioAssetVersionId?: string;
   byteSize: number;
@@ -252,9 +277,13 @@ export type AdminCosmeticAssetVersion = {
   format: string;
   frameRate: number;
   height: number;
+  loop?: boolean;
+  performanceTier?: 'low' | 'standard' | 'high';
   sha256: string;
   storagePath: string;
   transparent: boolean;
+  usage?: 'static' | 'looping' | 'one-shot';
+  videoCodec?: string;
   width: number;
 };
 
@@ -273,6 +302,26 @@ export type AdminCosmeticAssetDetail = {
   asset: AdminCosmeticAssetSummary | null;
   approvals: AdminCosmeticAssetApproval[];
   versions: AdminCosmeticAssetVersion[];
+};
+
+export type AdminPublishedCosmeticAssetOption = {
+  assetId: string;
+  assetVersionId: string;
+  audioAssetId: string;
+  audioAssetVersionId: string;
+  byteSize: number;
+  category: string;
+  durationMs: number;
+  fallbackAssetId: string;
+  fallbackAssetVersionId: string;
+  format: string;
+  frameRate: number;
+  height: number;
+  loop: boolean;
+  performanceTier: string;
+  storagePath: string;
+  transparent: boolean;
+  width: number;
 };
 
 export type AdminRocketAsset = {
@@ -1507,6 +1556,45 @@ export async function requestAdminOverview(user: User): Promise<AdminOverviewMet
   return overview;
 }
 
+export async function requestAdminStatusOperations(user: User): Promise<AdminStatusOperations> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean; operations?: AdminStatusOperations }>(user, { action: 'status-operations' });
+  if (payload.ok !== true || !payload.operations) throw new Error(payload.error || 'Status operations are unavailable.');
+  return payload.operations;
+}
+
+export async function requestAdminStatusUserInspection(user: User, targetUid: string): Promise<AdminStatusInspection> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean; inspection?: AdminStatusInspection }>(user, { action: 'status-user-inspect', targetUid });
+  if (payload.ok !== true || !payload.inspection) throw new Error(payload.error || 'Status user inspection is unavailable.');
+  return payload.inspection;
+}
+
+export async function proposeAdminStatusOperation(user: User, input: {
+  operation: 'vip-point-correction' | 'activate-catalog' | 'set-feature-flags' | 'set-signoffs' | 'set-migration-state'
+    | 'complimentary-grant' | 'revoke' | 'freeze' | 'unfreeze';
+  targetUid?: string; pointDelta?: number; catalogKind?: 'vip-svip' | 'aristocracy'; catalogVersion?: string;
+  flags?: Record<string, boolean>; signoffs?: Record<string, boolean>; migration?: { required: boolean; verified: boolean; userCount: number; snapshotHash: string; catalogVersion: string }; rankId?: string; durationDays?: number;
+  reason: string; evidenceRef: string;
+}): Promise<{ proposalId: string; state: string }> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean; proposalId?: string; state?: string }>(user, { action: 'status-operation-propose', ...input, requestId: crypto.randomUUID() });
+  if (payload.ok !== true || !payload.proposalId || !payload.state) throw new Error(payload.error || 'Status operation proposal failed.');
+  return { proposalId: payload.proposalId, state: payload.state };
+}
+
+export async function approveAdminStatusOperation(user: User, proposalId: string): Promise<void> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean }>(user, { action: 'status-operation-approve', proposalId });
+  if (payload.ok !== true) throw new Error(payload.error || 'Status operation approval failed.');
+}
+
+export async function freezeAdminStatusFeatures(user: User, flags: Record<string, false>, reason: string): Promise<void> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean }>(user, { action: 'status-emergency-freeze', flags, reason, requestId: crypto.randomUUID() });
+  if (payload.ok !== true) throw new Error(payload.error || 'Emergency status freeze failed.');
+}
+
+export async function reconcileAdminStatus(user: User, reason: string): Promise<void> {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean }>(user, { action: 'status-reconcile', reason, requestId: crypto.randomUUID() });
+  if (payload.ok !== true) throw new Error(payload.error || 'Status reconciliation failed.');
+}
+
 export async function requestAdminAuditEvents(
   user: User,
   filters: AdminAuditFilters,
@@ -1747,6 +1835,34 @@ export async function requestAdminCosmeticAssets(
     throw new Error(payload.error || 'Cosmetics asset registry is unavailable.');
   }
   return payload.registry;
+}
+
+export async function requestAdminPublishedCosmeticAssetOptions(
+  user: User,
+  input: { category: string; cursor?: string; formats: string[]; limit?: number },
+): Promise<{ items: AdminPublishedCosmeticAssetOption[]; pageInfo: { hasNextPage: boolean; nextCursor: string } }> {
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    items?: AdminPublishedCosmeticAssetOption[];
+    ok?: boolean;
+    pageInfo?: { hasNextPage?: boolean; nextCursor?: string };
+  }>(user, {
+    action: 'cosmetic-asset-options',
+    category: input.category,
+    cursor: input.cursor || '',
+    formats: input.formats,
+    limit: input.limit || 20,
+  });
+  if (payload.ok !== true || !Array.isArray(payload.items)) {
+    throw new Error(payload.error || 'Compatible cosmetic assets are unavailable.');
+  }
+  return {
+    items: payload.items,
+    pageInfo: {
+      hasNextPage: payload.pageInfo?.hasNextPage === true,
+      nextCursor: payload.pageInfo?.nextCursor || '',
+    },
+  };
 }
 
 export async function mutateAdminCosmeticAsset(
@@ -2634,6 +2750,12 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
     | ({ action: 'audit-events' } & Required<AdminAuditFilters>)
     | ({ action: 'audit-export' } & Omit<Required<AdminAuditFilters>, 'cursor'>)
     | { action: 'audit-detail'; eventId: string }
+    | { action: 'status-operations' }
+    | { action: 'status-user-inspect'; targetUid: string }
+    | { action: 'status-operation-propose'; operation: 'vip-point-correction' | 'activate-catalog' | 'set-feature-flags' | 'set-signoffs' | 'set-migration-state' | 'complimentary-grant' | 'revoke' | 'freeze' | 'unfreeze'; targetUid?: string; pointDelta?: number; catalogKind?: 'vip-svip' | 'aristocracy'; catalogVersion?: string; flags?: Record<string, boolean>; signoffs?: Record<string, boolean>; migration?: { required: boolean; verified: boolean; userCount: number; snapshotHash: string; catalogVersion: string }; rankId?: string; durationDays?: number; reason: string; evidenceRef: string; requestId: string }
+    | { action: 'status-operation-approve'; proposalId: string }
+    | { action: 'status-emergency-freeze'; flags: Record<string, false>; reason: string; requestId: string }
+    | { action: 'status-reconcile'; reason: string; requestId: string }
     | { action: 'client-error'; message: string; requestId: string; route: string; source: string; stack: string }
     | { action: 'push-audience-estimate'; audience: AdminPushAudience }
     | { action: 'push-campaigns-list' }
@@ -2642,6 +2764,8 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
     | { action: 'ops-events-mutate'; endsAtMs?: number; eventId?: string; operation: 'publish' | 'retire'; reason: string; requestId: string; startsAtMs?: number; themeAr?: string; titleAr?: string }
     | { action: 'admin-settings' | 'administrators' | 'audit-summary' | 'daily-login-campaign' | 'overview' | 'payroll-overview' | 'report-summary' | 'rocket-campaign' | 'room-target-campaign' | 'room-summary' | 'session' | 'store-summary' | 'user-summary' | 'weekly-incentive-integrity' }
     | { action: 'attendance-shadow'; targetUid: string }
+    | { action: 'account-deletion-jobs' }
+    | { action: 'account-deletion-retry'; requestId: string; targetUid: string }
     | { action: 'attendance-outage-mutate'; endAtMillis: number; operation: 'create' | 'revoke'; outageId: string; reason: string; requestId: string; startAtMillis: number }
     | ({ action: 'payroll-mutate'; requestId: string } & (
       | { operation: 'upsert-plan'; plan: AdminPayrollPlan; reason: string }
@@ -2676,6 +2800,7 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
     | { action: 'store-item-detail'; itemId: string }
     | { action: 'store-catalog-upsert'; entryPhysicalApproval?: AdminEntryPhysicalApproval; expectedUpdatedAt: string; item: Omit<AdminStoreCatalogItem, 'createdAt' | 'lastEditorEmail' | 'lastEditorUid' | 'updatedAt'>; reason: string; requestId: string }
     | { action: 'cosmetic-assets'; assetId: string; category: string; moderationStatus: string; publicationStatus: string }
+    | { action: 'cosmetic-asset-options'; category: string; cursor: string; formats: string[]; limit: number }
     | {
       action: 'cosmetic-assets-mutate';
       asset?: {

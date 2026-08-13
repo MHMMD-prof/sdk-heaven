@@ -35,6 +35,8 @@ import { resolveRoomThemeAssetSource } from '../../voice/roomThemeRuntime';
 import { RepresentativeBadge } from '../RepresentativeBadge';
 import { AvatarFrameLayer } from '../AvatarPresentation';
 import { EquipmentCosmeticAsset } from '../EquipmentCosmeticAsset';
+import { StatusBadgeRow } from '../status/StatusBadgeRow';
+import { StatusBenefitAsset } from '../status/StatusBenefitAsset';
 
 const SEAT_WIDTH = 70;
 const SEAT_HEIGHT = 96;
@@ -260,6 +262,9 @@ function Seat({
         />
       ) : null}
       <View style={styles.seatVisual}>
+        {isOccupied ? (
+          <StatusBenefitAsset flags={cosmeticsFlags} presentation={seat.participant?.statusPresentation} slot="frame" style={styles.statusFrame} />
+        ) : null}
         {isOccupied && seat.isSpeaking ? (
           <Animated.View
             pointerEvents="none"
@@ -372,6 +377,7 @@ function Seat({
         >
           {seat.participant?.displayName || presentation.secondaryLabel || ''}
         </Text>
+        {isOccupied ? <StatusBadgeRow compact presentation={seat.participant?.statusPresentation} style={styles.statusBadgeRow} /> : null}
         {isOccupied ? (
           <EquipmentCosmeticAsset
             category="cosmetic-badge"
@@ -706,6 +712,8 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   seatNameplate: { bottom: 0, left: 0, opacity: 0.68, position: 'absolute', right: 0, top: 0 },
+  statusFrame: { height: 58, left: '50%', marginLeft: -29, marginTop: -29, position: 'absolute', top: '50%', width: 58, zIndex: 1 },
+  statusBadgeRow: { marginLeft: 2, maxWidth: 38 },
   seatCosmeticBadge: { height: 14, width: 14 },
   targetedGift: {
     alignItems: 'center',

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const {
   getAdminCosmeticsAssets,
+  getAdminPublishedCosmeticAssetOptions,
   mutateAdminCosmeticsAsset,
   reconcileCosmeticAssetRegistryBatch,
 } = require('./adminCosmeticsAssetService');
@@ -38,6 +39,111 @@ describe('admin cosmetics asset service', () => {
 
     expect(result.assets).toHaveLength(1);
     expect(result.assets[0].id).toBe('frame-one');
+  });
+
+  it('paginates only exact approved, published, compatible versions', async () => {
+    const summaries = [
+      optionSummary('gift-a', 'v1-aaaaaaaaaaaa'),
+      optionSummary('gift-b', 'v1-bbbbbbbbbbbb'),
+      optionSummary('gift-c', 'v1-cccccccccccc'),
+      optionSummary('gift-disabled', 'v1-dddddddddddd', { renderingEnabled: false }),
+      optionSummary('gift-pending', 'v1-eeeeeeeeeeee', { moderationStatus: 'pending' }),
+      optionSummary('gift-unpublished', 'v1-111111111111', { publicationStatus: 'unpublished' }),
+      optionSummary('gift-stale', 'v1-222222222222', { approvedVersionId: 'v1-333333333333' }),
+    ];
+    const records = new Map();
+    for (const document of summaries) {
+      const data = document.data();
+      const version = {
+        assetId: document.id, assetVersionId: data.publishedVersionId, category: 'gift-effect', durationMs: 3000,
+        fallbackAssetId: `${document.id}-fallback`, fallbackAssetVersionId: 'v1-ffffffffffff',
+        audioCodec: '', byteSize: 1000, format: document.id === 'gift-b' ? 'lottie-json' : 'mp4', frameRate: 30,
+        height: 720, loop: false, sha256: `${document.id}-sum`, storagePath: `cosmetic-assets/platform/${document.id}/${data.publishedVersionId}/source.mp4`,
+        transparent: document.id === 'gift-b', usage: 'one-shot', videoCodec: document.id === 'gift-b' ? '' : 'h264', width: 1280,
+      };
+      records.set(`cosmeticAssets/${document.id}/versions/${data.publishedVersionId}`, snapshot(data.publishedVersionId, version));
+      records.set(`cosmeticAssetApprovals/${document.id}__${data.publishedVersionId}`, snapshot(`${document.id}__${data.publishedVersionId}`, {
+        assetId: document.id, assetVersionId: data.publishedVersionId, checksum: version.sha256, decision: 'approved',
+      }));
+      const fallbackId = version.fallbackAssetId;
+      const fallbackVersionId = version.fallbackAssetVersionId;
+      records.set(`cosmeticAssets/${fallbackId}`, snapshot(fallbackId, {
+        approvalId: `${fallbackId}__${fallbackVersionId}`, approvedVersionId: fallbackVersionId,
+        moderationStatus: 'approved', publicationStatus: 'published', publishedVersionId: fallbackVersionId, renderingEnabled: true,
+      }));
+      records.set(`cosmeticAssets/${fallbackId}/versions/${fallbackVersionId}`, snapshot(fallbackVersionId, {
+        assetId: fallbackId, assetVersionId: fallbackVersionId, category: 'gift-effect', durationMs: 0, format: 'png', height: 720,
+        loop: false, sha256: `${fallbackId}-sum`, usage: 'static', width: 1280,
+      }));
+      records.set(`cosmeticAssetApprovals/${fallbackId}__${fallbackVersionId}`, snapshot(`${fallbackId}__${fallbackVersionId}`, {
+        assetId: fallbackId, assetVersionId: fallbackVersionId, checksum: `${fallbackId}-sum`, decision: 'approved',
+      }));
+    }
+    const query = { get: async () => ({ docs: summaries }), limit: () => query, orderBy: () => query, startAfter: () => query, where: () => query };
+    const db = {
+      collection: () => query,
+      doc: (path) => ({ path }),
+      getAll: async (...references) => references.map((reference) => records.get(reference.path) || snapshot(reference.path)),
+    };
+
+    const first = await getAdminPublishedCosmeticAssetOptions({ db, input: { category: 'gift-effect', cursor: '', formats: ['mp4'], limit: 1 } });
+    expect(first.items.map((item) => item.assetId)).toEqual(['gift-a']);
+    expect(first.pageInfo).toEqual({ hasNextPage: true, nextCursor: 'gift-a' });
+    const second = await getAdminPublishedCosmeticAssetOptions({ db, input: { category: 'gift-effect', cursor: first.pageInfo.nextCursor, formats: ['mp4'], limit: 2 } });
+    expect(second.items.map((item) => item.assetId)).toEqual(['gift-c']);
+    expect(second.pageInfo.hasNextPage).toBe(false);
+  });
+
+  it('excludes sensitive animated bundles whose fallback lacks safety attestations', async () => {
+    const primaryId = 'safe-nameplate-motion';
+    const primaryVersionId = 'v1-aaaaaaaaaaaa';
+    const fallbackId = 'safe-nameplate-fallback';
+    const fallbackVersionId = 'v1-bbbbbbbbbbbb';
+    const summaries = [snapshot(primaryId, {
+      approvalId: `${primaryId}__${primaryVersionId}`,
+      approvedVersionId: primaryVersionId,
+      category: 'nameplate',
+      moderationStatus: 'approved',
+      publicationStatus: 'published',
+      publishedVersionId: primaryVersionId,
+      renderingEnabled: true,
+    })];
+    const records = new Map([
+      [`cosmeticAssets/${primaryId}/versions/${primaryVersionId}`, snapshot(primaryVersionId, {
+        assetId: primaryId, assetVersionId: primaryVersionId, category: 'nameplate',
+        fallbackAssetId: fallbackId, fallbackAssetVersionId: fallbackVersionId,
+        format: 'lottie-json', loop: true, sha256: 'primary-sum', usage: 'looping',
+      })],
+      [`cosmeticAssetApprovals/${primaryId}__${primaryVersionId}`, snapshot(`${primaryId}__${primaryVersionId}`, {
+        assetId: primaryId, assetVersionId: primaryVersionId, authoritySeparationPassed: true,
+        checksum: 'primary-sum', decision: 'approved', readableIdentityPassed: true,
+      })],
+      [`cosmeticAssets/${fallbackId}`, snapshot(fallbackId, {
+        approvalId: `${fallbackId}__${fallbackVersionId}`, approvedVersionId: fallbackVersionId,
+        moderationStatus: 'approved', publicationStatus: 'published', publishedVersionId: fallbackVersionId,
+        renderingEnabled: true,
+      })],
+      [`cosmeticAssets/${fallbackId}/versions/${fallbackVersionId}`, snapshot(fallbackVersionId, {
+        assetId: fallbackId, assetVersionId: fallbackVersionId, category: 'nameplate', durationMs: 0,
+        format: 'png', loop: false, sha256: 'fallback-sum', usage: 'static',
+      })],
+      [`cosmeticAssetApprovals/${fallbackId}__${fallbackVersionId}`, snapshot(`${fallbackId}__${fallbackVersionId}`, {
+        assetId: fallbackId, assetVersionId: fallbackVersionId, checksum: 'fallback-sum', decision: 'approved',
+      })],
+    ]);
+    const query = { get: async () => ({ docs: summaries }), limit: () => query, orderBy: () => query, startAfter: () => query, where: () => query };
+    const db = {
+      collection: () => query,
+      doc: (path) => ({ path }),
+      getAll: async (...references) => references.map((reference) => records.get(reference.path) || snapshot(reference.path)),
+    };
+
+    const result = await getAdminPublishedCosmeticAssetOptions({
+      db,
+      input: { category: 'nameplate', cursor: '', formats: ['lottie-json'], limit: 20 },
+    });
+
+    expect(result.items).toEqual([]);
   });
 
   it('dry-runs reconciliation and disables only invalid published pointers on apply', async () => {
@@ -182,6 +288,13 @@ function registryDocument(id, versionId, valid) {
       id,
     },
   };
+}
+
+function optionSummary(id, versionId, overrides = {}) {
+  return snapshot(id, {
+    approvalId: `${id}__${versionId}`, approvedVersionId: versionId, category: 'gift-effect', moderationStatus: 'approved',
+    publicationStatus: 'published', publishedVersionId: versionId, renderingEnabled: true, ...overrides,
+  });
 }
 
 function transactionalDb(seed) {

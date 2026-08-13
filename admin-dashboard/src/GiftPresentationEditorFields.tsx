@@ -1,5 +1,8 @@
+import type { User } from 'firebase/auth';
 import type { AdminGiftCatalogItem } from './adminDashboardApi';
 import { BottomEffectStagePreview } from './BottomEffectStagePreview';
+import { CosmeticAssetField } from './CosmeticAssetField';
+import { giftAssetRequirement } from './cosmeticAssetAuthoring';
 
 export type GiftPhysicalApprovalDraft = {
   androidDevice: string;
@@ -35,17 +38,15 @@ export const defaultStrictAnimatedPresentation: AdminGiftCatalogItem['presentati
   visualFormat: 'mp4',
 };
 
-export function GiftPresentationEditorFields({ approval, itemNameAr, onApprovalChange, onChange, value }: {
+export function GiftPresentationEditorFields({ approval, initialAssetId, itemNameAr, onApprovalChange, onChange, user, value }: {
   approval: GiftPhysicalApprovalDraft;
+  initialAssetId?: string;
   itemNameAr: string;
   onApprovalChange: (value: GiftPhysicalApprovalDraft) => void;
   onChange: (value: AdminGiftCatalogItem['presentation']) => void;
+  user: User;
   value: AdminGiftCatalogItem['presentation'];
 }) {
-  const setReference = (kind: 'visualAsset' | 'fallbackAsset' | 'audioAsset', field: 'assetId' | 'assetVersionId', next: string) => {
-    const current = value[kind] || { assetId: '', assetVersionId: '' };
-    onChange({ ...value, [kind]: { ...current, [field]: next.trim() } });
-  };
   return <>
     <label className="field span-2 economy-checkbox">
       <span>عرض متحرك للهدية</span>
@@ -100,40 +101,22 @@ export function GiftPresentationEditorFields({ approval, itemNameAr, onApprovalC
       </select>
     </label>
     {value.animationEnabled ? <>
-      <label className="field">
-        <span>صيغة العرض</span>
-        <select value={value.visualFormat || ''} onChange={(event) => onChange({ ...value, visualFormat: event.target.value as 'mp4' | 'lottie-json' })}>
-          <option value="">تُستنتج من الأصل</option>
-          <option value="mp4">MP4</option>
-          <option value="lottie-json">Lottie</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>معرّف الأصل المرئي</span>
-        <input dir="ltr" required value={value.visualAsset?.assetId || ''} onChange={(event) => setReference('visualAsset', 'assetId', event.target.value)} />
-      </label>
-      <label className="field">
-        <span>إصدار الأصل المرئي</span>
-        <input dir="ltr" required value={value.visualAsset?.assetVersionId || ''} onChange={(event) => setReference('visualAsset', 'assetVersionId', event.target.value)} />
-      </label>
-      <label className="field">
-        <span>معرّف أصل الاحتياط (PNG/JPEG)</span>
-        <input dir="ltr" required value={value.fallbackAsset?.assetId || ''} onChange={(event) => setReference('fallbackAsset', 'assetId', event.target.value)} />
-      </label>
-      <label className="field">
-        <span>إصدار أصل الاحتياط</span>
-        <input dir="ltr" required value={value.fallbackAsset?.assetVersionId || ''} onChange={(event) => setReference('fallbackAsset', 'assetVersionId', event.target.value)} />
-      </label>
-      {value.soundPolicy !== 'off' ? <>
-        <label className="field">
-          <span>معرّف أصل الصوت</span>
-          <input dir="ltr" required value={value.audioAsset?.assetId || ''} onChange={(event) => setReference('audioAsset', 'assetId', event.target.value)} />
-        </label>
-        <label className="field">
-          <span>إصدار أصل الصوت</span>
-          <input dir="ltr" required value={value.audioAsset?.assetVersionId || ''} onChange={(event) => setReference('audioAsset', 'assetVersionId', event.target.value)} />
-        </label>
-      </> : null}
+      <CosmeticAssetField
+        initialAssetId={initialAssetId || 'gift-effect'}
+        onSelect={(bundle) => onChange({
+          ...value,
+          audioAsset: bundle.audio,
+          durationMs: bundle.durationMs || value.durationMs,
+          fallbackAsset: bundle.fallback,
+          performanceTier: bundle.performanceTier || value.performanceTier,
+          soundPolicy: bundle.audio ? (value.soundPolicy === 'off' ? 'soft' : value.soundPolicy) : 'off',
+          visualAsset: bundle.primary,
+          visualFormat: bundle.format as 'lottie-json' | 'mp4',
+        })}
+        reference={value.visualAsset}
+        requirement={giftAssetRequirement}
+        user={user}
+      />
       <div className="span-2 gift-presentation-preview">
         <strong>إيصال معاينة غير قابل للتعديل بالإصدار الدقيق</strong>
         <code dir="ltr">{value.visualAsset?.assetId || 'visual'} / {value.visualAsset?.assetVersionId || 'version'}</code>
