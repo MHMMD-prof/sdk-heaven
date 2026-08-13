@@ -1,60 +1,113 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../../theme';
 import type { RewardBundleV1 } from '../../voice/weeklyIncentiveContract';
 import type { RoomRocketData } from '../../voice/useRoomRocketData';
 import type { RoomSupportLeaderboardEntryV1 } from '../../voice/roomSupportLeaderboardContract';
+import type { RoomThemeManifest } from '../../voice/roomThemeContract';
+import { resolveRoomRocketRailSummary } from '../../voice/roomIncentivePresentationModel';
 import { RoomSheet } from './VoiceRoomSheets';
 import { AvatarPresentation } from '../AvatarPresentation';
 import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
 
 export function RoomRocketButton({
+  cosmeticsFlags,
   data,
+  manifest,
   onPress,
 }: {
+  cosmeticsFlags: CosmeticsFeatureFlags;
   data: RoomRocketData;
+  manifest: RoomThemeManifest;
   onPress: () => void;
 }) {
   if (!data.renderingEnabled) return null;
-  const progress = resolveProgress(data);
+  const summary = resolveRoomRocketRailSummary(data);
+  const rankingsOnly = !data.campaignAvailable;
   const unlocked = data.cycle?.state !== 'active' && Boolean(data.cycle);
   return (
     <Pressable
-      accessibilityHint="يعرض هدف الصاروخ وترتيب داعمي الغرفة"
-      accessibilityLabel={`صاروخ الغرفة، ${Math.round(progress * 100)} بالمئة`}
+      accessibilityHint={rankingsOnly ? 'يعرض ترتيب داعمي الغرفة اليومي والأسبوعي' : 'يعرض هدف الصاروخ وترتيب داعمي الغرفة'}
+      accessibilityLabel={rankingsOnly ? `أفضل الداعمين، ${summary.supporters.length} في المراكز الثلاثة الأولى` : `صاروخ الغرفة، ${summary.progressPercent} بالمئة، ${summary.supporters.length} من أفضل الداعمين`}
       accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => [styles.launcher, pressed && styles.pressed]}
     >
-      <LinearGradient colors={['#8E1725', '#41080E', '#150305']} style={styles.launcherCore}>
-        <Text style={styles.launcherIcon}>{unlocked ? '✨' : '🚀'}</Text>
+      <LinearGradient
+        colors={[manifest.colors.rubyBright, manifest.colors.ruby, manifest.colors.panel]}
+        style={[styles.launcherCore, { borderColor: manifest.colors.goldSoft, shadowColor: manifest.colors.rubyBright }]}
+      >
+        <Text style={styles.launcherIcon}>{unlocked && !rankingsOnly ? '✨' : '🚀'}</Text>
+        <Text style={[styles.launcherPercent, { color: manifest.colors.text }]}>
+          {rankingsOnly ? 'TOP 3' : `${summary.progressPercent}٪`}
+        </Text>
       </LinearGradient>
+      <MiniSupporterStack cosmeticsFlags={cosmeticsFlags} entries={summary.supporters} manifest={manifest} />
       <View style={styles.launcherCopy}>
-        <Text style={styles.launcherLabel}>الصاروخ</Text>
-        <View style={styles.miniTrack}>
-          <View style={[styles.miniFill, { width: `${Math.max(3, progress * 100)}%` }]} />
-        </View>
+        <Text style={[styles.launcherLabel, { color: manifest.colors.goldSoft }]}>
+          {rankingsOnly ? 'الصاروخ · TOP 3' : 'دعم الأسبوع'}
+        </Text>
+        {!rankingsOnly ? (
+          <View style={[styles.miniTrack, { backgroundColor: `${manifest.colors.panelRaised}F2` }]}>
+            <View style={[styles.miniFill, { backgroundColor: manifest.colors.gold, width: `${Math.max(3, summary.progress * 100)}%` }]} />
+          </View>
+        ) : null}
       </View>
     </Pressable>
+  );
+}
+
+function MiniSupporterStack({
+  cosmeticsFlags,
+  entries,
+  manifest,
+}: {
+  cosmeticsFlags: CosmeticsFeatureFlags;
+  entries: RoomSupportLeaderboardEntryV1[];
+  manifest: RoomThemeManifest;
+}) {
+  if (!entries.length) {
+    return <Text style={[styles.miniEmpty, { color: manifest.colors.textMuted }]}>TOP 3</Text>;
+  }
+  return (
+    <View accessibilityLabel="أفضل ثلاثة داعمين هذا الأسبوع" style={styles.miniSupporters}>
+      {entries.map((entry, index) => (
+        <View key={entry.uid} style={[styles.miniAvatarShell, index > 0 && styles.miniAvatarOverlap, { borderColor: manifest.colors.gold }]}>
+          <AvatarPresentation
+            avatarUrl={entry.avatarUrl}
+            flags={cosmeticsFlags}
+            frame={entry.avatarFrame}
+            label={entry.avatarLabel || entry.displayName}
+            size={19}
+            viewerMode="reduced"
+          />
+          <Text style={[styles.miniRank, { backgroundColor: manifest.colors.rubyBright, color: manifest.colors.text }]}>{entry.rank}</Text>
+        </View>
+      ))}
+    </View>
   );
 }
 
 export function RoomRocketSheet({
   cosmeticsFlags,
   data,
+  initialFocus = 'rocket',
   payoutsEnabled,
   visible,
   onClose,
 }: {
   cosmeticsFlags: CosmeticsFeatureFlags;
   data: RoomRocketData;
+  initialFocus?: 'rocket' | 'supporters';
   payoutsEnabled: boolean;
   visible: boolean;
   onClose: () => void;
 }) {
+  const scrollRef = useRef<ScrollView>(null);
+  const leaderboardOffset = useRef(0);
   const [tab, setTab] = useState<'today' | 'week'>('week');
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -62,6 +115,17 @@ export function RoomRocketSheet({
     const timer = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(timer);
   }, [visible]);
+  useEffect(() => {
+    if (!visible) return;
+    if (initialFocus === 'supporters') setTab('week');
+    const frame = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        animated: false,
+        y: initialFocus === 'supporters' ? leaderboardOffset.current : 0,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [initialFocus, visible]);
   const leaderboard = tab === 'today' ? data.today : data.week;
   const progress = resolveProgress(data);
   const rewards = useMemo(
@@ -71,21 +135,27 @@ export function RoomRocketSheet({
   const endAtMillis = data.cycle?.endAtMillis || nextBaghdadWeekMillis(now);
   const state = data.cycle?.state || 'active';
   const unlocked = state !== 'active' && state !== 'missed';
+  const rankingsOnly = !data.campaignAvailable;
 
   return (
-    <RoomSheet onClose={onClose} title="صاروخ الغرفة" visible={visible}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <RoomSheet onClose={onClose} title={rankingsOnly ? 'الصاروخ وأفضل الداعمين' : 'صاروخ الغرفة'} visible={visible}>
+      <ScrollView contentContainerStyle={styles.content} ref={scrollRef} showsVerticalScrollIndicator={false}>
         <LinearGradient colors={['#3A070C', '#130306', '#050203']} style={styles.hero}>
           <View style={styles.heroHalo} />
           <Text accessibilityLabel="صاروخ" style={styles.heroRocket}>🚀</Text>
           <View style={styles.heroCopy}>
-            <Text style={styles.eyebrow}>هدف أسبوعي عالمي</Text>
-            <Text style={styles.heroTitle}>{data.cycle?.appearance.name.ar || data.template?.appearance.name.ar || 'صاروخ الغرفة'}</Text>
-            <Text style={styles.countdown}>ينتهي خلال {formatCountdown(endAtMillis - now)}</Text>
+            <Text style={styles.eyebrow}>{rankingsOnly ? 'الترتيب المباشر للغرفة' : 'هدف أسبوعي عالمي'}</Text>
+            <Text style={styles.heroTitle}>{rankingsOnly ? 'أفضل الداعمين' : data.cycle?.appearance.name.ar || data.template?.appearance.name.ar || 'صاروخ الغرفة'}</Text>
+            <Text style={styles.countdown}>{rankingsOnly ? 'ترتيب يومي وأسبوعي' : `ينتهي خلال ${formatCountdown(endAtMillis - now)}`}</Text>
           </View>
         </LinearGradient>
 
-        <View accessibilityLiveRegion="polite" style={styles.progressCard}>
+        {rankingsOnly ? (
+          <View accessibilityLiveRegion="polite" style={styles.progressCard}>
+            <Text style={styles.progressHint}>ترتيب أفضل الداعمين فعّال الآن. ستظهر حملة الصاروخ والجوائز هنا تلقائياً بعد نشر رسوماتها المعتمدة من لوحة التحكم.</Text>
+            <Text style={styles.testNotice}>صرف الجوائز متوقف؛ لا يتم عرض هدف أو تقدم وهمي.</Text>
+          </View>
+        ) : <View accessibilityLiveRegion="polite" style={styles.progressCard}>
           <View style={styles.progressHeading}>
             <View style={[styles.statePill, unlocked && styles.statePillUnlocked]}>
               <Text style={styles.stateText}>{stateLabel(state)}</Text>
@@ -106,9 +176,9 @@ export function RoomRocketSheet({
             {unlocked ? 'تم فتح المكافآت لهذا الأسبوع.' : 'الهدايا المؤهلة في هذه الغرفة تزيد الوقود.'}
           </Text>
           {!payoutsEnabled ? <Text style={styles.testNotice}>العرض قيد الاختبار؛ صرف الجوائز متوقف حالياً.</Text> : null}
-        </View>
+        </View>}
 
-        <View style={styles.rewardsHeader}>
+        {!rankingsOnly ? <><View style={styles.rewardsHeader}>
           <Text style={styles.sectionTitle}>الجوائز الدقيقة</Text>
           <Text style={styles.sectionNote}>تُحسم المراتب بعد إغلاق الأسبوع</Text>
         </View>
@@ -117,9 +187,18 @@ export function RoomRocketSheet({
             const rank = index + 1;
             return <RewardCard bundle={rewards[String(rank) as '1' | '2' | '3']} key={rank} rank={rank} />;
           })}
-        </View>
+        </View></> : null}
 
-        <View accessibilityRole="tablist" style={styles.tabs}>
+        <View
+          accessibilityRole="tablist"
+          onLayout={(event) => {
+            leaderboardOffset.current = Math.max(0, event.nativeEvent.layout.y - spacing.sm);
+            if (visible && initialFocus === 'supporters') {
+              scrollRef.current?.scrollTo({ animated: false, y: leaderboardOffset.current });
+            }
+          }}
+          style={styles.tabs}
+        >
           <Tab active={tab === 'week'} label="هذا الأسبوع" onPress={() => setTab('week')} />
           <Tab active={tab === 'today'} label="اليوم" onPress={() => setTab('today')} />
         </View>
@@ -239,32 +318,38 @@ const styles = StyleSheet.create({
   content: { gap: spacing.md, paddingBottom: spacing.xl },
   launcher: {
     alignItems: 'center',
-    backgroundColor: 'rgba(10,3,5,0.96)',
-    borderColor: 'rgba(221,164,77,0.72)',
-    borderRadius: radius.full,
-    borderWidth: 1,
-    flexDirection: 'row-reverse',
-    gap: 8,
-    padding: 5,
-    paddingEnd: 10,
+    gap: 2,
+    minHeight: 91,
+    width: 58,
     shadowColor: '#E73348',
     shadowOpacity: 0.32,
     shadowRadius: 12,
   },
   launcherCore: {
     alignItems: 'center',
+    backgroundColor: 'rgba(10,3,5,0.96)',
     borderColor: colors.goldSoft,
     borderRadius: radius.full,
-    borderWidth: 1,
-    height: 40,
+    borderWidth: 1.5,
+    height: 47,
     justifyContent: 'center',
-    width: 40,
+    shadowColor: '#E73348',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.34,
+    shadowRadius: 9,
+    width: 47,
   },
-  launcherIcon: { fontSize: 21 },
-  launcherCopy: { gap: 3, width: 58 },
-  launcherLabel: { color: colors.goldSoft, fontSize: 10, fontWeight: typography.weights.black, textAlign: 'right' },
-  miniTrack: { backgroundColor: '#301419', borderRadius: radius.full, height: 4, overflow: 'hidden' },
+  launcherIcon: { fontSize: 18, marginTop: -3 },
+  launcherPercent: { bottom: 3, fontSize: 8, fontWeight: typography.weights.black, position: 'absolute' },
+  launcherCopy: { alignItems: 'center', gap: 2, width: 56 },
+  launcherLabel: { fontSize: 7, fontWeight: typography.weights.black, textAlign: 'center' },
+  miniTrack: { backgroundColor: '#301419', borderRadius: radius.full, height: 3, overflow: 'hidden', width: 34 },
   miniFill: { backgroundColor: '#F1B75D', borderRadius: radius.full, height: '100%' },
+  miniSupporters: { alignItems: 'center', flexDirection: 'row', justifyContent: 'center', minHeight: 23, paddingLeft: 8 },
+  miniAvatarShell: { backgroundColor: '#19080B', borderRadius: radius.full, borderWidth: 1, height: 21, width: 21 },
+  miniAvatarOverlap: { marginLeft: -7 },
+  miniRank: { borderRadius: radius.full, bottom: -2, fontSize: 5, fontWeight: typography.weights.black, height: 9, lineHeight: 9, position: 'absolute', right: -2, textAlign: 'center', width: 9 },
+  miniEmpty: { fontSize: 7, fontWeight: typography.weights.black, minHeight: 20, paddingTop: 5 },
   pressed: { opacity: 0.75, transform: [{ scale: 0.97 }] },
   hero: { borderColor: colors.borderGold, borderRadius: radius.xl, borderWidth: 1, minHeight: 130, overflow: 'hidden', padding: spacing.lg },
   heroHalo: { backgroundColor: 'rgba(229,47,67,0.2)', borderRadius: 100, height: 150, position: 'absolute', right: -30, top: -45, width: 150 },

@@ -98,6 +98,17 @@ describe('directChatCore shared contract', () => {
     }, 'uid-1')).toMatchObject({ code: 'MESSAGE_TOO_LONG', ok: false });
   });
 
+  it('strips adversarial unicode and bidi controls without inventing content', () => {
+    expect(normalizeDirectChatText('hi\u202Asecret\u202C')).toBe('hisecret');
+    expect(normalizeDirectChatText('\u2066admin\u2069')).toBe('admin');
+    expect(normalizeDirectChatText('a\u200Eb\u200Fc')).toBe('abc');
+    expect(normalizeDirectChatText('cafe\u0301')).toBe('café');
+    // ZWJ is kept so legitimate emoji sequences survive; only directional controls are stripped.
+    expect(normalizeDirectChatText('family\u200Demoji')).toBe('family\u200Demoji');
+    expect(normalizeDirectChatText('\uD800alone')).toBe('alone');
+    expect(normalizeDirectChatText('line1\r\n\r\n\r\nline2')).toBe('line1\n\nline2');
+  });
+
   it('provides a bounded Arabic-safe error for every command failure', () => {
     expect(DIRECT_CHAT_ACTIONS).toHaveLength(15);
     expect(Object.keys(DIRECT_CHAT_ERRORS).length).toBeGreaterThanOrEqual(20);

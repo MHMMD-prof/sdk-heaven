@@ -63,6 +63,7 @@ export function useRoomGameSession(roomId: string | undefined, enabled: boolean)
               }
               const nextSession: RoomGameSession = {
                 clientRoute: typeof data.clientRoute === 'string' ? data.clientRoute : '',
+                economy: mapRoomGameEconomy(data.economy),
                 expiresAtMs,
                 gameId: typeof data.gameId === 'string' ? data.gameId : '',
                 hostUid: typeof data.hostUid === 'string' ? data.hostUid : '',
@@ -118,4 +119,18 @@ function readMillis(value: unknown) {
     return value.toMillis();
   }
   return 0;
+}
+
+function mapRoomGameEconomy(value: unknown): RoomGameSession['economy'] {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  return {
+    currency: candidate.currency === 'diamonds' ? 'diamonds' : 'coins',
+    entryFeeCoins: Number.isInteger(candidate.entryFeeCoins) ? Number(candidate.entryFeeCoins) : 0,
+    poolCoins: Number.isInteger(candidate.poolCoins) ? Number(candidate.poolCoins) : 0,
+    prizeUid: typeof candidate.prizeUid === 'string' ? candidate.prizeUid : null,
+    settled: candidate.settled === true,
+    settlementKind: typeof candidate.settlementKind === 'string' ? candidate.settlementKind : null,
+    settlementMode: typeof candidate.settlementMode === 'string' ? candidate.settlementMode : null,
+  };
 }

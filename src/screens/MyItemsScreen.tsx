@@ -24,14 +24,10 @@ import {
 } from '../social/requestSocialCommand';
 import type { CustomerStoreCatalogItem, MyStoreItem } from '../social/types';
 import type { StoreCategory } from '../store/contracts';
-import {
-  isMockStoreItemId,
-  mockMyStoreItems,
-  mockStoreCatalogItems,
-} from '../store/mockStoreData';
 import { colors, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
 import { useCosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import { CustomCosmeticsPanel } from '../components/CustomCosmeticsPanel';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MyItems'>;
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -54,25 +50,14 @@ export function MyItemsScreen({ navigation }: Props) {
     try {
       const [catalog, inventory] = await Promise.all([requestStoreCatalog(), requestMyStoreItems()]);
 
-      if (!catalog.ok) {
-        setCatalogItems(mockStoreCatalogItems);
-      } else {
-        const realItemIds = new Set(catalog.result.items.map((item) => item.itemId));
-        const mockItems = mockStoreCatalogItems.filter((item) => !realItemIds.has(item.itemId));
-        setCatalogItems([...catalog.result.items, ...mockItems]);
-      }
-
-      if (!inventory.ok) {
-        setOwned(mockMyStoreItems);
-      } else {
-        const realOwnershipItemIds = new Set(inventory.result.items.map((row) => row.ownership.itemId));
-        const mockOwnerships = mockMyStoreItems.filter((row) => !realOwnershipItemIds.has(row.ownership.itemId));
-        setOwned([...inventory.result.items, ...mockOwnerships]);
-      }
-    } catch {
-      setCatalogItems(mockStoreCatalogItems);
-      setOwned(mockMyStoreItems);
-      setError('تعذر تحميل عناصرك. تحقق من الاتصال وحاول مرة أخرى.');
+      if (!catalog.ok) throw new Error(catalog.error.messageAr);
+      if (!inventory.ok) throw new Error(inventory.error.messageAr);
+      setCatalogItems(catalog.result.items);
+      setOwned(inventory.result.items);
+    } catch (loadError) {
+      setCatalogItems([]);
+      setOwned([]);
+      setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل عناصرك. تحقق من الاتصال وحاول مرة أخرى.');
     } finally {
       setLoading(false);
     }
@@ -90,19 +75,6 @@ export function MyItemsScreen({ navigation }: Props) {
   }, [selectedCategory]);
 
   async function equip(row: MyStoreItem) {
-    if (isMockStoreItemId(row.ownership.itemId)) {
-      setOwned((current) => current.map((entry) => ({
-        ...entry,
-        ownership: {
-          ...entry.ownership,
-          equipped: entry.ownership.category === row.ownership.category
-            ? entry.ownership.itemId === row.ownership.itemId
-            : entry.ownership.equipped,
-        },
-      })));
-      return;
-    }
-
     setBusy(`equip:${row.ownership.itemId}`);
     try {
       const response = await requestStoreEquip(row.ownership.itemId);
@@ -162,17 +134,20 @@ export function MyItemsScreen({ navigation }: Props) {
         ) : null}
 
         {!loading && !error ? (
-          <MyItemsEquipment
-            avatarLabel={profile?.avatarLabel || '؟'}
-            busy={busy}
-            catalogItems={catalogItems}
-            compact={compact}
-            cosmeticsFlags={cosmeticsFlags}
-            onEquip={(row) => void equip(row)}
-            onOpenCategory={setSelectedCategory}
-            owned={owned}
-            selectedCategory={selectedCategory}
-          />
+          <>
+            <MyItemsEquipment
+              avatarLabel={profile?.avatarLabel || '؟'}
+              busy={busy}
+              catalogItems={catalogItems}
+              compact={compact}
+              cosmeticsFlags={cosmeticsFlags}
+              onEquip={(row) => void equip(row)}
+              onOpenCategory={setSelectedCategory}
+              owned={owned}
+              selectedCategory={selectedCategory}
+            />
+            {!selectedCategory ? <CustomCosmeticsPanel /> : null}
+          </>
         ) : null}
       </View>
     </ScreenContainer>

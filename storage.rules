@@ -3,7 +3,8 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && (!request.auth.token.keys().hasAll(['accountDeletionPending']) || request.auth.token.accountDeletionPending != true);
     }
 
     function isOwner(userId) {
@@ -56,6 +57,21 @@ service firebase.storage {
       return /databases/(default)/documents/directConversations/$(conversationId);
     }
 
+    function directChatFeaturesPath() {
+      return /databases/(default)/documents/appConfig/socialFeatures;
+    }
+
+    function directMessagesEnabled() {
+      return signedIn()
+        && firestore.exists(directChatFeaturesPath())
+        && firestore.get(directChatFeaturesPath()).data.directMessages == true;
+    }
+
+    function directChatMediaEnabled() {
+      return directMessagesEnabled()
+        && firestore.get(directChatFeaturesPath()).data.directMessageMedia == true;
+    }
+
     function directChatUploadPath(uploadId) {
       return /databases/(default)/documents/directChatUploads/$(uploadId);
     }
@@ -66,7 +82,7 @@ service firebase.storage {
 
     function directChatMember(conversationId) {
       let conversation = firestore.get(directChatConversationPath(conversationId)).data;
-      return signedIn()
+      return directMessagesEnabled()
         && conversation.memberUids is list
         && conversation.memberUids.size() == 2
         && request.auth.uid in conversation.memberUids;
@@ -74,7 +90,7 @@ service firebase.storage {
 
     function validDirectChatUpload(conversationId, uploadId) {
       let authorization = firestore.get(directChatAuthorizationPath(request.auth.uid, uploadId)).data;
-      return signedIn()
+      return directChatMediaEnabled()
         && request.auth.token.email_verified == true
         && uploadId.matches('^dmu_[a-f0-9]{40}$')
         && authorization.state == 'active'
@@ -124,6 +140,33 @@ service firebase.storage {
       return /databases/(default)/documents/cosmeticUploadAuthorizations/$(userId);
     }
 
+    function avatarUploadAuthorizationPath(userId) {
+      return /databases/(default)/documents/avatarUploadAuthorizations/$(userId);
+    }
+
+    function validAvatarUpload(userId, uploadId, assetName) {
+      let authorization = firestore.get(avatarUploadAuthorizationPath(userId)).data;
+      return signedIn()
+        && request.auth.uid == userId
+        && authorization.active == true
+        && authorization.uid == userId
+        && authorization.uploadId == uploadId
+        && authorization.sourcePath == 'avatar-quarantine/' + userId + '/' + uploadId + '/' + assetName
+        && authorization.expiresAt > request.time
+        && request.resource != null
+        && request.resource.size == authorization.sizeBytes
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType == authorization.contentType
+        && request.resource.metadata.uploaderUid == userId
+        && request.resource.metadata.uploadId == uploadId
+        && request.resource.metadata.sha256 == authorization.sha256
+        && (
+          (assetName.matches('^source\\.jpg$') && request.resource.contentType == 'image/jpeg')
+          || (assetName.matches('^source\\.png$') && request.resource.contentType == 'image/png')
+          || (assetName.matches('^source\\.webp$') && request.resource.contentType == 'image/webp')
+        );
+    }
+
     function publishedCosmeticVersion(assetId, versionId) {
       let asset = firestore.get(cosmeticAssetPath(assetId)).data;
       let version = firestore.get(cosmeticVersionPath(assetId, versionId)).data;
@@ -156,6 +199,13 @@ service firebase.storage {
         );
     }
 
+    function validCosmeticSubmissionSourceType(assetName) {
+      // Custom V1 quarantine never accepts MP4/WebP; platform catalog keeps broader types.
+      return (assetName == 'source.png' && request.resource.contentType == 'image/png')
+        || (assetName == 'source.jpg' && request.resource.contentType == 'image/jpeg')
+        || (assetName == 'source.json' && request.resource.contentType == 'application/json');
+    }
+
     function validCosmeticSubmission(userId, submissionId, versionId, assetName) {
       let authorization = firestore.get(cosmeticUploadAuthorizationPath(userId)).data;
       return authorization.active == true
@@ -167,16 +217,23 @@ service firebase.storage {
         && authorization.maxBytes <= 10 * 1024 * 1024
         && request.resource.size <= authorization.maxBytes
         && authorization.contentType == request.resource.contentType
-        && validCosmeticSourceType(assetName);
+        && request.resource.contentType != 'video/mp4'
+        && validCosmeticSubmissionSourceType(assetName);
     }
 
     match /avatars/{userId}/profile.jpg {
       allow read: if signedIn();
-      allow create, update: if isOwner(userId)
-        && request.resource != null
-        && request.resource.size <= 2 * 1024 * 1024
-        && request.resource.contentType == 'image/jpeg';
-      allow delete: if isOwner(userId);
+      allow write: if false;
+    }
+
+    match /avatar-quarantine/{userId}/{uploadId}/{assetName} {
+      allow create: if resource == null && validAvatarUpload(userId, uploadId, assetName);
+      allow read, update, delete: if false;
+    }
+
+    match /avatars-public/{userId}/{assetName} {
+      allow read: if signedIn() && assetName.matches('^avu_[a-f0-9]{40}\\.webp$');
+      allow write: if false;
     }
 
     match /store-assets/{itemId}/{assetName} {
@@ -233,9 +290,21 @@ service firebase.storage {
             && request.resource.contentType.matches('image/(png|webp)')
           )
           || (
-            assetName == 'animation.webp'
-            && request.resource.size <= 12 * 1024 * 1024
-            && request.resource.contentType == 'image/webp'
+            request.resource.size <= 12 * 1024 * 1024
+            && (
+              (
+                assetName == 'animation.webp'
+                && request.resource.contentType == 'image/webp'
+              )
+              || (
+                assetName == 'animation.mp4'
+                && request.resource.contentType == 'video/mp4'
+              )
+              || (
+                assetName == 'animation.json'
+                && request.resource.contentType == 'application/json'
+              )
+            )
           )
           || (
             assetName.matches('^launch\\.(mp3|m4a)$')

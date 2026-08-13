@@ -102,4 +102,26 @@ describe('voiceRoomLaunchCore', () => {
       requireClientVersion: true,
     })).toMatchObject({ ok: false, code: 'CLIENT_UPGRADE_REQUIRED' });
   });
+
+  it('keeps public access closed until the explicit broad-release gate is enabled', () => {
+    const publicPolicy = {
+      ...policy,
+      allowedUids: ['owner-uid'],
+      audienceMode: 'public',
+      stageId: 10,
+      status: 'active',
+    };
+    expect(evaluateVoiceRoomLaunchAccess({
+      decodedToken: { uid: 'outsider' },
+      policy: publicPolicy,
+    })).toMatchObject({ ok: false, code: 'LAUNCH_AUDIENCE_DENIED' });
+    expect(evaluateVoiceRoomLaunchAccess({
+      decodedToken: { uid: 'outsider' },
+      policy: { ...publicPolicy, broadReleaseReady: true },
+    })).toMatchObject({ ok: true });
+    expect(evaluateVoiceRoomLaunchAccess({
+      decodedToken: { uid: 'owner-uid' },
+      policy: publicPolicy,
+    })).toMatchObject({ ok: true });
+  });
 });

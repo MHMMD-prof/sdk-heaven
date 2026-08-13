@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { validateRoomThemeManifestV1 } = require('./roomThemeCore');
+const { validateRoomThemeManifest } = require('./roomThemeCore');
 
 async function getAdminRoomTheme({ db, themeId }) {
   const [theme, versions] = await Promise.all([
@@ -7,9 +7,9 @@ async function getAdminRoomTheme({ db, themeId }) {
     db.collection(`roomThemes/${themeId}/versions`).orderBy('revision', 'desc').limit(20).get(),
   ]);
   return {
-    manifest: theme.exists ? validateRoomThemeManifestV1(theme.data(), themeId) || null : null,
+    manifest: theme.exists ? validateRoomThemeManifest(theme.data(), themeId) || null : null,
     versions: versions.docs.map((document) => ({
-      manifest: validateRoomThemeManifestV1(document.data(), themeId) || null,
+      manifest: validateRoomThemeManifest(document.data(), themeId) || null,
       revision: document.data()?.revision || 0,
     })).filter((entry) => entry.manifest),
   };
@@ -33,7 +33,7 @@ async function mutateAdminRoomTheme({ db, decodedToken, fieldValue, input }) {
       }
       return { eventId: auditRef.id, replayed: true, revision: audit.revision };
     }
-    const existing = themeSnapshot.exists ? validateRoomThemeManifestV1(themeSnapshot.data(), input.themeId) : undefined;
+    const existing = themeSnapshot.exists ? validateRoomThemeManifest(themeSnapshot.data(), input.themeId) : undefined;
     const currentRevision = existing?.revision || 0;
     if (currentRevision !== input.expectedRevision) throw adminError(409, 'Theme changed after it was opened. Refresh and try again.');
     if (input.themeId !== 'majlis-default' && (!catalogSnapshot.exists || catalogSnapshot.data()?.category !== 'chat-themes')) {
@@ -51,7 +51,7 @@ async function mutateAdminRoomTheme({ db, decodedToken, fieldValue, input }) {
       };
     } else if (input.operation === 'rollback') {
       const rollback = rollbackSnapshot?.exists
-        ? validateRoomThemeManifestV1(rollbackSnapshot.data(), input.themeId)
+        ? validateRoomThemeManifest(rollbackSnapshot.data(), input.themeId)
         : undefined;
       if (!rollback) throw adminError(404, 'Rollback version was not found.');
       next = {
@@ -62,6 +62,9 @@ async function mutateAdminRoomTheme({ db, decodedToken, fieldValue, input }) {
       };
     } else {
       next = { ...input.manifest, revision: currentRevision + 1 };
+    }
+    if (next.publicationStatus === 'published' && next.manifestVersion >= 2) {
+      await assertPublishedMotionAssets(transaction, db, next);
     }
     const timestamp = fieldValue.serverTimestamp();
     const stored = {
@@ -97,6 +100,89 @@ async function mutateAdminRoomTheme({ db, decodedToken, fieldValue, input }) {
   });
 }
 
+async function assertPublishedMotionAssets(transaction, db, manifest) {
+  const references = [
+    ...(manifest.motion.background ? [{ kind: 'background', reference: manifest.motion.background }] : []),
+    ...manifest.motion.ambient.map((slot) => ({ kind: 'ambient', reference: slot.asset })),
+  ];
+  for (const entry of references) {
+    const { assetId, assetVersionId } = entry.reference;
+    const records = await readAssetRecords(transaction, db, assetId, assetVersionId);
+    const validFormat = entry.kind === 'background'
+      ? records.version?.format === 'mp4'
+      : records.version?.format === 'lottie-json';
+    if (!isApprovedThemeAsset(records, assetId, assetVersionId) || !validFormat) {
+      throw adminError(409, `Animated ${entry.kind} asset is not approved for room themes.`);
+    }
+    if (
+      !isSilentThemeMotionVersion(records.version)
+      || records.version.audioAssetId !== undefined
+      || records.version.audioAssetVersionId !== undefined
+      || typeof records.version.fallbackAssetId !== 'string'
+      || typeof records.version.fallbackAssetVersionId !== 'string'
+    ) {
+      throw adminError(409, 'Animated room-theme assets must be silent and include an approved static fallback.');
+    }
+    const fallback = await readAssetRecords(
+      transaction,
+      db,
+      records.version.fallbackAssetId,
+      records.version.fallbackAssetVersionId,
+    );
+    if (
+      !isApprovedThemeAsset(
+        fallback,
+        records.version.fallbackAssetId,
+        records.version.fallbackAssetVersionId,
+      )
+      || !['png', 'jpeg'].includes(fallback.version?.format)
+    ) {
+      throw adminError(409, 'Animated room-theme fallback is not approved.');
+    }
+  }
+}
+
+function isSilentThemeMotionVersion(version) {
+  return Boolean(version && version.audioCodec === '');
+}
+
+async function readAssetRecords(transaction, db, assetId, assetVersionId) {
+  const [summary, version, approval] = await Promise.all([
+    transaction.get(db.doc(`cosmeticAssets/${assetId}`)),
+    transaction.get(db.doc(`cosmeticAssets/${assetId}/versions/${assetVersionId}`)),
+    transaction.get(db.doc(`cosmeticAssetApprovals/${assetId}__${assetVersionId}`)),
+  ]);
+  return {
+    approval: approval.exists ? approval.data() : undefined,
+    summary: summary.exists ? summary.data() : undefined,
+    version: version.exists ? version.data() : undefined,
+  };
+}
+
+function isApprovedThemeAsset(records, assetId, assetVersionId) {
+  const approvalId = `${assetId}__${assetVersionId}`;
+  return Boolean(
+    records.summary
+    && records.version
+    && records.approval
+    && records.summary.assetId === assetId
+    && records.summary.moderationStatus === 'approved'
+    && records.summary.publicationStatus === 'published'
+    && records.summary.renderingEnabled === true
+    && records.summary.publishedVersionId === assetVersionId
+    && records.summary.approvedVersionId === assetVersionId
+    && records.summary.approvalId === approvalId
+    && records.version.assetId === assetId
+    && records.version.assetVersionId === assetVersionId
+    && records.version.category === 'room-theme'
+    && typeof records.version.sha256 === 'string'
+    && records.approval.decision === 'approved'
+    && records.approval.assetId === assetId
+    && records.approval.assetVersionId === assetVersionId
+    && records.approval.checksum === records.version.sha256
+  );
+}
+
 function stableFingerprint(value) {
   return crypto.createHash('sha256').update(JSON.stringify(sort(value))).digest('hex');
 }
@@ -113,4 +199,4 @@ function adminError(status, message) {
   return error;
 }
 
-module.exports = { getAdminRoomTheme, mutateAdminRoomTheme };
+module.exports = { getAdminRoomTheme, isSilentThemeMotionVersion, mutateAdminRoomTheme };

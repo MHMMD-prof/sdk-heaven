@@ -60,7 +60,8 @@ export function AvatarFrameLayer({
     flags.unifiedAvatarFrames
     && frame?.canonicalAsset
     && flags.assetRegistry
-    && flags.sharedRenderer,
+    && flags.sharedRenderer
+    && (frame.source !== 'custom' || flags.customRendering),
   );
   const bundle = usePublishedCosmeticAsset(
     frame?.canonicalAsset?.assetId,
@@ -69,13 +70,17 @@ export function AvatarFrameLayer({
   );
   if (!frame) return null;
   if (!flags.unifiedAvatarFrames && !renderLegacyWhenUnifiedDisabled) return null;
+  if (frame.source === 'custom' && !flags.customRendering) return null;
+  if (frame.source === 'custom' && !bundle) return null;
+  // User-owned canonical frames fail closed when custom rendering is dark.
+  if (bundle?.primary?.ownerType === 'user' && !flags.customRendering) return null;
   const rendererFlags = flags.animatedAvatarFrames
     ? flags
     : { ...flags, lottie: false };
   return (
     <View pointerEvents="none" style={styles.frameLayer}>
       <CosmeticAssetRenderer
-        compatibilityUri={frame.assetUrl}
+        compatibilityUri={frame.source === 'custom' ? undefined : frame.assetUrl}
         descriptor={bundle?.primary}
         fallbackDescriptor={bundle?.fallback}
         flags={rendererFlags}

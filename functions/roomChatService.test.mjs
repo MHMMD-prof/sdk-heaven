@@ -88,8 +88,24 @@ describe('roomChatService', () => {
     const { createDirectConversationId } = require('./directChatCore');
     const relationshipId = createFriendshipId('member-1', 'target-1');
     const conversationId = createDirectConversationId('member-1', 'target-1');
+    db.data.set('publicProfiles/member-1', {
+      ...db.data.get('publicProfiles/member-1'),
+      friendCount: 1,
+      followerCount: 1,
+      followingCount: 1,
+    });
+    db.data.set('publicProfiles/target-1', {
+      ...db.data.get('publicProfiles/target-1'),
+      friendCount: 1,
+      followerCount: 1,
+      followingCount: 1,
+    });
     db.data.set(`friendships/${relationshipId}`, { memberUids: ['member-1', 'target-1'] });
     db.data.set(`friendRequests/${relationshipId}`, { status: 'pending' });
+    db.data.set('following/member-1/items/target-1', { targetUid: 'target-1' });
+    db.data.set('followers/target-1/items/member-1', { followerUid: 'member-1' });
+    db.data.set('following/target-1/items/member-1', { targetUid: 'member-1' });
+    db.data.set('followers/member-1/items/target-1', { followerUid: 'target-1' });
     db.data.set(`directConversations/${conversationId}`, { requestState: 'pending' });
     db.data.set(`directMessageRequests/${conversationId}`, { status: 'pending' });
 
@@ -113,6 +129,20 @@ describe('roomChatService', () => {
     });
     expect(db.data.has(`friendships/${relationshipId}`)).toBe(false);
     expect(db.data.has(`friendRequests/${relationshipId}`)).toBe(false);
+    expect(db.data.has('following/member-1/items/target-1')).toBe(false);
+    expect(db.data.has('followers/target-1/items/member-1')).toBe(false);
+    expect(db.data.has('following/target-1/items/member-1')).toBe(false);
+    expect(db.data.has('followers/member-1/items/target-1')).toBe(false);
+    expect(db.data.get('publicProfiles/member-1')).toMatchObject({
+      friendCount: 0,
+      followerCount: 0,
+      followingCount: 0,
+    });
+    expect(db.data.get('publicProfiles/target-1')).toMatchObject({
+      friendCount: 0,
+      followerCount: 0,
+      followingCount: 0,
+    });
     expect(db.data.get(`directMessageRequests/${conversationId}`)).toMatchObject({
       blockedByUid: 'member-1',
       status: 'blocked',

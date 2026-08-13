@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 
 import { VoiceProviderConfig } from './types';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomMusicAction =
   | 'list-room-music-catalog'
@@ -113,6 +114,7 @@ export async function requestRoomMusicCommand(
       headers: {
         Authorization: `Bearer ${await getIdToken(true)}`,
         'Content-Type': 'application/json',
+        ...(await getVoiceAppCheckHeader()),
       },
       method: 'POST',
       signal: controller.signal,

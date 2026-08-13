@@ -28,14 +28,14 @@ export class DailyLoginRequestError extends Error {
 export async function requestDailyLoginStatus(): Promise<DailyLoginStatus | null> {
   const payload = await request({ action: 'get-daily-login-status' });
   const status = mapDailyLoginStatus(payload.result);
-  if (!status) throw new DailyLoginRequestError('INVALID_RESPONSE', 'Daily reward status is invalid.');
+  if (!status) throw new DailyLoginRequestError('INVALID_RESPONSE', 'بيانات مكافأة الدخول غير صالحة.');
   return status;
 }
 
 export async function claimDailyLoginReward(requestId: string): Promise<DailyLoginClaimResult> {
   const payload = await request({ action: 'claim-daily-login-reward', requestId });
   const result = mapDailyLoginClaimResult(payload.result);
-  if (!result) throw new DailyLoginRequestError('INVALID_RESPONSE', 'Daily reward receipt is invalid.');
+  if (!result) throw new DailyLoginRequestError('INVALID_RESPONSE', 'إيصال مكافأة الدخول غير صالح.');
   return result;
 }
 
@@ -59,7 +59,7 @@ async function request(body: { action: 'get-daily-login-status' } | { action: 'c
   if (!response.ok || payload.ok !== true) {
     throw new DailyLoginRequestError(
       payload.code || `HTTP_${response.status}`,
-      payload.error || 'Daily reward service is unavailable.',
+      arabicServiceError(payload.code, payload.error),
     );
   }
   return payload;
@@ -69,9 +69,21 @@ function noEndpoint(action: 'get-daily-login-status' | 'claim-daily-login-reward
   throw new DailyLoginRequestError(
     'ENDPOINT_MISSING',
     action === 'get-daily-login-status'
-      ? 'Daily rewards are not configured.'
-      : 'Daily reward claiming is not configured.',
+      ? 'مكافآت الدخول غير مفعّلة حالياً.'
+      : 'استلام مكافأة الدخول غير مفعّل حالياً.',
   );
+}
+
+function arabicServiceError(code?: string, fallback?: string) {
+  if (code === 'RATE_LIMITED') return 'محاولات كثيرة. حاول مرة أخرى بعد قليل.';
+  if (code === 'CLIENT_INCOMPATIBLE') return 'حدّث التطبيق لاستلام المكافأة.';
+  if (code === 'CLAIMS_PAUSED' || code === 'EMERGENCY_DISABLED') return 'المكافآت متوقفة مؤقتاً.';
+  if (code === 'ALREADY_CLAIMED') return 'تم استلام هدية اليوم مسبقاً.';
+  if (code === 'CLAIM_CONFLICT' || code === 'CLAIM_STATE_CONFLICT') return 'حالة مكافأة اليوم قيد المراجعة. حاول لاحقاً.';
+  if (code === 'ITEM_REWARDS_DISABLED') return 'هدية اليوم غير متاحة حالياً.';
+  if (code === 'NOT_CLAIMABLE') return 'المكافأة غير متاحة الآن.';
+  if (fallback && /[\u0600-\u06FF]/.test(fallback)) return fallback;
+  return 'تعذر الوصول إلى خدمة المكافآت.';
 }
 
 async function readPayload(response: Response): Promise<{

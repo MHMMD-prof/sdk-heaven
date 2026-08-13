@@ -1,8 +1,10 @@
 import type { AdminGiftCatalogItem } from './adminDashboardApi';
+import { BottomEffectStagePreview } from './BottomEffectStagePreview';
 
 export type GiftPhysicalApprovalDraft = {
   androidDevice: string;
   androidPassed: boolean;
+  controlsSafeZonePassed: boolean;
   iosDevice: string;
   iosPassed: boolean;
   notes: string;
@@ -20,8 +22,22 @@ export const defaultGiftPresentation: AdminGiftCatalogItem['presentation'] = {
   tier: 'inline',
 };
 
-export function GiftPresentationEditorFields({ approval, onApprovalChange, onChange, value }: {
+export const defaultStrictAnimatedPresentation: AdminGiftCatalogItem['presentation'] = {
+  animationEnabled: true,
+  approvalMode: 'strict',
+  durationMs: 3_000,
+  hapticPolicy: 'off',
+  minimumClientVersion: '0.0.0',
+  performanceTier: 'standard',
+  schemaVersion: 1,
+  soundPolicy: 'off',
+  tier: 'major',
+  visualFormat: 'mp4',
+};
+
+export function GiftPresentationEditorFields({ approval, itemNameAr, onApprovalChange, onChange, value }: {
   approval: GiftPhysicalApprovalDraft;
+  itemNameAr: string;
   onApprovalChange: (value: GiftPhysicalApprovalDraft) => void;
   onChange: (value: AdminGiftCatalogItem['presentation']) => void;
   value: AdminGiftCatalogItem['presentation'];
@@ -31,43 +47,138 @@ export function GiftPresentationEditorFields({ approval, onApprovalChange, onCha
     onChange({ ...value, [kind]: { ...current, [field]: next.trim() } });
   };
   return <>
-    <label className="span-2">
-      <span>Animated presentation</span>
+    <label className="field span-2 economy-checkbox">
+      <span>عرض متحرك للهدية</span>
       <input
         checked={value.animationEnabled}
         onChange={(event) => onChange(event.target.checked
-          ? { ...defaultGiftPresentation, animationEnabled: true, performanceTier: 'standard' }
+          ? { ...defaultStrictAnimatedPresentation }
           : defaultGiftPresentation)}
         type="checkbox"
       />
-      <small>The gift economy stays active when animation is disabled.</small>
+      <small>اقتصاد الهدية لا يعتمد على الحركة. كل عرض متحرك جديد يحتاج اعتماد Android وiOS ومنطقة التحكم الآمنة.</small>
     </label>
-    <label>Presentation tier<select disabled={!value.animationEnabled} value={value.tier} onChange={(event) => onChange({ ...value, tier: event.target.value as AdminGiftCatalogItem['presentation']['tier'] })}><option value="inline">Inline</option><option value="targeted">Targeted seat</option><option value="major">Major room</option><option value="global">Global campaign</option></select></label>
-    <label>Duration (ms)<input disabled={!value.animationEnabled} max="6000" min="1500" type="number" value={value.durationMs} onChange={(event) => onChange({ ...value, durationMs: Number(event.target.value) })} /></label>
-    <label>Performance<select disabled={!value.animationEnabled} value={value.performanceTier} onChange={(event) => onChange({ ...value, performanceTier: event.target.value as AdminGiftCatalogItem['presentation']['performanceTier'] })}><option value="low">Low</option><option value="standard">Standard</option><option value="high">High</option></select></label>
-    <label>Minimum client<input disabled={!value.animationEnabled} pattern="[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}" value={value.minimumClientVersion} onChange={(event) => onChange({ ...value, minimumClientVersion: event.target.value })} /></label>
-    <label>Sound<select disabled={!value.animationEnabled} value={value.soundPolicy} onChange={(event) => onChange({ ...value, soundPolicy: event.target.value as AdminGiftCatalogItem['presentation']['soundPolicy'], ...(event.target.value === 'off' ? { audioAsset: undefined } : {}) })}><option value="off">Off</option><option value="soft">Soft</option><option value="full">Full</option></select></label>
-    <label>Haptics<select disabled={!value.animationEnabled} value={value.hapticPolicy} onChange={(event) => onChange({ ...value, hapticPolicy: event.target.value as AdminGiftCatalogItem['presentation']['hapticPolicy'] })}><option value="off">Off</option><option value="light">Light</option><option value="success">Success</option></select></label>
+    <label className="field">
+      <span>مستوى العرض</span>
+      <select disabled={!value.animationEnabled} value={value.tier} onChange={(event) => onChange({ ...value, tier: event.target.value as AdminGiftCatalogItem['presentation']['tier'] })}>
+        <option value="inline">مدمج</option>
+        <option value="targeted">مقعد مستهدف</option>
+        <option value="major">غرفة رئيسية</option>
+        <option value="global">حملة عامة</option>
+      </select>
+    </label>
+    <label className="field">
+      <span>المدة (مللي ثانية)</span>
+      <input disabled={!value.animationEnabled} max="6000" min="1500" type="number" value={value.durationMs} onChange={(event) => onChange({ ...value, durationMs: Number(event.target.value) })} />
+    </label>
+    <label className="field">
+      <span>مستوى الأداء</span>
+      <select disabled={!value.animationEnabled} value={value.performanceTier} onChange={(event) => onChange({ ...value, performanceTier: event.target.value as AdminGiftCatalogItem['presentation']['performanceTier'] })}>
+        <option value="low">منخفض</option>
+        <option value="standard">قياسي</option>
+        <option value="high">مرتفع</option>
+      </select>
+    </label>
+    <label className="field">
+      <span>أدنى إصدار للعميل</span>
+      <input dir="ltr" disabled={!value.animationEnabled} pattern="[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}" value={value.minimumClientVersion} onChange={(event) => onChange({ ...value, minimumClientVersion: event.target.value })} />
+    </label>
+    <label className="field">
+      <span>الصوت</span>
+      <select disabled={!value.animationEnabled} value={value.soundPolicy} onChange={(event) => onChange({ ...value, soundPolicy: event.target.value as AdminGiftCatalogItem['presentation']['soundPolicy'], ...(event.target.value === 'off' ? { audioAsset: undefined } : {}) })}>
+        <option value="off">متوقف</option>
+        <option value="soft">خفيف</option>
+        <option value="full">كامل</option>
+      </select>
+    </label>
+    <label className="field">
+      <span>الاهتزاز</span>
+      <select disabled={!value.animationEnabled} value={value.hapticPolicy} onChange={(event) => onChange({ ...value, hapticPolicy: event.target.value as AdminGiftCatalogItem['presentation']['hapticPolicy'] })}>
+        <option value="off">متوقف</option>
+        <option value="light">خفيف</option>
+        <option value="success">نجاح</option>
+      </select>
+    </label>
     {value.animationEnabled ? <>
-      <label>Visual asset ID<input required value={value.visualAsset?.assetId || ''} onChange={(event) => setReference('visualAsset', 'assetId', event.target.value)} /></label>
-      <label>Visual version<input required value={value.visualAsset?.assetVersionId || ''} onChange={(event) => setReference('visualAsset', 'assetVersionId', event.target.value)} /></label>
-      <label>Fallback asset ID<input required value={value.fallbackAsset?.assetId || ''} onChange={(event) => setReference('fallbackAsset', 'assetId', event.target.value)} /></label>
-      <label>Fallback version<input required value={value.fallbackAsset?.assetVersionId || ''} onChange={(event) => setReference('fallbackAsset', 'assetVersionId', event.target.value)} /></label>
+      <label className="field">
+        <span>صيغة العرض</span>
+        <select value={value.visualFormat || ''} onChange={(event) => onChange({ ...value, visualFormat: event.target.value as 'mp4' | 'lottie-json' })}>
+          <option value="">تُستنتج من الأصل</option>
+          <option value="mp4">MP4</option>
+          <option value="lottie-json">Lottie</option>
+        </select>
+      </label>
+      <label className="field">
+        <span>معرّف الأصل المرئي</span>
+        <input dir="ltr" required value={value.visualAsset?.assetId || ''} onChange={(event) => setReference('visualAsset', 'assetId', event.target.value)} />
+      </label>
+      <label className="field">
+        <span>إصدار الأصل المرئي</span>
+        <input dir="ltr" required value={value.visualAsset?.assetVersionId || ''} onChange={(event) => setReference('visualAsset', 'assetVersionId', event.target.value)} />
+      </label>
+      <label className="field">
+        <span>معرّف أصل الاحتياط (PNG/JPEG)</span>
+        <input dir="ltr" required value={value.fallbackAsset?.assetId || ''} onChange={(event) => setReference('fallbackAsset', 'assetId', event.target.value)} />
+      </label>
+      <label className="field">
+        <span>إصدار أصل الاحتياط</span>
+        <input dir="ltr" required value={value.fallbackAsset?.assetVersionId || ''} onChange={(event) => setReference('fallbackAsset', 'assetVersionId', event.target.value)} />
+      </label>
       {value.soundPolicy !== 'off' ? <>
-        <label>Audio asset ID<input required value={value.audioAsset?.assetId || ''} onChange={(event) => setReference('audioAsset', 'assetId', event.target.value)} /></label>
-        <label>Audio version<input required value={value.audioAsset?.assetVersionId || ''} onChange={(event) => setReference('audioAsset', 'assetVersionId', event.target.value)} /></label>
+        <label className="field">
+          <span>معرّف أصل الصوت</span>
+          <input dir="ltr" required value={value.audioAsset?.assetId || ''} onChange={(event) => setReference('audioAsset', 'assetId', event.target.value)} />
+        </label>
+        <label className="field">
+          <span>إصدار أصل الصوت</span>
+          <input dir="ltr" required value={value.audioAsset?.assetVersionId || ''} onChange={(event) => setReference('audioAsset', 'assetVersionId', event.target.value)} />
+        </label>
       </> : null}
       <div className="span-2 gift-presentation-preview">
-        <strong>Exact-version preview receipt</strong>
-        <code>{value.visualAsset?.assetId || 'visual'} / {value.visualAsset?.assetVersionId || 'version'}</code>
-        <small>Fallback: {value.fallbackAsset?.assetId || 'required'} / {value.fallbackAsset?.assetVersionId || 'version'}</small>
+        <strong>إيصال معاينة غير قابل للتعديل بالإصدار الدقيق</strong>
+        <code dir="ltr">{value.visualAsset?.assetId || 'visual'} / {value.visualAsset?.assetVersionId || 'version'}</code>
+        <small dir="ltr">fallback: {value.fallbackAsset?.assetId || 'required'} / {value.fallbackAsset?.assetVersionId || 'version'}</small>
+        <small dir="ltr">audio: {value.audioAsset?.assetId || 'off'} / {value.audioAsset?.assetVersionId || 'off'}</small>
       </div>
-      <label><span>Android physical pass</span><input checked={approval.androidPassed} onChange={(event) => onApprovalChange({ ...approval, androidPassed: event.target.checked })} required type="checkbox" /></label>
-      <label><span>iOS physical pass</span><input checked={approval.iosPassed} onChange={(event) => onApprovalChange({ ...approval, iosPassed: event.target.checked })} required type="checkbox" /></label>
-      <label>Android device<input required value={approval.androidDevice} onChange={(event) => onApprovalChange({ ...approval, androidDevice: event.target.value })} /></label>
-      <label>iOS device<input required value={approval.iosDevice} onChange={(event) => onApprovalChange({ ...approval, iosDevice: event.target.value })} /></label>
-      <label>Tested client version<input pattern="[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}" required value={approval.testedClientVersion} onChange={(event) => onApprovalChange({ ...approval, testedClientVersion: event.target.value })} /></label>
-      <label className="span-2">Physical test notes<textarea value={approval.notes} onChange={(event) => onApprovalChange({ ...approval, notes: event.target.value })} /></label>
+      <div className="span-2">
+        <BottomEffectStagePreview
+          animationEnabled={value.animationEnabled}
+          approval={approval}
+          itemNameAr={itemNameAr}
+          kind="gift"
+          tier={value.tier}
+          visualFormat={value.visualFormat}
+        />
+      </div>
+      <label className="field economy-checkbox">
+        <span>نجاح الاختبار على Android</span>
+        <input checked={approval.androidPassed} onChange={(event) => onApprovalChange({ ...approval, androidPassed: event.target.checked })} required type="checkbox" />
+      </label>
+      <label className="field economy-checkbox">
+        <span>نجاح الاختبار على iOS</span>
+        <input checked={approval.iosPassed} onChange={(event) => onApprovalChange({ ...approval, iosPassed: event.target.checked })} required type="checkbox" />
+      </label>
+      <label className="field span-2 economy-checkbox">
+        <span>نجاح منطقة عناصر التحكم الآمنة</span>
+        <input checked={approval.controlsSafeZonePassed} onChange={(event) => onApprovalChange({ ...approval, controlsSafeZonePassed: event.target.checked })} required type="checkbox" />
+        <small>يجب ألا يغطي التأثير أزرار المغادرة أو الإشراف أو الاتصال في حجمي الهاتف.</small>
+      </label>
+      <label className="field">
+        <span>جهاز Android</span>
+        <input dir="ltr" required value={approval.androidDevice} onChange={(event) => onApprovalChange({ ...approval, androidDevice: event.target.value })} />
+      </label>
+      <label className="field">
+        <span>جهاز iOS</span>
+        <input dir="ltr" required value={approval.iosDevice} onChange={(event) => onApprovalChange({ ...approval, iosDevice: event.target.value })} />
+      </label>
+      <label className="field">
+        <span>إصدار العميل المختبَر</span>
+        <input dir="ltr" pattern="[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}" required value={approval.testedClientVersion} onChange={(event) => onApprovalChange({ ...approval, testedClientVersion: event.target.value })} />
+      </label>
+      <label className="field span-2">
+        <span>ملاحظات الاختبار الفعلي</span>
+        <textarea value={approval.notes} onChange={(event) => onApprovalChange({ ...approval, notes: event.target.value })} />
+      </label>
     </> : null}
   </>;
 }

@@ -770,6 +770,18 @@ clients show bundled defaults.
 
 ## Wave 7 — Room reactions, ambient effects, and animated themes
 
+Implementation status: local code complete on 2026-08-04. Server-authorized
+LiveKit reactions, bounded ambient aggregation, backward-compatible animated
+theme manifests, canonical asset enforcement, admin safe-area preview,
+independent dark flags, rollback, rules, and automated coverage are
+implemented. No deployment or production data mutation was performed.
+Root typecheck, 211 files/1,131 non-emulator tests, Functions lint, Expo Doctor,
+Android export, and admin build pass. Rules pass 59/60 with only the
+pre-existing Wave 6 projection expectation failing; admin standalone
+typecheck retains the pre-existing daily-login errors. Physical Android/iOS
+voice-performance acceptance and approved assets remain open. See
+`docs/COSMETICS_ROOM_EFFECTS_WAVE7_REACTIONS_THEMES.md`.
+
 ### Goal
 
 Add lightweight room activity and controlled motion without competing with
@@ -818,6 +830,18 @@ themes continue to work.
 
 ## Wave 8 — Couple cosmetics and coordinated presentation
 
+Implementation status: local code complete on 2026-08-04. Shared couple
+entitlement (one partner buys for the exact relationship instance), dual
+profile projections, profile treatment, paired borders, one coalesced
+synchronized entrance through the existing room-entry queue, independent dark
+flags for pair cosmetics and pair entrances, admin catalog authoring, false-only
+rollback, sanitized telemetry, rules, and automated coverage are implemented.
+No deployment or production data mutation was performed. Root typecheck, 218
+files/1,178 non-emulator tests, Functions lint, and admin build pass. Physical
+Android/iOS acceptance, approved production assets, relationship-ID backfill
+review, and flag enablement remain open. See
+`docs/COSMETICS_ROOM_EFFECTS_WAVE8_COUPLE_EFFECTS.md`.
+
 ### Goal
 
 Add relationship cosmetics without granting ownership or access through
@@ -856,6 +880,20 @@ relationship and ownership history.
 ---
 
 ## Wave 9 — Approved custom user assets
+
+Implementation status: **local code complete** on 2026-08-04 (gap-fill same
+day). Server-owned eligibility allowlist, expiring quarantine upload
+authorization, trusted finalize/process, copyright attestation → pending,
+checksum-bound owner-bound approve (not catalog publish), custom equip path,
+eligibility grant/revoke that preserves store purchases, admin queue/preview UI,
+mobile upload/list/equip surface (including entry-effect Lottie JSON
+DocumentPicker), room-entry custom playback with store-car fallthrough, dark
+flags `cosmetics_custom_submissions` / `cosmetics_custom_rendering`, and
+adversarial gap-fill (public projection hygiene, owner-bound list deny, atomic
+suspend, transactional maxPending, client ownerType gates) are implemented
+locally. Physical-device acceptance, production assets/allowlist, deployment,
+and flag enablement remain open. No deployment or flag enablement. See
+`docs/COSMETICS_ROOM_EFFECTS_WAVE9_CUSTOM_ASSETS.md`.
 
 ### Goal
 
@@ -923,6 +961,15 @@ period.
 ---
 
 ## Wave 10 — Hardening, migration completion, and staged launch
+
+Implementation status: **local code complete** on 2026-08-04 for migration/
+hardening/rollout tools and runbooks. Dry-run migration + reconcile scripts,
+alert-threshold evaluators, Vitest chaos harnesses, staged matrix with
+`--assert-dark`, metadata-only `appRuntime/cosmeticsRollout` recorder (does not
+enable `cosmeticsFeatures`), admin read-only stage display, and
+`docs/COSMETICS_ROOM_EFFECTS_WAVE10_HARDENING.md` are in place. Physical-device
+chaos, deployment, and presentation-flag enablement remain open. No production
+data mutation or flag enablement was performed.
 
 ### Goal
 

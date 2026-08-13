@@ -23,6 +23,16 @@ export async function clearDirectChatDraft(uid: string, conversationId: string) 
   if (validScope(uid, conversationId)) await AsyncStorage.removeItem(draftKey(uid, conversationId));
 }
 
+/** Wipe all private draft keys for one account. Safe to call on logout. */
+export async function clearDirectChatPrivateData(uid: string) {
+  if (!uid || uid.length > 128) return 0;
+  const prefix = `${DRAFT_PREFIX}/${encodeURIComponent(uid)}/`;
+  const keys = await AsyncStorage.getAllKeys();
+  const owned = keys.filter((key) => key.startsWith(prefix));
+  if (owned.length > 0) await AsyncStorage.multiRemove(owned);
+  return owned.length;
+}
+
 export function draftKey(uid: string, conversationId: string) {
   return `${DRAFT_PREFIX}/${encodeURIComponent(uid)}/${encodeURIComponent(conversationId)}`;
 }

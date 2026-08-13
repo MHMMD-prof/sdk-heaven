@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { MiniGameModeId } from '../types/miniGame';
+import { MiniGameModeId, MiniGameTarget } from '../types/miniGame';
 import { MAX_ATTEMPTS } from '../utils/miniGameEngine';
 import { labels } from './constants';
 import {
@@ -15,15 +15,27 @@ import { useBattleshipGame } from './useBattleshipGame';
 type UseBattleshipScreenModelOptions = {
   initialMode: MiniGameModeId;
   onBack: () => void;
+  onOnlineFleetConfirmed?: (targets: MiniGameTarget[]) => void;
+  persistenceEnabled?: boolean;
   screenWidth: number;
+  skipPreMatch?: boolean;
 };
 
 export function useBattleshipScreenModel({
   initialMode,
   onBack,
+  onOnlineFleetConfirmed,
+  persistenceEnabled = true,
   screenWidth,
+  skipPreMatch = false,
 }: UseBattleshipScreenModelOptions) {
-  const game = useBattleshipGame({ initialMode, screenWidth });
+  const game = useBattleshipGame({
+    initialMode,
+    onOnlineFleetConfirmed,
+    persistenceEnabled,
+    screenWidth,
+    skipPreMatch,
+  });
   const [confirmDialog, setConfirmDialog] = useState<BattleshipConfirmDialogState | undefined>();
   const handoffPlayer: 1 | 2 =
     game.phase === 'handoff-to-player-2' ? 2 : game.currentPlayer === 1 ? 2 : 1;

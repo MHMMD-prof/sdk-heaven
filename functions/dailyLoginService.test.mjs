@@ -71,6 +71,7 @@ describe('dailyLoginService', () => {
     expect(replay).toEqual({ replayed: true, result: first.result });
     expect(db.read('walletSummaries/user-1').balances).toEqual({ coins: 110, diamonds: 3 });
     expect([...db.documents.keys()].filter((path) => path.startsWith('walletTransactions/'))).toHaveLength(2);
+    expect([...db.documents.keys()].filter((path) => path.startsWith('dailyLoginCommands/'))).toHaveLength(1);
     expect(db.read(`dailyLoginClaims/user-1/days/${todayId}`)).toMatchObject({
       campaignRevision: 1,
       kind: 'daily-login-claim',
@@ -180,6 +181,28 @@ describe('dailyLoginService', () => {
     expect([...db.documents.keys()].filter((path) => path.startsWith('walletTransactions/'))).toHaveLength(0);
   });
 
+  it('rate-limits repeated failed economic claims without partial rewards', async () => {
+    const db = seededDb({
+      daily_login_reward_items: true,
+      rewards: rewards({ items: [{ itemId: 'missing-item' }] }),
+    });
+    const results = [];
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      results.push(await claimDailyLoginReward({
+        clock,
+        db,
+        fieldValue,
+        input: claimInput(`request_failed_${attempt}`),
+        uid: 'user-1',
+      }));
+    }
+    expect(results.slice(0, 8).every((result) => result.code === 'ITEM_NOT_REWARDABLE')).toBe(true);
+    expect(results[8]).toMatchObject({ code: 'RATE_LIMITED', status: 429 });
+    expect(db.read('dailyLoginRateLimits/user-1')).toMatchObject({ count: 9, uid: 'user-1' });
+    expect(db.read('walletSummaries/user-1').balances).toEqual({ coins: 100, diamonds: 2 });
+    expect(db.read(`dailyLoginClaims/user-1/days/${todayId}`)).toBeUndefined();
+  });
+
   it('uses duplicate item fallback and reconciles every economic record', async () => {
     const db = seededDb({
       daily_login_reward_items: true,
@@ -238,6 +261,89 @@ describe('dailyLoginService', () => {
       },
     });
     expect(status.result.calendar).toHaveLength(7);
+  });
+
+  it('does not advertise an item-only day when item rewards are disabled', async () => {
+    const db = seededDb({
+      rewards: rewards({ coins: 0, diamonds: 0, items: [{ itemId: 'gold-frame' }] }),
+    });
+    const status = await getDailyLoginStatus({
+      clock,
+      db,
+      input: { action: 'get-daily-login-status', clientVersion: '1.0.0' },
+      uid: 'user-1',
+    });
+    expect(status).toMatchObject({
+      result: {
+        claimable: false,
+        reason: 'ITEM_REWARDS_DISABLED',
+        streakPosition: 1,
+      },
+    });
+  });
+
+  it('fails status closed when today state or receipt is inconsistent', async () => {
+    const missingReceipt = seededDb();
+    missingReceipt.documents.set('dailyLoginStates/user-1', {
+      lastClaimDateId: '2026-07-31',
+      streakPosition: 3,
+      uid: 'user-1',
+    });
+    await expect(getDailyLoginStatus({
+      clock,
+      db: missingReceipt,
+      input: { action: 'get-daily-login-status', clientVersion: '1.0.0' },
+      uid: 'user-1',
+    })).resolves.toMatchObject({
+      result: { alreadyClaimed: true, claimable: false, reason: 'CLAIM_STATE_CONFLICT' },
+    });
+
+    const corruptReceipt = seededDb();
+    await claimDailyLoginReward({
+      clock,
+      db: corruptReceipt,
+      fieldValue,
+      input: claimInput('request_corrupt_1'),
+      uid: 'user-1',
+    });
+    const receipt = corruptReceipt.read(`dailyLoginClaims/user-1/days/${todayId}`);
+    corruptReceipt.documents.set(`dailyLoginClaims/user-1/days/${todayId}`, {
+      ...receipt,
+      result: { ...receipt.result, settlementId: 'wrong-settlement' },
+    });
+    await expect(getDailyLoginStatus({
+      clock,
+      db: corruptReceipt,
+      input: { action: 'get-daily-login-status', clientVersion: '1.0.0' },
+      uid: 'user-1',
+    })).resolves.toMatchObject({
+      result: { claimable: false, reason: 'CLAIM_CONFLICT' },
+    });
+  });
+
+  it('uses a valid receipt as the authoritative streak position when state lags', async () => {
+    const db = seededDb();
+    db.documents.set('dailyLoginStates/user-1', {
+      lastClaimDateId: '2026-07-30',
+      streakPosition: 4,
+      uid: 'user-1',
+    });
+    await claimDailyLoginReward({
+      clock,
+      db,
+      fieldValue,
+      input: claimInput('request_receipt_5'),
+      uid: 'user-1',
+    });
+    db.documents.delete('dailyLoginStates/user-1');
+    await expect(getDailyLoginStatus({
+      clock,
+      db,
+      input: { action: 'get-daily-login-status', clientVersion: '1.0.0' },
+      uid: 'user-1',
+    })).resolves.toMatchObject({
+      result: { alreadyClaimed: true, claimable: false, streakPosition: 5 },
+    });
   });
 });
 

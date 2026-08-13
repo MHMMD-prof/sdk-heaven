@@ -5,6 +5,7 @@ const {
   createGiftPhysicalApprovalReceiptId,
   mapGiftPresentation,
 } = require('./roomGiftPresentationCore');
+const { mapGiftTheater } = require('./giftTheaterCore');
 const GIFT_HISTORY_LIMIT = 20;
 const GIFT_KINDS = Object.freeze(['rose', 'crown', 'diamond', 'heart', 'star']);
 
@@ -43,6 +44,8 @@ function mapGiftCatalogItem(data) {
     ? buildLegacyGiftPresentation()
     : mapGiftPresentation(data.presentation);
   if (!presentation) return undefined;
+  const theater = mapGiftTheater(data.theater);
+  if (!theater) return undefined;
   return {
     giftId,
     iconKey: data.iconKey,
@@ -51,6 +54,7 @@ function mapGiftCatalogItem(data) {
     presentation,
     scoreValue: data.scoreValue,
     status: data.status,
+    theater,
   };
 }
 
@@ -98,6 +102,7 @@ function normalizeAdminGiftCatalogInput(input) {
     price: Number(input?.price),
     scoreValue: Number(input?.scoreValue),
     status: input?.status,
+    theater: input?.theater,
     presentation: rawPresentation.value,
   });
   if (!/^[A-Za-z0-9_-]{12,80}$/.test(requestId) || reason.length < 2 || !item) {
@@ -124,22 +129,35 @@ function normalizeAdminGiftPresentationInput(value, input) {
   const existingReceiptId = typeof value.physicalApprovalReceiptId === 'string'
     ? value.physicalApprovalReceiptId.trim()
     : '';
+  const requestedMode = typeof value.approvalMode === 'string' ? value.approvalMode.trim() : '';
+  if (animationEnabled && requestedMode && requestedMode !== 'strict') {
+    return { ok: false, error: 'New animated gifts require strict physical approval.' };
+  }
+  const approvalMode = animationEnabled ? 'strict' : undefined;
+  const reuseExistingReceipt = animationEnabled
+    && input?.reusePhysicalApprovalReceipt === true
+    && Boolean(existingReceiptId);
   const generatedReceiptId = animationEnabled
     ? createGiftPhysicalApprovalReceiptId(
       typeof input?.giftId === 'string' ? input.giftId.trim() : '',
       typeof value?.visualAsset?.assetVersionId === 'string' ? value.visualAsset.assetVersionId.trim() : '',
+      value,
     )
     : '';
   const presentation = mapGiftPresentation({
     ...value,
     animationEnabled,
-    physicalApprovalReceiptId: animationEnabled
-      ? generatedReceiptId
+    ...(approvalMode ? { approvalMode } : {}),
+    physicalApprovalReceiptId: approvalMode
+      ? (reuseExistingReceipt ? existingReceiptId : generatedReceiptId)
       : undefined,
     schemaVersion: 1,
   });
   if (!presentation) return { ok: false, error: 'Gift presentation fields are invalid.' };
-  const reusesReceipt = animationEnabled && existingReceiptId === generatedReceiptId;
+  if (!animationEnabled) {
+    return { ok: true, value: presentation };
+  }
+  const reusesReceipt = reuseExistingReceipt;
   const androidDevice = typeof input?.physicalApproval?.androidDevice === 'string'
     ? input.physicalApproval.androidDevice.trim().slice(0, 120)
     : '';
@@ -152,11 +170,12 @@ function normalizeAdminGiftPresentationInput(value, input) {
   if (animationEnabled && !reusesReceipt && (
     input?.physicalApproval?.androidPassed !== true
     || input?.physicalApproval?.iosPassed !== true
+    || input?.physicalApproval?.controlsSafeZonePassed !== true
     || androidDevice.length < 2
     || iosDevice.length < 2
     || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(testedClientVersion)
   )) {
-    return { ok: false, error: 'Android and iOS physical approval are required for animated paid gifts.' };
+    return { ok: false, error: 'Android and iOS physical approval are required for strict animated gifts.' };
   }
   const notes = typeof input?.physicalApproval?.notes === 'string'
     ? input.physicalApproval.notes.trim().slice(0, 500)
@@ -168,6 +187,7 @@ function normalizeAdminGiftPresentationInput(value, input) {
       physicalApproval: {
         androidPassed: true,
         androidDevice,
+        controlsSafeZonePassed: true,
         iosPassed: true,
         iosDevice,
         notes,
@@ -181,10 +201,15 @@ function readNonNegativeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
+function isExpectedAdminGiftRevisionCurrent(expectedUpdatedAt, currentUpdatedAt) {
+  return !expectedUpdatedAt || expectedUpdatedAt === currentUpdatedAt;
+}
+
 module.exports = {
   GIFT_CATALOG_LIMIT,
   GIFT_HISTORY_LIMIT,
   GIFT_KINDS,
+  isExpectedAdminGiftRevisionCurrent,
   mapGiftCatalogItem,
   mapGiftEvent,
   normalizeAdminGiftCatalogInput,

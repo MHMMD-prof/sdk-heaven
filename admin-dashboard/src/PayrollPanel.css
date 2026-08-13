@@ -1,4 +1,4 @@
-.payroll-panel{display:grid;gap:16px;margin-block:18px 28px}
+.payroll-panel{display:grid;gap:16px;margin-block:0}
 .payroll-heading{align-items:start;background:radial-gradient(circle at 12% 10%,rgba(202,42,54,.14),transparent 35%),linear-gradient(135deg,rgba(32,20,22,.98),rgba(17,15,15,.98));border:1px solid rgba(205,162,86,.3);border-radius:18px;display:flex;gap:18px;justify-content:space-between;padding:20px}
 .payroll-heading h2{margin:3px 0 7px}.payroll-heading p{color:var(--text-muted);margin:0;max-width:850px}
 .payroll-plan-grid{display:grid;gap:12px;grid-template-columns:repeat(3,minmax(0,1fr))}.payroll-plan-grid .primary-button{align-self:end}

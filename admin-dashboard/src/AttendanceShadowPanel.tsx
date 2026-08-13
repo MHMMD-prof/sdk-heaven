@@ -63,13 +63,16 @@ export function AttendanceShadowPanel({ permissions, user }: { permissions: stri
         <AdminStatusBadge tone="warning">تقرير فقط</AdminStatusBadge>
       </div>
       <form className="attendance-shadow-search" onSubmit={(event) => void submit(event)}>
-        <input aria-label="UID" dir="ltr" disabled={!canView || busy} onChange={(event) => setUid(event.target.value)} placeholder="Firebase UID" value={uid} />
+        <label className="field">
+          <span>معرّف المستخدم</span>
+          <input aria-label="UID" dir="ltr" disabled={!canView || busy} onChange={(event) => setUid(event.target.value)} placeholder="Firebase UID" value={uid} />
+        </label>
         <button className="secondary-button compact" disabled={!canView || busy || !uid.trim()} type="submit">{busy ? 'جارٍ التحقق…' : 'عرض الأدلة'}</button>
       </form>
       {canManage ? <div className="attendance-outage-editor">
-        <label><span>بداية العطل</span><input onChange={(event) => setOutageStart(event.target.value)} type="datetime-local" value={outageStart} /></label>
-        <label><span>نهاية العطل</span><input onChange={(event) => setOutageEnd(event.target.value)} type="datetime-local" value={outageEnd} /></label>
-        <label><span>سبب موثق</span><input onChange={(event) => setOutageReason(event.target.value)} value={outageReason} /></label>
+        <label className="field"><span>بداية العطل</span><input onChange={(event) => setOutageStart(event.target.value)} type="datetime-local" value={outageStart} /></label>
+        <label className="field"><span>نهاية العطل</span><input onChange={(event) => setOutageEnd(event.target.value)} type="datetime-local" value={outageEnd} /></label>
+        <label className="field"><span>سبب موثق</span><input onChange={(event) => setOutageReason(event.target.value)} value={outageReason} /></label>
         <button className="secondary-button compact" disabled={busy || !outageStart || !outageEnd || outageReason.trim().length < 3} onClick={() => void mutateOutage('create')} type="button">إضافة عطل معذور</button>
       </div> : null}
       {error ? <p className="danger-text">{error}</p> : null}

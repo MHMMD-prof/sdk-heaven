@@ -31,24 +31,56 @@ export function useDailyLoginRewards(uid?: string): DailyLoginRewardsController 
   const [errorCode, setErrorCode] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const requestIdRef = useRef('');
-  const hasAutoOpenedRef = useRef(false);
+  const requestIdDayRef = useRef('');
+  const autoOpenedDayRef = useRef('');
+  const activeUidRef = useRef(uid);
+  const refreshRunRef = useRef(0);
+  const claimRunRef = useRef(0);
+  const claimInFlightRef = useRef(false);
+
+  if (activeUidRef.current !== uid) {
+    activeUidRef.current = uid;
+    refreshRunRef.current += 1;
+    claimRunRef.current += 1;
+    claimInFlightRef.current = false;
+    requestIdRef.current = '';
+    requestIdDayRef.current = '';
+    autoOpenedDayRef.current = '';
+  }
 
   const refresh = useCallback(async () => {
-    if (!uid) return;
+    const run = ++refreshRunRef.current;
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setErrorCode('');
     setErrorMessage('');
     try {
       const next = await requestDailyLoginStatus();
+      if (activeUidRef.current !== uid || refreshRunRef.current !== run) return;
+      if (
+        next?.alreadyClaimed
+        || (requestIdDayRef.current && requestIdDayRef.current !== next?.todayDayId)
+      ) {
+        requestIdRef.current = '';
+        requestIdDayRef.current = '';
+      }
       setStatus(next);
-      if (next?.claimable && next.presentationVisible && !hasAutoOpenedRef.current) {
-        hasAutoOpenedRef.current = true;
+      if (
+        next?.claimable
+        && next.presentationVisible
+        && autoOpenedDayRef.current !== next.todayDayId
+      ) {
+        autoOpenedDayRef.current = next.todayDayId;
         setVisible(true);
       }
     } catch (error) {
+      if (activeUidRef.current !== uid || refreshRunRef.current !== run) return;
       setRequestError(error, setErrorCode, setErrorMessage);
     } finally {
-      setLoading(false);
+      if (activeUidRef.current === uid && refreshRunRef.current === run) setLoading(false);
     }
   }, [uid]);
 
@@ -58,9 +90,17 @@ export function useDailyLoginRewards(uid?: string): DailyLoginRewardsController 
     setVisible(false);
     setErrorCode('');
     setErrorMessage('');
+    setLoading(Boolean(uid));
+    setClaiming(false);
     requestIdRef.current = '';
-    hasAutoOpenedRef.current = false;
+    requestIdDayRef.current = '';
+    autoOpenedDayRef.current = '';
     if (uid) void refresh();
+    return () => {
+      refreshRunRef.current += 1;
+      claimRunRef.current += 1;
+      claimInFlightRef.current = false;
+    };
   }, [refresh, uid]);
 
   useEffect(() => {
@@ -74,15 +114,22 @@ export function useDailyLoginRewards(uid?: string): DailyLoginRewardsController 
   }, [refresh, status?.nextResetAtMillis, uid]);
 
   const claim = useCallback(async () => {
-    if (!uid || !status?.claimable || isClaiming) return;
+    if (!uid || !status?.claimable || claimInFlightRef.current) return;
+    const run = ++claimRunRef.current;
+    claimInFlightRef.current = true;
     setClaiming(true);
     setErrorCode('');
     setErrorMessage('');
-    if (!requestIdRef.current) requestIdRef.current = createDailyLoginRequestId();
+    if (!requestIdRef.current) {
+      requestIdRef.current = createDailyLoginRequestId();
+      requestIdDayRef.current = status.todayDayId;
+    }
     try {
       const result = await claimDailyLoginReward(requestIdRef.current);
+      if (activeUidRef.current !== uid || claimRunRef.current !== run) return;
       setClaimResult(result);
       requestIdRef.current = '';
+      requestIdDayRef.current = '';
       setStatus((current) => current ? {
         ...current,
         alreadyClaimed: true,
@@ -99,11 +146,19 @@ export function useDailyLoginRewards(uid?: string): DailyLoginRewardsController 
         streakPosition: result.streakPosition,
       } : current);
     } catch (error) {
+      if (activeUidRef.current !== uid || claimRunRef.current !== run) return;
       setRequestError(error, setErrorCode, setErrorMessage);
+      const code = error instanceof DailyLoginRequestError ? error.code : '';
+      if (TERMINAL_CLAIM_CODES.has(code)) {
+        setStatus((current) => current ? { ...current, claimable: false, reason: code } : current);
+      }
     } finally {
-      setClaiming(false);
+      if (activeUidRef.current === uid && claimRunRef.current === run) {
+        claimInFlightRef.current = false;
+        setClaiming(false);
+      }
     }
-  }, [isClaiming, status?.claimable, uid]);
+  }, [status?.claimable, status?.todayDayId, uid]);
 
   return {
     claim,
@@ -120,11 +175,25 @@ export function useDailyLoginRewards(uid?: string): DailyLoginRewardsController 
   };
 }
 
+const TERMINAL_CLAIM_CODES = new Set([
+  'CLAIMS_PAUSED',
+  'CLAIM_CONFLICT',
+  'CLAIM_STATE_CONFLICT',
+  'CLIENT_INCOMPATIBLE',
+  'EMERGENCY_DISABLED',
+  'FEATURE_DISABLED',
+  'ITEM_REWARDS_DISABLED',
+]);
+
 function setRequestError(
   error: unknown,
   setCode: (value: string) => void,
   setMessage: (value: string) => void,
 ) {
   setCode(error instanceof DailyLoginRequestError ? error.code : 'NETWORK_ERROR');
-  setMessage(error instanceof Error ? error.message : 'تعذر الاتصال بخدمة المكافآت.');
+  setMessage(
+    error instanceof DailyLoginRequestError
+      ? error.message
+      : 'تعذر الاتصال بخدمة المكافآت.',
+  );
 }

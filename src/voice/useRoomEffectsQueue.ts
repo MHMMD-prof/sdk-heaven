@@ -2,13 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState } from 'react-native';
 
 import { debugError, debugLog } from '../utils/debugLog';
-import { recordCosmeticsRuntimeEvent } from '../cosmetics/runtimeTelemetry';
+import {
+  recordBottomEffectStageRuntimeEvent,
+  recordCosmeticsRuntimeEvent,
+} from '../cosmetics/runtimeTelemetry';
+import { resolveBottomEffectCompletionDelay } from './bottomEffectStage';
+import {
+  areRoomEntryParticipantsPresent,
+  resolveRoomEntryPlaybackDropReason,
+} from './roomEntryPlayback';
 import {
   QueuedRoomEffect,
   ROCKET_EFFECT_DELIVERY_GRACE_MS,
   RoomEffectKind,
-  enqueueRoomEffect,
-  isRoomEffectComboUpdate,
+  completeRoomEffectIfActive,
+  enqueueRoomEffectWithOutcome,
   mapRoomEventDocument,
   removeRoomEffect,
   resolveViewerEffectMode,
@@ -16,6 +24,8 @@ import {
 } from './roomEffectsQueue';
 
 export function useRoomEffectsQueue(options: {
+  bottomEffectStageEnabled?: boolean;
+  coupleEntrancesEnabled?: boolean;
   entryEffectsEnabled: boolean;
   giftsEnabled: boolean;
   giftGlobalEffectsEnabled?: boolean;
@@ -33,6 +43,7 @@ export function useRoomEffectsQueue(options: {
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [nowMs, setNowMs] = useState(Date.now());
   const seenEventIdsRef = useRef(new Set<string>());
+  const coalescedPairEventIdsRef = useRef(new Set<string>());
   const blockedUidsRef = useRef(new Set<string>());
   const presentUidsRef = useRef<Set<string> | undefined>(undefined);
   const enteredRoomAtRef = useRef(Date.now());
@@ -58,7 +69,7 @@ export function useRoomEffectsQueue(options: {
       setAppActive(active);
       if (!active) {
         setQueue((current) => {
-          current.forEach((effect) => logDropped(effect, 'app-background'));
+          current.forEach((effect) => logDropped(effect, 'app-background', options.bottomEffectStageEnabled));
           return [];
         });
       }
@@ -66,7 +77,7 @@ export function useRoomEffectsQueue(options: {
     const memorySubscription = AppState.addEventListener('memoryWarning', () => {
       setLowMemory(true);
       setQueue((current) => {
-        current.forEach((effect) => logDropped(effect, 'memory-warning'));
+        current.forEach((effect) => logDropped(effect, 'memory-warning', options.bottomEffectStageEnabled));
         return [];
       });
     });
@@ -74,7 +85,7 @@ export function useRoomEffectsQueue(options: {
       appStateSubscription.remove();
       memorySubscription.remove();
     };
-  }, []);
+  }, [options.bottomEffectStageEnabled]);
 
   useEffect(() => {
     enteredRoomAtRef.current = Date.now();
@@ -93,8 +104,17 @@ export function useRoomEffectsQueue(options: {
     if (options.entryEffectsEnabled) allowedKinds.add('room-entry');
     if (options.giftsEnabled) allowedKinds.add('room-gift');
     if (options.rocketEnabled) allowedKinds.add('room-rocket');
-    setQueue((current) => current.filter((effect) => allowedKinds.has(effect.kind)));
-  }, [enabledKindsKey, options.entryEffectsEnabled, options.giftsEnabled, options.rocketEnabled]);
+    setQueue((current) => current.filter((effect) => (
+      allowedKinds.has(effect.kind)
+      && (!effect.coupleEntrance || options.coupleEntrancesEnabled === true)
+    )));
+  }, [
+    enabledKindsKey,
+    options.coupleEntrancesEnabled,
+    options.entryEffectsEnabled,
+    options.giftsEnabled,
+    options.rocketEnabled,
+  ]);
 
   useEffect(() => {
     if (!enabled || !options.roomId || !appActive) {
@@ -133,16 +153,26 @@ export function useRoomEffectsQueue(options: {
             setQueue((current) => {
               let next = current.filter((item) => {
                 const keep = item.expiresAtMs > now;
-                if (!keep) logDropped(item, 'expired');
+                if (!keep) logDropped(item, 'expired', options.bottomEffectStageEnabled);
                 return keep;
               });
               for (const document of snapshot.docs) {
-                if (seenEventIdsRef.current.has(document.id)) continue;
+                if (seenEventIdsRef.current.has(document.id)) {
+                  if (
+                    !coalescedPairEventIdsRef.current.has(document.id)
+                    && current.some((effect) => effect.eventId === document.id && effect.coupleEntrance)
+                  ) {
+                    coalescedPairEventIdsRef.current.add(document.id);
+                    recordCosmeticsRuntimeEvent('pair-entrance-coalesced');
+                  }
+                  continue;
+                }
                 const mapped = mapRoomEventDocument({
                   ...document.data(),
                   eventId: document.id,
                 }, now, {
                   blockedUids: blockedUidsRef.current,
+                  coupleEntrancesEnabled: options.coupleEntrancesEnabled,
                   enabledKinds,
                   expectedRoomId: options.roomId,
                 });
@@ -153,42 +183,23 @@ export function useRoomEffectsQueue(options: {
                     < enteredRoomAtRef.current
                 ) {
                   seenEventIdsRef.current.add(mapped.eventId);
-                  logDropped(mapped, 'joined-after-event');
+                  logDropped(mapped, 'joined-after-event', options.bottomEffectStageEnabled);
                   continue;
                 }
-                if (
-                  mapped.kind === 'room-entry'
-                  && mapped.occurredAtMs
-                  && mapped.occurredAtMs < enteredRoomAtRef.current
-                ) {
-                  seenEventIdsRef.current.add(mapped.eventId);
-                  logDropped(mapped, 'already-present');
-                  continue;
-                }
-                if (
-                  mapped.kind === 'room-entry'
-                  && presentUidsRef.current
-                  && (!mapped.senderUid || !presentUidsRef.current.has(mapped.senderUid))
-                ) {
-                  logDropped(mapped, 'participant-left');
-                  seenEventIdsRef.current.add(mapped.eventId);
-                  continue;
-                }
-                const comboUpdate = isRoomEffectComboUpdate(next, mapped);
-                seenEventIdsRef.current.add(mapped.eventId);
-                const beforeEnqueue = next;
-                next = enqueueRoomEffect(next, mapped, now);
-                beforeEnqueue.forEach((item) => {
-                  if (!next.some((queued) => queued.eventId === item.eventId)) {
-                    logDropped(item, 'priority-cap');
-                  }
+                const entryDropReason = resolveRoomEntryPlaybackDropReason(mapped, {
+                  enteredRoomAtMs: enteredRoomAtRef.current,
+                  presentUids: presentUidsRef.current,
+                  seenEventIds: seenEventIdsRef.current,
                 });
-                if (!comboUpdate && !next.some((item) => item.eventId === mapped.eventId)) {
-                  logDropped(mapped, 'priority-cap');
+                if (entryDropReason) {
+                  logDropped(mapped, entryDropReason, options.bottomEffectStageEnabled);
+                  seenEventIdsRef.current.add(mapped.eventId);
+                  continue;
                 }
-                if (comboUpdate) {
-                  recordCosmeticsRuntimeEvent('combo-update', { reason: mapped.comboKey });
-                }
+                seenEventIdsRef.current.add(mapped.eventId);
+                const outcome = enqueueRoomEffectWithOutcome(next, mapped, now);
+                next = outcome.queue;
+                logEnqueueOutcome(outcome, mapped, options.bottomEffectStageEnabled);
                 debugLog('voice.effects', 'queued', {
                   eventId: mapped.eventId,
                   kind: mapped.kind,
@@ -210,8 +221,9 @@ export function useRoomEffectsQueue(options: {
             );
             presentUidsRef.current = present;
             setQueue((current) => current.filter((effect) => {
-              const keep = effect.kind !== 'room-entry' || (!!effect.senderUid && present.has(effect.senderUid));
-              if (!keep) logDropped(effect, 'participant-left');
+              const keep = effect.kind !== 'room-entry'
+                || areRoomEntryParticipantsPresent(effect, present);
+              if (!keep) logDropped(effect, 'participant-left', options.bottomEffectStageEnabled);
               return keep;
             }));
           },
@@ -230,7 +242,11 @@ export function useRoomEffectsQueue(options: {
               const now = Date.now();
               setNowMs(now);
               setQueue((current) => {
-                let next = current.filter((item) => item.expiresAtMs > now);
+                let next = current.filter((item) => {
+                  const keep = item.expiresAtMs > now;
+                  if (!keep) logDropped(item, 'expired', options.bottomEffectStageEnabled);
+                  return keep;
+                });
                 for (const document of snapshot.docs) {
                   if (seenEventIdsRef.current.has(document.id)) continue;
                   const mapped = mapRoomEventDocument({
@@ -245,7 +261,9 @@ export function useRoomEffectsQueue(options: {
                   });
                   if (!mapped || mapped.giftPresentationTier !== 'global') continue;
                   seenEventIdsRef.current.add(mapped.eventId);
-                  next = enqueueRoomEffect(next, mapped, now);
+                  const outcome = enqueueRoomEffectWithOutcome(next, mapped, now);
+                  next = outcome.queue;
+                  logEnqueueOutcome(outcome, mapped, options.bottomEffectStageEnabled);
                 }
                 return next;
               });
@@ -262,8 +280,10 @@ export function useRoomEffectsQueue(options: {
               const blocked = new Set(snapshot.docs.map((document) => document.id));
               blockedUidsRef.current = blocked;
               setQueue((current) => current.filter((effect) => {
-                const keep = !effect.senderUid || !blocked.has(effect.senderUid);
-                if (!keep) logDropped(effect, 'blocked-sender');
+                const keep = effect.participantUids
+                  ? effect.participantUids.every((uid) => !blocked.has(uid))
+                  : !effect.senderUid || !blocked.has(effect.senderUid);
+                if (!keep) logDropped(effect, 'blocked-sender', options.bottomEffectStageEnabled);
                 return keep;
               }));
             },
@@ -282,6 +302,8 @@ export function useRoomEffectsQueue(options: {
     appActive,
     enabled,
     enabledKindsKey,
+    options.coupleEntrancesEnabled,
+    options.bottomEffectStageEnabled,
     options.entryEffectsEnabled,
     options.giftGlobalEffectsEnabled,
     options.giftsEnabled,
@@ -295,10 +317,10 @@ export function useRoomEffectsQueue(options: {
   useEffect(() => {
     if (!options.suspended) return;
     setQueue((current) => {
-      current.forEach((effect) => logDropped(effect, 'room-suspended'));
+      current.forEach((effect) => logDropped(effect, 'room-suspended', options.bottomEffectStageEnabled));
       return [];
     });
-  }, [options.suspended]);
+  }, [options.bottomEffectStageEnabled, options.suspended]);
 
   useEffect(() => {
     if (!queue.length) return undefined;
@@ -332,8 +354,18 @@ export function useRoomEffectsQueue(options: {
       elapsedMs: Date.now() - (activeEffect.queuedAtMs || Date.now()),
       reason: activeEffect.kind,
     });
-    const remainingMs = Math.max(0, activeEffect.expiresAtMs - Date.now());
+    const timeoutMs = resolveBottomEffectCompletionDelay({
+      durationMs: activeEffect.durationMs,
+      expiresAtMs: activeEffect.expiresAtMs,
+      nowMs: Date.now(),
+    });
     const timeout = setTimeout(() => {
+      if (options.bottomEffectStageEnabled && isBottomStageEffect(activeEffect)) {
+        recordBottomEffectStageRuntimeEvent('bottom-stage-completion', {
+          kind: activeEffect.kind === 'room-gift' ? 'gift' : 'entry',
+          reason: 'completed',
+        });
+      }
       setQueue((current) => removeRoomEffect(current, activeEffect.eventId));
       setNowMs(Date.now());
       debugLog('voice.effects', 'completed', {
@@ -341,7 +373,7 @@ export function useRoomEffectsQueue(options: {
         kind: activeEffect.kind,
         roomId: options.roomId,
       });
-    }, Math.min(activeEffect.durationMs, remainingMs));
+    }, timeoutMs);
     return () => clearTimeout(timeout);
   }, [
     activeEffect?.durationMs,
@@ -350,31 +382,52 @@ export function useRoomEffectsQueue(options: {
     activeEffect?.presentation,
     activeEffect?.expiresAtMs,
     options.roomId,
+    options.bottomEffectStageEnabled,
   ]);
 
   const enqueueLocalEffect = useCallback((effect: QueuedRoomEffect) => {
     if (!options.giftsEnabled || seenEventIdsRef.current.has(effect.eventId)) return;
     seenEventIdsRef.current.add(effect.eventId);
-    setQueue((current) => enqueueRoomEffect(current, effect));
-  }, [options.giftsEnabled]);
+    setQueue((current) => {
+      const outcome = enqueueRoomEffectWithOutcome(current, effect);
+      logEnqueueOutcome(outcome, effect, options.bottomEffectStageEnabled);
+      return outcome.queue;
+    });
+  }, [options.bottomEffectStageEnabled, options.giftsEnabled]);
 
-  const completeActiveEffect = useCallback((reason: 'completed' | 'renderer-error' = 'completed') => {
+  const completeActiveEffect = useCallback((
+    eventId: string,
+    reason: 'completed' | 'renderer-error' = 'completed',
+  ) => {
     setQueue((current) => {
       const active = selectActiveRoomEffect(current, viewerMode, Date.now());
-      if (!active) return current;
+      if (!active || active.eventId !== eventId) return current;
       recordCosmeticsRuntimeEvent(
         reason === 'completed' ? 'completion' : 'failure',
         { reason: `${active.kind}:${reason}` },
       );
-      return removeRoomEffect(current, active.eventId);
+      if (options.bottomEffectStageEnabled && isBottomStageEffect(active)) {
+        recordBottomEffectStageRuntimeEvent(
+          reason === 'completed' ? 'bottom-stage-completion' : 'bottom-stage-decode-error',
+          {
+            kind: active.kind === 'room-gift' ? 'gift' : 'entry',
+            reason: reason === 'completed' ? 'completed' : 'renderer-error',
+          },
+        );
+      }
+      return completeRoomEffectIfActive(current, eventId, viewerMode, Date.now());
     });
     setNowMs(Date.now());
-  }, [viewerMode]);
+  }, [options.bottomEffectStageEnabled, viewerMode]);
 
   return { activeEffect, completeActiveEffect, enqueueLocalEffect, viewerMode };
 }
 
-function logDropped(effect: QueuedRoomEffect, reason: string) {
+function logDropped(
+  effect: QueuedRoomEffect,
+  reason: string,
+  bottomEffectStageEnabled = false,
+) {
   debugLog('voice.effects', 'dropped', {
     eventId: effect.eventId,
     kind: effect.kind,
@@ -386,4 +439,32 @@ function logDropped(effect: QueuedRoomEffect, reason: string) {
       : reason === 'priority-cap' ? 'priority-drop' : 'cancellation',
     { reason: `${effect.kind}:${reason}` },
   );
+  if (bottomEffectStageEnabled && isBottomStageEffect(effect)) {
+    const kind = effect.kind === 'room-gift' ? 'gift' : 'entry';
+    recordBottomEffectStageRuntimeEvent('bottom-stage-queue-drop', { kind, reason });
+    if (['app-background', 'memory-warning', 'participant-left', 'room-suspended'].includes(reason)) {
+      recordBottomEffectStageRuntimeEvent('bottom-stage-cancellation', { kind, reason });
+    }
+  }
+}
+
+function logEnqueueOutcome(
+  outcome: ReturnType<typeof enqueueRoomEffectWithOutcome>,
+  effect: QueuedRoomEffect,
+  bottomEffectStageEnabled = false,
+) {
+  outcome.dropped.forEach((item) => {
+    logDropped(item.effect, item.reason, bottomEffectStageEnabled);
+  });
+  if (!outcome.comboUpdate) return;
+  recordCosmeticsRuntimeEvent('combo-update', { reason: effect.kind });
+  if (bottomEffectStageEnabled && isBottomStageEffect(effect)) {
+    recordBottomEffectStageRuntimeEvent('bottom-stage-combo-update', { kind: 'gift' });
+  }
+}
+
+function isBottomStageEffect(effect: QueuedRoomEffect) {
+  return effect.kind === 'room-entry'
+    || (effect.kind === 'room-gift'
+      && (effect.giftPresentationTier === 'major' || effect.giftPresentationTier === 'global'));
 }

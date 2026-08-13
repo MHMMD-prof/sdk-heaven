@@ -205,10 +205,15 @@ async function executeRoomCommand({ db, decodedToken, fieldValue, body }) {
     const activeMusicLeaseRef = shouldReadMusicLease
       ? roomRef.collection('musicLeases').doc(room.activeMusicLeaseId)
       : null;
-    const [targetSeatSnapshot, activeGameSessionSnapshot, activeMusicLeaseSnapshot] = await Promise.all([
+    const ownerUid = room?.ownerUid || room?.hostId || '';
+    const activeHostLockRef = ownerUid && ['close-room', 'remove-room'].includes(command.action)
+      ? db.doc(`voiceRoomActiveHosts/${ownerUid}`)
+      : null;
+    const [targetSeatSnapshot, activeGameSessionSnapshot, activeMusicLeaseSnapshot, activeHostLockSnapshot] = await Promise.all([
       targetSeatRef ? transaction.get(targetSeatRef) : Promise.resolve(null),
       activeGameSessionRef ? transaction.get(activeGameSessionRef) : Promise.resolve(null),
       activeMusicLeaseRef ? transaction.get(activeMusicLeaseRef) : Promise.resolve(null),
+      activeHostLockRef ? transaction.get(activeHostLockRef) : Promise.resolve(null),
     ]);
     const plan = buildRoomCommandMutationPlan({ actorMembership, command, room, targetMembership });
     if (
@@ -312,6 +317,13 @@ async function executeRoomCommand({ db, decodedToken, fieldValue, body }) {
         updatedAt: timestamp,
         updatedBy: decodedToken.uid,
       });
+    }
+    if (
+      activeHostLockRef
+      && activeHostLockSnapshot?.exists
+      && activeHostLockSnapshot.data()?.roomId === command.roomId
+    ) {
+      transaction.delete(activeHostLockRef);
     }
     if (plan.clearActiveGameSession && activeGameSessionRef && activeGameSessionSnapshot?.exists) {
       const session = activeGameSessionSnapshot.data();

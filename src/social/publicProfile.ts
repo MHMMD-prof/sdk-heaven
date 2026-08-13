@@ -1,5 +1,6 @@
 import { isRoomCountryCode } from '../voice/roomProfile';
 import { readAvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import { readCoupleEffectProjection } from '../cosmetics/coupleEffects';
 import { readEquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
 import type {
   ProfileGender,
@@ -50,17 +51,21 @@ export function mapPublicUserProfile(data: unknown, expectedUid?: string): Publi
   const gender = readGender(candidate.gender);
   const equippedAvatarFrame = readAvatarFrameProjection(candidate);
   const equippedCosmetics = readEquipmentCosmetics(candidate);
+  const coupleEffect = readCoupleEffectProjection(candidate.coupleEffect);
   return {
     avatarModerationStatus,
     avatarUrl: readBoundedString(candidate.avatarUrl, 2048),
     bio: readBoundedString(candidate.bio, 160),
     countryCode,
+    ...(coupleEffect ? { coupleEffect } : {}),
     coupleLevel: readNonNegativeInteger(candidate.coupleLevel),
     createdAt: candidate.createdAt,
     displayName,
     ...(equippedAvatarFrame ? { equippedAvatarFrame } : {}),
     ...(Object.keys(equippedCosmetics).length ? { equippedCosmetics } : {}),
     friendCount: readNonNegativeInteger(candidate.friendCount),
+    followerCount: readNonNegativeInteger(candidate.followerCount),
+    followingCount: readNonNegativeInteger(candidate.followingCount),
     ...(gender ? { gender } : {}),
     giftScore: readNonNegativeInteger(candidate.giftScore),
     moderationStatus,
@@ -74,6 +79,27 @@ export function mapPublicUserProfile(data: unknown, expectedUid?: string): Publi
     ...(specialId ? { specialId } : {}),
     uid,
     updatedAt: candidate.updatedAt,
+    ...(readVipTierProjection(candidate.vipTier) ? { vipTier: readVipTierProjection(candidate.vipTier)! } : {}),
+    ...(readFamilyProjection(candidate.family) ? { family: readFamilyProjection(candidate.family)! } : {}),
+  };
+}
+
+function readFamilyProjection(value: unknown): PublicUserProfile['family'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const familyId = typeof candidate.familyId === 'string' ? candidate.familyId.trim() : '';
+  const nameAr = typeof candidate.nameAr === 'string' ? candidate.nameAr.trim() : '';
+  const role = candidate.role;
+  if (!familyId || !nameAr || (role !== 'owner' && role !== 'elder' && role !== 'member')) {
+    return undefined;
+  }
+  return {
+    badgeColor: typeof candidate.badgeColor === 'string' && candidate.badgeColor.trim()
+      ? candidate.badgeColor.trim().slice(0, 32)
+      : '#5B8C5A',
+    familyId: familyId.slice(0, 64),
+    nameAr: nameAr.slice(0, 40),
+    role: role as 'elder' | 'member' | 'owner',
   };
 }
 
@@ -102,6 +128,11 @@ export function validatePublicProfilePresentation(input: PublicProfilePresentati
       ...(input.gender ? { gender: input.gender } : {}),
     },
   };
+}
+
+/** V1 coupleLevel is a coupled flag (0/1), not intimacy progression. */
+export function formatCoupleRelationshipStatus(coupleLevel: number) {
+  return Number.isSafeInteger(coupleLevel) && coupleLevel > 0 ? 'مرتبط' : 'غير مرتبط';
 }
 
 export function createSocialRequestId(prefix: string, now = Date.now(), random = Math.random()) {
@@ -137,17 +168,26 @@ export async function updatePublicProfilePresentation(
     throw new Error(validation.messageAr);
   }
 
-  const [{ firebaseDb }, { deleteField, doc, serverTimestamp, updateDoc }] = await Promise.all([
+  const [{ firebaseAuth, firebaseDb }, { doc, getDoc }, { requestProfilePresentationUpdate }] = await Promise.all([
     import('../auth/firebase'),
     import('firebase/firestore'),
+    import('./requestSocialCommand'),
   ]);
-
-  await updateDoc(doc(firebaseDb, 'publicProfiles', uid), {
+  if (firebaseAuth.currentUser?.uid !== uid) throw new Error('PERMISSION_DENIED');
+  const [privateProfile, publicProfile] = await Promise.all([
+    getDoc(doc(firebaseDb, 'users', uid)),
+    getDoc(doc(firebaseDb, 'publicProfiles', uid)),
+  ]);
+  const displayName = readBoundedString(publicProfile.data()?.displayName, 32);
+  const avatarLabel = readBoundedString(privateProfile.data()?.avatarLabel, 2);
+  const result = await requestProfilePresentationUpdate({
+    avatarLabel,
     bio: validation.value.bio,
     countryCode: validation.value.countryCode,
-    gender: validation.value.gender ?? deleteField(),
-    updatedAt: serverTimestamp(),
+    displayName,
+    gender: validation.value.gender,
   });
+  if (!result.ok) throw new Error(result.error.messageAr);
 }
 
 function readBoundedString(value: unknown, maxLength: number) {
@@ -160,6 +200,17 @@ function readGender(value: unknown): ProfileGender | undefined {
 
 function readNonNegativeInteger(value: unknown) {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
+}
+
+function readVipTierProjection(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const id = readBoundedString(candidate.id, 40);
+  const nameAr = readBoundedString(candidate.nameAr, 40);
+  const accentColor = readBoundedString(candidate.accentColor, 32);
+  const rank = Number(candidate.rank);
+  if (!id || !nameAr || !accentColor || !Number.isSafeInteger(rank) || rank < 1) return undefined;
+  return { accentColor, id, nameAr, rank };
 }
 
 function normalizeSearchName(value: string) {

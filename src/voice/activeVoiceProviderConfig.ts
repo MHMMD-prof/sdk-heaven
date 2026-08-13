@@ -26,12 +26,21 @@ const roomGiftCommandEndpoint =
 const roomEntryEffectCommandEndpoint =
   env.EXPO_PUBLIC_ROOM_ENTRY_EFFECT_COMMAND_ENDPOINT ??
   deriveRoomEntryEffectCommandEndpoint(roomCommandEndpoint ?? liveKitTokenEndpoint);
+const roomReactionCommandEndpoint =
+  env.EXPO_PUBLIC_ROOM_REACTION_COMMAND_ENDPOINT ??
+  deriveRoomReactionCommandEndpoint(roomCommandEndpoint ?? liveKitTokenEndpoint);
 const roomGameCommandEndpoint =
   env.EXPO_PUBLIC_ROOM_GAME_COMMAND_ENDPOINT ??
   deriveRoomGameCommandEndpoint(roomCommandEndpoint ?? liveKitTokenEndpoint);
+const roomPkCommandEndpoint =
+  env.EXPO_PUBLIC_ROOM_PK_COMMAND_ENDPOINT ??
+  deriveRoomPkCommandEndpoint(roomCommandEndpoint ?? liveKitTokenEndpoint);
 const roomMusicCommandEndpoint =
   env.EXPO_PUBLIC_ROOM_MUSIC_COMMAND_ENDPOINT ??
   deriveRoomMusicCommandEndpoint(roomCommandEndpoint ?? liveKitTokenEndpoint);
+const roomWatchCommandEndpoint =
+  env.EXPO_PUBLIC_ROOM_WATCH_COMMAND_ENDPOINT ??
+  deriveRoomWatchCommandEndpoint(roomCommandEndpoint ?? liveKitTokenEndpoint);
 const roomRecordingCommandEndpoint =
   env.EXPO_PUBLIC_ROOM_RECORDING_COMMAND_ENDPOINT ??
   deriveRoomRecordingCommandEndpoint(roomCommandEndpoint ?? liveKitTokenEndpoint);
@@ -100,6 +109,15 @@ export function deriveRoomEntryEffectCommandEndpoint(endpoint?: string) {
     .replace(/livekittoken-/i, 'roomentryeffectcommand-');
 }
 
+export function deriveRoomReactionCommandEndpoint(endpoint?: string) {
+  if (!endpoint) return undefined;
+  return endpoint
+    .replace(/roomCommand(?:\/)?$/, 'roomReactionCommand')
+    .replace(/livekitToken(?:\/)?$/, 'roomReactionCommand')
+    .replace(/roomcommand-/i, 'roomreactioncommand-')
+    .replace(/livekittoken-/i, 'roomreactioncommand-');
+}
+
 export function deriveRoomGameCommandEndpoint(endpoint?: string) {
   if (!endpoint) return undefined;
   return endpoint
@@ -109,6 +127,15 @@ export function deriveRoomGameCommandEndpoint(endpoint?: string) {
     .replace(/livekittoken-/i, 'roomgamecommand-');
 }
 
+export function deriveRoomPkCommandEndpoint(endpoint?: string) {
+  if (!endpoint) return undefined;
+  return endpoint
+    .replace(/roomCommand(?:\/)?$/, 'roomPkCommand')
+    .replace(/livekitToken(?:\/)?$/, 'roomPkCommand')
+    .replace(/roomcommand-/i, 'roompkcommand-')
+    .replace(/livekittoken-/i, 'roompkcommand-');
+}
+
 export function deriveRoomMusicCommandEndpoint(endpoint?: string) {
   if (!endpoint) return undefined;
   return endpoint
@@ -116,6 +143,15 @@ export function deriveRoomMusicCommandEndpoint(endpoint?: string) {
     .replace(/livekitToken(?:\/)?$/, 'roomMusicCommand')
     .replace(/roomcommand-/i, 'roommusiccommand-')
     .replace(/livekittoken-/i, 'roommusiccommand-');
+}
+
+export function deriveRoomWatchCommandEndpoint(endpoint?: string) {
+  if (!endpoint) return undefined;
+  return endpoint
+    .replace(/roomCommand(?:\/)?$/, 'roomWatchCommand')
+    .replace(/livekitToken(?:\/)?$/, 'roomWatchCommand')
+    .replace(/roomcommand-/i, 'roomwatchcommand-')
+    .replace(/livekittoken-/i, 'roomwatchcommand-');
 }
 
 export function deriveRoomRecordingCommandEndpoint(endpoint?: string) {
@@ -166,11 +202,14 @@ export const liveKitVoiceProviderConfig: VoiceProviderConfig = {
     roomCommandEndpoint,
     roomEntryEffectCommandEndpoint,
     roomGameCommandEndpoint,
+    roomPkCommandEndpoint,
     roomGiftCommandEndpoint,
     roomMediaCommandEndpoint,
     roomMusicCommandEndpoint,
+    roomWatchCommandEndpoint,
     roomOwnershipCommandEndpoint,
     roomRecordingCommandEndpoint,
+    roomReactionCommandEndpoint,
     roomThemeCommandEndpoint,
     roomTargetCommandEndpoint,
     roomAttendanceCommandEndpoint,

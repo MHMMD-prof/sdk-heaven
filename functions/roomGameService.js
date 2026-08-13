@@ -1,11 +1,13 @@
 const {
   buildRoomGameFingerprint,
+  createRoomGameLedgerId,
   createRoomGameSessionId,
   GAME_COMMAND_RETENTION_MS,
   GAME_SESSION_RETENTION_MS,
   listRoomGames,
   mapSessionPublic,
   normalizeRoomGameBody,
+  pickEntertainmentPrizeUid,
   resolveCreateRoomGameInvite,
   resolveEndRoomGame,
   resolveJoinRoomGame,
@@ -15,6 +17,12 @@ const {
   timestampToMillis,
   validateRoomGameRequest,
 } = require('./roomGameCore');
+const {
+  applyWalletMutation,
+  buildWalletDocument,
+  buildWalletTransaction,
+  mapWalletSummary,
+} = require('./socialWalletCore');
 const {
   ROOM_GAME_RATE_LIMIT,
   ROOM_GAME_RATE_WINDOW_MS,
@@ -46,6 +54,7 @@ async function executeRoomGameCommand({
     const requestRef = roomRef.collection('gameCommandRequests').doc(command.requestId);
     const rateLimitRef = db.doc(`roomGameRateLimits/${decodedToken.uid}`);
     const featureRef = db.doc('appConfig/voiceRoomFeatures');
+    const growthRef = db.doc('appConfig/growthFeatures');
     const memberRef = roomRef.collection('members').doc(decodedToken.uid);
     const publicRef = db.doc(`publicProfiles/${decodedToken.uid}`);
     const adminRef = db.doc(`adminProfiles/${decodedToken.uid}`);
@@ -53,6 +62,7 @@ async function executeRoomGameCommand({
     const [
       requestSnapshot,
       featureSnapshot,
+      growthSnapshot,
       roomSnapshot,
       memberSnapshot,
       publicSnapshot,
@@ -61,6 +71,7 @@ async function executeRoomGameCommand({
     ] = await Promise.all([
       transaction.get(requestRef),
       transaction.get(featureRef),
+      transaction.get(growthRef),
       transaction.get(roomRef),
       transaction.get(memberRef),
       transaction.get(publicRef),
@@ -77,6 +88,7 @@ async function executeRoomGameCommand({
     }
 
     const featureFlags = featureSnapshot.exists ? featureSnapshot.data() : undefined;
+    const growthFeatures = growthSnapshot.exists ? growthSnapshot.data() : undefined;
     const roomData = roomSnapshot.exists ? { id: command.roomId, ...roomSnapshot.data() } : undefined;
     const membership = memberSnapshot.exists ? memberSnapshot.data() : undefined;
     const publicProfile = publicSnapshot.exists ? publicSnapshot.data() : undefined;
@@ -199,6 +211,7 @@ async function executeRoomGameCommand({
         actorMembership: membership,
         command,
         featureFlags,
+        growthFeatures,
         nowMs,
         publicProfile,
         room: roomData,
@@ -207,6 +220,19 @@ async function executeRoomGameCommand({
       });
       if (!resolution.ok) return deny(resolution);
       const session = resolution.value.session;
+      const entryApplied = await applyRoomGameWalletDebit({
+        clock,
+        debit: resolution.value.entryDebit,
+        deny,
+        fieldValue,
+        nowMs,
+        requestId: command.requestId,
+        sessionId,
+        timestamp,
+        transaction,
+        db,
+      });
+      if (entryApplied && entryApplied.ok === false) return entryApplied;
       const sessionRef = roomRef.collection('gameSessions').doc(sessionId);
       const response = {
         ok: true,
@@ -221,6 +247,7 @@ async function executeRoomGameCommand({
       transaction.create(sessionRef, {
         clientRoute: session.clientRoute,
         createdAt: timestamp,
+        ...(session.economy ? { economy: session.economy } : {}),
         expiresAt: clock.timestampFromMillis(session.expiresAtMs),
         gameId: session.gameId,
         hostUid: session.hostUid,
@@ -287,9 +314,25 @@ async function executeRoomGameCommand({
         session,
       });
       if (!resolution.ok) return deny(resolution);
+      if (!resolution.value.alreadyJoined && resolution.value.entryDebit) {
+        const entryApplied = await applyRoomGameWalletDebit({
+          clock,
+          debit: resolution.value.entryDebit,
+          deny,
+          fieldValue,
+          nowMs,
+          requestId: command.requestId,
+          sessionId: command.sessionId,
+          timestamp,
+          transaction,
+          db,
+        });
+        if (entryApplied && entryApplied.ok === false) return entryApplied;
+      }
       if (!resolution.value.alreadyJoined && resolution.value.sessionPatch) {
         const patch = resolution.value.sessionPatch;
         transaction.update(sessionRef, {
+          ...(patch.economy ? { economy: patch.economy } : {}),
           playerCount: patch.playerCount,
           playerUids: patch.playerUids,
           status: patch.status,
@@ -336,9 +379,25 @@ async function executeRoomGameCommand({
         session,
       });
       if (!resolution.ok) return deny(resolution);
+      if (Array.isArray(resolution.value.economyCredits) && resolution.value.economyCredits.length) {
+        const credited = await applyRoomGameWalletCredits({
+          clock,
+          credits: resolution.value.economyCredits,
+          deny,
+          fieldValue,
+          nowMs,
+          requestId: command.requestId,
+          sessionId: command.sessionId,
+          timestamp,
+          transaction,
+          db,
+        });
+        if (credited && credited.ok === false) return credited;
+      }
       if (!resolution.value.alreadyLeft && resolution.value.sessionPatch) {
         const patch = resolution.value.sessionPatch;
         transaction.update(sessionRef, {
+          ...(patch.economy ? { economy: patch.economy } : {}),
           ...(patch.hostUid ? { hostUid: patch.hostUid } : {}),
           ...(patch.endedAtMs ? { endedAt: clock.timestampFromMillis(patch.endedAtMs) } : {}),
           ...(patch.endedBy ? { endedBy: patch.endedBy } : {}),
@@ -403,8 +462,24 @@ async function executeRoomGameCommand({
         session,
       });
       if (!resolution.ok) return deny(resolution);
+      if (Array.isArray(resolution.value.economyCredits) && resolution.value.economyCredits.length) {
+        const credited = await applyRoomGameWalletCredits({
+          clock,
+          credits: resolution.value.economyCredits,
+          deny,
+          fieldValue,
+          nowMs,
+          requestId: command.requestId,
+          sessionId: command.sessionId,
+          timestamp,
+          transaction,
+          db,
+        });
+        if (credited && credited.ok === false) return credited;
+      }
       const patch = resolution.value.sessionPatch;
       transaction.update(sessionRef, {
+        ...(patch.economy ? { economy: patch.economy } : {}),
         endedAt: clock.timestampFromMillis(patch.endedAtMs),
         endedBy: patch.endedBy,
         endReason: patch.endReason,
@@ -437,6 +512,7 @@ async function executeRoomGameCommand({
         ok: true,
         result: {
           action: command.action,
+          ...(session.economy?.prizeUid ? { prizeUid: session.economy.prizeUid } : {}),
           requestId: command.requestId,
           roomId: command.roomId,
           session: mapSessionPublic(session),
@@ -492,10 +568,76 @@ async function expireRoomGameSessions({
         return false;
       }
       const timestamp = clock.timestampFromMillis(nowMs);
+      const economy = session.economy && typeof session.economy === 'object' ? session.economy : null;
+      let refundCredits = [];
+      let nextEconomy = null;
+      if (economy && economy.settled !== true) {
+        const poolCoins = Number(economy.poolCoins) || 0;
+        if (session.status === 'lobby') {
+          refundCredits = Object.entries(economy.paidEntries || {})
+            .filter(([, amount]) => Number(amount) >= 1)
+            .map(([uid, amount]) => ({
+              amount: Number(amount),
+              currency: 'coins',
+              kind: 'refund',
+              uid,
+            }));
+          nextEconomy = {
+            ...economy,
+            poolCoins: 0,
+            settled: true,
+            settledAtMs: nowMs,
+            settlementKind: 'expire-lobby-refund',
+          };
+        } else if (poolCoins >= 1) {
+          const players = Array.isArray(session.playerUids)
+            ? session.playerUids.filter((uid) => typeof uid === 'string' && uid)
+            : [];
+          if (players.length) {
+            const prizeUid = pickEntertainmentPrizeUid({
+              nowMs,
+              playerUids: players,
+              sessionId: sessionRef.id,
+            });
+            refundCredits = [{ amount: poolCoins, currency: 'coins', kind: 'prize', uid: prizeUid }];
+            nextEconomy = {
+              ...economy,
+              poolCoins: 0,
+              prizeUid,
+              settled: true,
+              settledAtMs: nowMs,
+              settlementKind: 'expire-raffle',
+            };
+          }
+        } else {
+          nextEconomy = {
+            ...economy,
+            settled: true,
+            settledAtMs: nowMs,
+            settlementKind: 'expire-empty',
+          };
+        }
+      }
+      if (refundCredits.length) {
+        const credited = await applyRoomGameWalletCredits({
+          clock,
+          credits: refundCredits,
+          deny: (error) => error,
+          fieldValue: { serverTimestamp: () => timestamp },
+          nowMs,
+          requestId: `expire_${sessionRef.id}`,
+          sessionId: sessionRef.id,
+          timestamp,
+          transaction,
+          db,
+        });
+        if (credited && credited.ok === false) return false;
+      }
       transaction.update(sessionRef, {
         endedAt: timestamp,
         endedBy: 'system',
         endReason: 'expired',
+        ...(nextEconomy ? { economy: nextEconomy } : {}),
         purgeAfter: clock.timestampFromMillis(nowMs + GAME_SESSION_RETENTION_MS),
         status: 'abandoned',
         updatedAt: timestamp,
@@ -512,6 +654,155 @@ async function expireRoomGameSessions({
     if (changed) expired += 1;
   }
   return { expired, scanned: snapshot.size };
+}
+
+async function applyRoomGameWalletDebit({
+  clock,
+  debit,
+  deny,
+  fieldValue,
+  nowMs,
+  requestId,
+  sessionId,
+  timestamp,
+  transaction,
+  db,
+}) {
+  if (!debit || !debit.amount) return { ok: true };
+  const walletRef = db.doc(`walletSummaries/${debit.uid}`);
+  const ledgerId = createRoomGameLedgerId({
+    kind: 'entry',
+    requestId,
+    sessionId,
+    uid: debit.uid,
+  });
+  const ledgerRef = db.doc(`walletTransactions/${ledgerId}`);
+  const [walletSnapshot, ledgerSnapshot] = await Promise.all([
+    transaction.get(walletRef),
+    transaction.get(ledgerRef),
+  ]);
+  if (ledgerSnapshot.exists) return { ok: true, replayed: true };
+  if (!walletSnapshot.exists) {
+    return deny(roomGameError('INSUFFICIENT_FUNDS', 409, 'Wallet funds are insufficient for this entry fee.'));
+  }
+  const wallet = mapWalletSummary(walletSnapshot.data(), debit.uid);
+  const mutated = applyWalletMutation(wallet, {
+    amount: debit.amount,
+    currency: debit.currency || 'coins',
+    type: 'debit',
+  });
+  if (!mutated.ok) {
+    return deny(roomGameError(
+      mutated.code === 'INSUFFICIENT_FUNDS' ? 'INSUFFICIENT_FUNDS' : 'WALLET_CONFLICT',
+      409,
+      mutated.code === 'INSUFFICIENT_FUNDS'
+        ? 'Wallet funds are insufficient for this entry fee.'
+        : 'Wallet could not be updated for this game entry.',
+    ));
+  }
+  const createdAt = clock.timestampFromMillis(nowMs);
+  const ledger = buildWalletTransaction({
+    actorUid: debit.uid,
+    amount: debit.amount,
+    balanceAfter: mutated.value.balanceAfter,
+    createdAt,
+    currency: debit.currency || 'coins',
+    note: 'Room game entry fee',
+    referenceId: sessionId,
+    source: 'room-game-entry',
+    type: 'debit',
+    uid: debit.uid,
+  });
+  if (!ledger) {
+    return deny(roomGameError('WALLET_CONFLICT', 409, 'Wallet ledger could not be built for this game entry.'));
+  }
+  transaction.set(walletRef, buildWalletDocument(mutated.value.wallet, {
+    createdAt: walletSnapshot.data()?.createdAt || createdAt,
+    updatedAt: timestamp || fieldValue.serverTimestamp(),
+  }), { merge: true });
+  transaction.create(ledgerRef, ledger);
+  return { ok: true };
+}
+
+async function applyRoomGameWalletCredits({
+  clock,
+  credits,
+  deny,
+  fieldValue,
+  nowMs,
+  requestId,
+  sessionId,
+  timestamp,
+  transaction,
+  db,
+}) {
+  if (!Array.isArray(credits) || !credits.length) return { ok: true };
+  const uniqueUids = [...new Set(credits.map((credit) => credit.uid).filter(Boolean))];
+  const walletRefs = Object.fromEntries(uniqueUids.map((uid) => [uid, db.doc(`walletSummaries/${uid}`)]));
+  const ledgerPlans = credits.map((credit) => ({
+    credit,
+    ledgerId: createRoomGameLedgerId({
+      kind: credit.kind || 'prize',
+      requestId,
+      sessionId,
+      uid: credit.uid,
+    }),
+  }));
+  const ledgerRefs = Object.fromEntries(
+    ledgerPlans.map((plan) => [plan.ledgerId, db.doc(`walletTransactions/${plan.ledgerId}`)]),
+  );
+  const snapshots = await Promise.all([
+    ...uniqueUids.map((uid) => transaction.get(walletRefs[uid])),
+    ...ledgerPlans.map((plan) => transaction.get(ledgerRefs[plan.ledgerId])),
+  ]);
+  const walletSnapshots = Object.fromEntries(
+    uniqueUids.map((uid, index) => [uid, snapshots[index]]),
+  );
+  const ledgerSnapshots = Object.fromEntries(
+    ledgerPlans.map((plan, index) => [plan.ledgerId, snapshots[uniqueUids.length + index]]),
+  );
+  const wallets = {};
+  for (const uid of uniqueUids) {
+    const snapshot = walletSnapshots[uid];
+    wallets[uid] = snapshot.exists
+      ? mapWalletSummary(snapshot.data(), uid)
+      : mapWalletSummary(undefined, uid);
+  }
+  const createdAt = clock.timestampFromMillis(nowMs);
+  for (const plan of ledgerPlans) {
+    if (ledgerSnapshots[plan.ledgerId]?.exists) continue;
+    const mutated = applyWalletMutation(wallets[plan.credit.uid], {
+      amount: plan.credit.amount,
+      currency: plan.credit.currency || 'coins',
+      type: 'credit',
+    });
+    if (!mutated.ok) {
+      return deny(roomGameError('WALLET_CONFLICT', 409, 'Wallet could not be credited for game settlement.'));
+    }
+    wallets[plan.credit.uid] = mutated.value.wallet;
+    const ledger = buildWalletTransaction({
+      actorUid: plan.credit.uid,
+      amount: plan.credit.amount,
+      balanceAfter: mutated.value.balanceAfter,
+      createdAt,
+      currency: plan.credit.currency || 'coins',
+      note: plan.credit.kind === 'refund' ? 'Room game entry refund' : 'Room game entertainment prize',
+      referenceId: sessionId,
+      source: plan.credit.kind === 'refund' ? 'room-game-refund' : 'room-game-prize',
+      type: 'credit',
+      uid: plan.credit.uid,
+    });
+    if (!ledger) {
+      return deny(roomGameError('WALLET_CONFLICT', 409, 'Wallet ledger could not be built for game settlement.'));
+    }
+    const walletSnapshot = walletSnapshots[plan.credit.uid];
+    transaction.set(walletRefs[plan.credit.uid], buildWalletDocument(mutated.value.wallet, {
+      createdAt: walletSnapshot.exists ? walletSnapshot.data()?.createdAt || createdAt : createdAt,
+      updatedAt: timestamp || fieldValue.serverTimestamp(),
+    }), { merge: true });
+    transaction.create(ledgerRefs[plan.ledgerId], ledger);
+  }
+  return { ok: true };
 }
 
 async function cleanupExpiredRoomGameRecords({

@@ -33,6 +33,9 @@ export class MockVoiceClient implements VoiceClient {
     }
 
     this.participants = mapVoiceRoomToMockParticipants(options.mockRoom);
+    if (options.canPublishAudio === false || options.startMuted === true) {
+      this.updateLocalParticipant({ isMuted: true, isSpeaking: false });
+    }
     this.setConnectionState('connected');
     this.emitParticipants();
     this.startSpeakingLoop();
@@ -58,6 +61,8 @@ export class MockVoiceClient implements VoiceClient {
   async setSpeakerEnabled(enabled: boolean): Promise<void> {
     this.speakerEnabled = enabled;
   }
+
+  setBlockedParticipantIds(_participantIds: Iterable<string>): void {}
 
   async executeRoomCommand(command: VoiceRoomCommand): Promise<VoiceRoomCommandResult> {
     const participantExists = this.participants.some(

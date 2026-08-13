@@ -25,6 +25,7 @@ export function useVoiceRoomController(room: VoiceRoom) {
   const seatControls = useRoomSeatControls(room);
   const voiceRoom = useVoiceRoom();
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const micMutedRef = useRef(voiceRoom.isMicMuted);
   const {
     connect,
     connectionState,
@@ -35,6 +36,7 @@ export function useVoiceRoomController(room: VoiceRoom) {
     setConnectionError,
     speakers,
   } = voiceRoom;
+  micMutedRef.current = voiceRoom.isMicMuted;
   const connectKey = useMemo(
     () =>
       [
@@ -64,10 +66,16 @@ export function useVoiceRoomController(room: VoiceRoom) {
     });
 
     if (providerConfig.provider === 'livekit') {
-      return requestLiveKitConnectOptions(room, providerConfig.liveKit);
+      return {
+        ...(await requestLiveKitConnectOptions(room, providerConfig.liveKit)),
+        startMuted: micMutedRef.current,
+      };
     }
 
-    return createMockVoiceConnectOptions(room);
+    return {
+      ...createMockVoiceConnectOptions(room),
+      startMuted: micMutedRef.current,
+    };
   }, [providerConfig, room]);
 
   const connectToRoom = useCallback(async () => {

@@ -14,7 +14,7 @@ const {
   mapRoomThemeEntitlement,
   normalizeRoomThemeBody,
   roomThemeError,
-  validateRoomThemeManifestV1,
+  validateRoomThemeManifest,
   validateRoomThemeRequest,
 } = require('./roomThemeCore');
 
@@ -61,7 +61,7 @@ async function getRoomThemeInventory({ command, db, decodedToken }) {
     mapStoreCatalogItem(document.data(), document.id),
   ]));
   const inventory = themes.docs
-    .map((document) => validateRoomThemeManifestV1(document.data(), document.id))
+    .map((document) => validateRoomThemeManifest(document.data(), document.id))
     .filter(Boolean)
     .filter((manifest) => manifest.renderingEnabled)
     .map((manifest) => {
@@ -132,7 +132,7 @@ async function purchaseRoomTheme({ clock, command, db, decodedToken, fieldValue 
       purchases: true,
     });
     if (!access.ok) return access;
-    const manifest = theme.exists ? validateRoomThemeManifestV1(theme.data(), theme.id) : undefined;
+    const manifest = theme.exists ? validateRoomThemeManifest(theme.data(), theme.id) : undefined;
     const item = catalog.exists ? mapStoreCatalogItem(catalog.data(), catalog.id) : undefined;
     if (
       !manifest
@@ -267,7 +267,7 @@ async function equipRoomTheme({ command, db, decodedToken, fieldValue }) {
     if (!access.ok) return access;
     let manifest;
     if (command.themeId !== DEFAULT_ROOM_THEME_ID) {
-      manifest = theme.exists ? validateRoomThemeManifestV1(theme.data(), theme.id) : undefined;
+      manifest = theme.exists ? validateRoomThemeManifest(theme.data(), theme.id) : undefined;
       const owned = entitlement.exists
         ? mapRoomThemeEntitlement(entitlement.data(), entitlement.id)
         : undefined;

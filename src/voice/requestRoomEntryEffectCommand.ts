@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 
 import { VoiceProviderConfig } from './types';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomEntryEffectAction = 'announce-entry-effect';
 
@@ -96,6 +97,7 @@ export async function requestRoomEntryEffectCommand(
       headers: {
         Authorization: `Bearer ${await getIdToken(true)}`,
         'Content-Type': 'application/json',
+        ...(await getVoiceAppCheckHeader()),
       },
       method: 'POST',
       signal: controller.signal,

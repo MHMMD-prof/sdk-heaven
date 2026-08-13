@@ -27,6 +27,15 @@ describe('storeService', () => {
     expect(await getStoreCatalog({ db, uid: 'self' })).toMatchObject({ result: { featuredItemId: '' } });
   });
 
+  it('never releases or mutates mock item IDs', async () => {
+    const db = storeDb();
+    db.documents.set('storeCatalog/mock-preview-car', catalogItem('mock-preview-car'));
+    expect((await getStoreCatalog({ db, uid: 'self' })).result.items).toEqual([]);
+    expect(await purchaseStoreItem({ clock, db, fieldValue, input: { currency: 'coins', itemId: 'mock-preview-car' }, requestId: 'mock_purchase_1234', uid: 'self' })).toEqual({ errorCode: 'ITEM_UNAVAILABLE' });
+    expect(await equipStoreItem({ clock, db, fieldValue, input: { itemId: 'demo-car' }, requestId: 'mock_equip_123456', uid: 'self' })).toEqual({ errorCode: 'ITEM_UNAVAILABLE' });
+    expect(await giftStoreItem({ clock, db, fieldValue, input: { currency: 'coins', itemId: 'mock-preview-car', recipientPublicId: '7654321' }, requestId: 'mock_gift_1234567', uid: 'self' })).toEqual({ errorCode: 'ITEM_UNAVAILABLE' });
+  });
+
   it('purchases with the chosen currency, decrements stock, and auto-equips without deleting the old item', async () => {
     const db = storeDb();
     db.documents.set('storeCatalog/gold-car', { ...catalogItem(), duration: { kind: 'timed', unit: 'weeks', value: 1 }, stock: { kind: 'limited', remaining: 2 } });

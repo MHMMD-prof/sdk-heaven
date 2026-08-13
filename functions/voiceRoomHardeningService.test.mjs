@@ -10,6 +10,18 @@ const {
 } = require('./voiceRoomRateLimitCore');
 
 describe('voiceRoomHardeningService', () => {
+  it('accepts the LiveKit token surface used by voice admission', async () => {
+    const result = await consumeVoiceRoomHttpRateLimit({
+      clock: { nowMillis: () => 1_000_000, timestampFromMillis: (value) => value },
+      db: fakeDb(),
+      fieldValue: { serverTimestamp: () => 1_000_000 },
+      requestId: '',
+      surface: 'livekit-token',
+      uid: 'user-1',
+    });
+    expect(result).toMatchObject({ ok: true, replayed: false });
+  });
+
   it('counts denied-path HTTP attempts globally and replays one request ID without charging twice', async () => {
     const db = fakeDb();
     const options = {

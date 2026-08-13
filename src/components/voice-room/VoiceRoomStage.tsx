@@ -1,8 +1,10 @@
 import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
+import { Image as ExpoImage } from 'expo-image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Animated,
   Easing,
   LayoutChangeEvent,
@@ -12,29 +14,42 @@ import {
   View,
 } from 'react-native';
 
-import { colors, radius, spacing, typography } from '../../theme';
+import { colors, radius, typography } from '../../theme';
 import { CosmeticAssetRenderer } from '../../cosmetics/CosmeticAssetRenderer';
 import { usePublishedCosmeticAsset } from '../../cosmetics/assetRegistry';
 import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
 import type { QueuedRoomEffect } from '../../voice/roomEffectsQueue';
 import { RoomSeatViewModel } from '../../voice/roomMainScreenModel';
 import {
+  orderRoomSeatsForAccessibility,
+  resolveRoomSeatPresentation,
+} from '../../voice/roomSeatPresentationModel';
+import {
   MAJLIS_DEFAULT_MANIFEST,
-  RoomThemeManifestV1,
+  RoomThemeManifest,
   RoomThemeSeatPositionV1,
+  RoomThemeViewportProfile,
+  resolveRoomThemeScene,
 } from '../../voice/roomThemeContract';
+import { resolveRoomThemeAssetSource } from '../../voice/roomThemeRuntime';
 import { RepresentativeBadge } from '../RepresentativeBadge';
 import { AvatarFrameLayer } from '../AvatarPresentation';
 import { EquipmentCosmeticAsset } from '../EquipmentCosmeticAsset';
 
+const SEAT_WIDTH = 70;
+const SEAT_HEIGHT = 96;
+const OCCUPIED_BORDER_COLOR = 'rgba(255, 244, 222, 0.52)';
+const SPEAKING_STATUS_COLOR = '#F4D58A';
+
 type VoiceRoomStageProps = {
   cosmeticsFlags: CosmeticsFeatureFlags;
-  manifest?: RoomThemeManifestV1;
+  manifest?: RoomThemeManifest;
   modeLabel: string;
   onSeatPress: (seat: RoomSeatViewModel) => void;
   pendingSeatId?: string;
   seats: RoomSeatViewModel[];
   targetedGiftEffect?: QueuedRoomEffect;
+  viewportProfile: RoomThemeViewportProfile;
 };
 
 export function VoiceRoomStage({
@@ -45,44 +60,56 @@ export function VoiceRoomStage({
   pendingSeatId,
   seats,
   targetedGiftEffect,
+  viewportProfile,
 }: VoiceRoomStageProps) {
-  const [stageWidth, setStageWidth] = useState(0);
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const reduceMotion = useReducedMotion();
-  const height = stageHeight(seats.length);
-  const layout = manifest.layouts[String(seats.length) as keyof RoomThemeManifestV1['layouts']]
-    ?? MAJLIS_DEFAULT_MANIFEST.layouts[String(seats.length) as keyof RoomThemeManifestV1['layouts']];
+  const scene = useMemo(
+    () => resolveRoomThemeScene(manifest, viewportProfile),
+    [manifest, viewportProfile],
+  );
+  const layout = scene.layouts[String(seats.length) as keyof RoomThemeManifest['layouts']]
+    ?? MAJLIS_DEFAULT_MANIFEST.layouts[String(seats.length) as keyof RoomThemeManifest['layouts']];
   const positions = useMemo(
     () => new Map(layout?.map((position) => [position.seatNumber, position]) ?? []),
     [layout],
   );
-  const handleLayout = (event: LayoutChangeEvent) => setStageWidth(event.nativeEvent.layout.width);
+  const orderedSeats = useMemo(() => orderRoomSeatsForAccessibility(seats), [seats]);
+  const handleLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setStageSize({ width, height });
+  };
 
   return (
-    <View style={styles.root}>
-      <View style={styles.heading}>
-        <View style={[styles.modePill, { borderColor: manifest.colors.gold }]}>
-          <View style={styles.liveDot} />
-          <Text style={[styles.modeLabel, { color: manifest.colors.textMuted }]}>{modeLabel}</Text>
-        </View>
-        <Text style={[styles.headingTitle, { color: manifest.colors.text }]}>منصة المقاعد</Text>
-      </View>
+    <View style={[styles.root, viewportProfile === 'compact' && styles.rootCompact]}>
       <View
         accessibilityRole="summary"
         onLayout={handleLayout}
-        style={[
-          styles.stage,
-          {
-            backgroundColor: `${manifest.colors.panel}B8`,
-            borderColor: `${manifest.colors.gold}55`,
-            height,
-          },
-        ]}
+        style={styles.stage}
       >
-        {stageWidth > 0 ? seats.map((seat) => (
+        {manifest.assets.stage ? (
+          <ExpoImage
+            accessibilityIgnoresInvertColors
+            cachePolicy="memory-disk"
+            contentFit={scene.stage.fit}
+            contentPosition={mediaContentPosition(scene.stage.focalX, scene.stage.focalY)}
+            recyclingKey={`${manifest.themeId}:${manifest.revision}:stage`}
+            source={resolveRoomThemeAssetSource(manifest.assets.stage.uri)}
+            style={styles.stageArtwork}
+            transition={reduceMotion ? 0 : 140}
+          />
+        ) : null}
+        <View pointerEvents="none" style={styles.modeAnchor}>
+          <View style={[styles.modePill, { borderColor: `${manifest.colors.gold}77` }]}>
+            <View style={[styles.liveDot, { backgroundColor: manifest.colors.goldSoft }]} />
+            <Text style={[styles.modeLabel, { color: manifest.colors.goldSoft }]}>{modeLabel}</Text>
+          </View>
+        </View>
+        {stageSize.width > 0 && stageSize.height > 0 ? orderedSeats.map((seat) => (
           <PositionedSeat
             key={seat.id}
-            height={height}
             cosmeticsFlags={cosmeticsFlags}
+            height={stageSize.height}
             manifest={manifest}
             onPress={() => onSeatPress(seat)}
             pending={pendingSeatId === seat.id}
@@ -90,12 +117,19 @@ export function VoiceRoomStage({
             reduceMotion={reduceMotion}
             seat={seat}
             targetedGiftEffect={targetedGiftEffect?.recipientUid === seat.participant?.id ? targetedGiftEffect : undefined}
-            width={stageWidth}
+            width={stageSize.width}
           />
         )) : null}
       </View>
     </View>
   );
+}
+
+function mediaContentPosition(focalX: number, focalY: number) {
+  return {
+    left: `${Math.round(focalX * 100)}%` as `${number}%`,
+    top: `${Math.round(focalY * 100)}%` as `${number}%`,
+  };
 }
 
 function PositionedSeat({
@@ -112,7 +146,7 @@ function PositionedSeat({
 }: {
   cosmeticsFlags: CosmeticsFeatureFlags;
   height: number;
-  manifest: RoomThemeManifestV1;
+  manifest: RoomThemeManifest;
   onPress: () => void;
   pending: boolean;
   position: RoomThemeSeatPositionV1;
@@ -121,8 +155,8 @@ function PositionedSeat({
   targetedGiftEffect?: QueuedRoomEffect;
   width: number;
 }) {
-  const x = Math.max(0, Math.min(width - 66, position.x * width - 33));
-  const y = Math.max(0, Math.min(height - 72, position.y * height - 30));
+  const x = Math.max(0, Math.min(width - SEAT_WIDTH, position.x * width - SEAT_WIDTH / 2));
+  const y = Math.max(0, Math.min(height - SEAT_HEIGHT, position.y * height - SEAT_HEIGHT / 2));
   const translation = useRef(new Animated.ValueXY({ x, y })).current;
 
   useEffect(() => {
@@ -155,8 +189,10 @@ function PositionedSeat({
       <Seat
         cosmeticsFlags={cosmeticsFlags}
         emptyColors={[manifest.colors.goldSoft, manifest.colors.panelRaised]}
+        emptySeatFrameUri={manifest.assets.emptySeatFrame?.uri}
         onPress={onPress}
         pending={pending}
+        reduceMotion={reduceMotion}
         seat={seat}
         targetedGiftEffect={targetedGiftEffect}
       />
@@ -167,25 +203,35 @@ function PositionedSeat({
 function Seat({
   cosmeticsFlags,
   emptyColors,
+  emptySeatFrameUri,
   onPress,
   pending,
+  reduceMotion,
   seat,
   targetedGiftEffect,
 }: {
   cosmeticsFlags: CosmeticsFeatureFlags;
   emptyColors: [string, string];
+  emptySeatFrameUri?: string;
   onPress: () => void;
   pending: boolean;
+  reduceMotion: boolean;
   seat: RoomSeatViewModel;
   targetedGiftEffect?: QueuedRoomEffect;
 }) {
   const canPress = seat.action !== null && !pending;
-  const isOccupied = !!seat.participant;
+  const presentation = resolveRoomSeatPresentation(seat, pending);
+  const isOccupied = presentation.isOccupied;
   const muted = seat.participant?.isMuted;
-  const ownedFrame = seat.participant?.avatarFrameAssetUrl && seat.participant.avatarFrameItemId
+  const pulse = useSpeakingPulse(seat.isSpeaking, reduceMotion);
+  const hasCanonicalFrame = Boolean(
+    seat.participant?.avatarFrameAssetId && seat.participant.avatarFrameAssetVersionId,
+  );
+  const ownedFrame = seat.participant?.avatarFrameItemId
+    && (seat.participant.avatarFrameAssetUrl || hasCanonicalFrame)
     ? {
-      assetUrl: seat.participant.avatarFrameAssetUrl,
       itemId: seat.participant.avatarFrameItemId,
+      ...(seat.participant.avatarFrameAssetUrl ? { assetUrl: seat.participant.avatarFrameAssetUrl } : {}),
       ...(seat.participant.avatarFrameAssetId && seat.participant.avatarFrameAssetVersionId ? {
         canonicalAsset: {
           assetId: seat.participant.avatarFrameAssetId,
@@ -204,90 +250,152 @@ function Seat({
       onPress={onPress}
       style={styles.seatCell}
     >
-      {isOccupied ? <EquipmentCosmeticAsset category="seat-effect" enabled={cosmeticsFlags.seatEffects} flags={cosmeticsFlags} projection={seat.participant?.equipmentCosmetics?.seatEffect} style={styles.seatEffect} /> : null}
-      <View
-        style={[
-          styles.statusHalo,
-          seat.isSpeaking && styles.speakingHalo,
-          seat.state === 'locked' && styles.lockedFrame,
-          seat.state === 'reconnecting' && styles.reconnectingFrame,
-          seat.state === 'retiring' && styles.retiringFrame,
-        ]}
-      >
-        <View
-          style={[
-            styles.avatarFrame,
-            !isOccupied && {
-              backgroundColor: emptyColors[1],
-              borderColor: `${emptyColors[0]}99`,
-            },
-          ]}
-        >
-          <View style={[styles.avatarInner, seat.isSpeaking && styles.speakingInner]}>
-            {seat.participant ? (
-              <Text style={styles.avatarText}>{seat.participant.avatarLabel}</Text>
+      {isOccupied ? (
+        <EquipmentCosmeticAsset
+          category="seat-effect"
+          enabled={cosmeticsFlags.seatEffects}
+          flags={cosmeticsFlags}
+          projection={seat.participant?.equipmentCosmetics?.seatEffect}
+          style={styles.seatEffect}
+        />
+      ) : null}
+      <View style={styles.seatVisual}>
+        {isOccupied && seat.isSpeaking ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.speakingHalo,
+              {
+                borderColor: SPEAKING_STATUS_COLOR,
+                shadowColor: SPEAKING_STATUS_COLOR,
+                transform: [{ scale: pulse }],
+              },
+            ]}
+          />
+        ) : null}
+        {isOccupied ? (
+          <View
+            style={[
+              styles.avatarFrame,
+              { borderColor: ownedFrame ? 'transparent' : OCCUPIED_BORDER_COLOR },
+              presentation.kind === 'reconnecting' && styles.reconnectingFrame,
+              presentation.kind === 'retiring' && styles.retiringFrame,
+            ]}
+          >
+            <View style={styles.avatarInner}>
+              <Text style={styles.avatarText}>{seat.participant?.avatarLabel}</Text>
+            </View>
+            {ownedFrame ? (
+              <AvatarFrameLayer
+                flags={cosmeticsFlags}
+                frame={ownedFrame}
+                renderLegacyWhenUnifiedDisabled
+              />
+            ) : null}
+            {muted ? (
+              <View accessibilityLabel="الميكروفون مكتوم" style={styles.muteBadge}>
+                <SymbolView
+                  name={{ ios: 'mic.slash.fill', android: 'mic_off', web: 'mic_off' }}
+                  size={10}
+                  tintColor="#FFFFFF"
+                />
+              </View>
+            ) : null}
+            {seat.isOwner || seat.isModerator ? (
+              <View
+                accessibilityLabel={presentation.roleLabel}
+                style={[styles.roleBadge, seat.isModerator && styles.moderatorBadge]}
+              >
+                <SymbolView
+                  name={
+                    seat.isOwner
+                      ? { ios: 'crown.fill', android: 'workspace_premium', web: 'workspace_premium' }
+                      : { ios: 'shield.fill', android: 'shield', web: 'shield' }
+                  }
+                  size={9}
+                  tintColor={seat.isOwner ? '#2A1604' : '#FFFFFF'}
+                />
+              </View>
+            ) : null}
+            <RepresentativeBadge
+              active={seat.participant?.representativeBadgeActive}
+              style={styles.representativeBadge}
+            />
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.emptySeatShell,
+              { backgroundColor: emptyColors[1], borderColor: `${emptyColors[0]}99` },
+              presentation.kind === 'locked' && styles.lockedFrame,
+              presentation.kind === 'reconnecting' && styles.reconnectingFrame,
+              presentation.kind === 'retiring' && styles.retiringFrame,
+            ]}
+          >
+            {emptySeatFrameUri ? (
+              <ExpoImage
+                accessibilityIgnoresInvertColors
+                contentFit="contain"
+                pointerEvents="none"
+                source={resolveRoomThemeAssetSource(emptySeatFrameUri)}
+                style={styles.emptySeatArtwork}
+              />
+            ) : null}
+            {pending ? (
+              <ActivityIndicator color={emptyColors[0]} size="small" />
             ) : (
               <SymbolView
-                name={
-                  seat.state === 'locked'
-                    ? { ios: 'lock.fill', android: 'lock', web: 'lock' }
-                    : seat.state === 'reconnecting'
-                      ? { ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' }
-                      : { ios: 'plus', android: 'add', web: 'add' }
-                }
-                size={seat.state === 'locked' ? 17 : 21}
-                tintColor={seat.state === 'locked' ? colors.textSubtle : emptyColors[0]}
+                name={seatStateSymbol(presentation.kind)}
+                size={presentation.kind === 'open' ? 21 : 17}
+                tintColor={presentation.kind === 'locked' ? '#8A7A68' : emptyColors[0]}
               />
             )}
+            <View style={styles.emptySeatNumberBadge}>
+              <Text style={styles.emptySeatNumber}>{seat.seatNumber}</Text>
+            </View>
           </View>
-          {isOccupied && ownedFrame ? (
-            <AvatarFrameLayer
-              flags={cosmeticsFlags}
-              frame={ownedFrame}
-              renderLegacyWhenUnifiedDisabled
-            />
-          ) : null}
-          {muted ? (
-            <View style={styles.muteBadge}>
-              <SymbolView
-                name={{ ios: 'mic.slash.fill', android: 'mic_off', web: 'mic_off' }}
-                size={10}
-                tintColor="#FFFFFF"
-              />
-            </View>
-          ) : null}
-          {seat.isOwner || seat.isModerator ? (
-            <View style={[styles.roleBadge, seat.isModerator && styles.moderatorBadge]}>
-              <SymbolView
-                name={
-                  seat.isOwner
-                    ? { ios: 'crown.fill', android: 'workspace_premium', web: 'workspace_premium' }
-                    : { ios: 'shield.fill', android: 'shield', web: 'shield' }
-                }
-                size={9}
-                tintColor={seat.isOwner ? '#2A1604' : '#FFFFFF'}
-              />
-            </View>
-          ) : null}
-          <RepresentativeBadge
-            active={seat.participant?.representativeBadgeActive}
-            style={styles.representativeBadge}
-          />
-        </View>
+        )}
       </View>
       <View style={styles.nameShell}>
-        {isOccupied ? <EquipmentCosmeticAsset category="nameplate" enabled={cosmeticsFlags.nameplates} flags={cosmeticsFlags} projection={seat.participant?.equipmentCosmetics?.nameplate} style={styles.seatNameplate} /> : null}
-        <Text numberOfLines={1} style={[styles.name, seat.isSpeaking && styles.speakingName]}>
-          {seat.participant?.displayName || (pending ? 'جارٍ التنفيذ…' : `مقعد ${seat.seatNumber}`)}
+        {isOccupied ? (
+          <EquipmentCosmeticAsset
+            category="nameplate"
+            enabled={cosmeticsFlags.nameplates}
+            flags={cosmeticsFlags}
+            projection={seat.participant?.equipmentCosmetics?.nameplate}
+            style={styles.seatNameplate}
+          />
+        ) : null}
+        <Text
+          numberOfLines={1}
+          style={[styles.name, seat.isSpeaking && styles.speakingName]}
+        >
+          {seat.participant?.displayName || presentation.secondaryLabel || ''}
         </Text>
-        {isOccupied ? <EquipmentCosmeticAsset category="cosmetic-badge" enabled={cosmeticsFlags.cosmeticBadges} flags={cosmeticsFlags} projection={seat.participant?.equipmentCosmetics?.cosmeticBadge} style={styles.seatCosmeticBadge} /> : null}
+        {isOccupied ? (
+          <EquipmentCosmeticAsset
+            category="cosmetic-badge"
+            enabled={cosmeticsFlags.cosmeticBadges}
+            flags={cosmeticsFlags}
+            projection={seat.participant?.equipmentCosmetics?.cosmeticBadge}
+            style={styles.seatCosmeticBadge}
+          />
+        ) : null}
       </View>
-      <Text style={styles.seatNumber}>#{seat.seatNumber}</Text>
       {targetedGiftEffect ? (
         <TargetedGiftEffect effect={targetedGiftEffect} flags={cosmeticsFlags} />
       ) : null}
     </Pressable>
   );
+}
+
+function seatStateSymbol(kind: ReturnType<typeof resolveRoomSeatPresentation>['kind']) {
+  if (kind === 'locked') return { ios: 'lock.fill', android: 'lock', web: 'lock' } as const;
+  if (kind === 'reconnecting') return { ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' } as const;
+  if (kind === 'retiring') {
+    return { ios: 'hourglass.bottomhalf.filled', android: 'hourglass_bottom', web: 'hourglass_bottom' } as const;
+  }
+  return { ios: 'plus', android: 'add', web: 'add' } as const;
 }
 
 function TargetedGiftEffect({ effect, flags }: { effect: QueuedRoomEffect; flags: CosmeticsFeatureFlags }) {
@@ -300,11 +408,11 @@ function TargetedGiftEffect({ effect, flags }: { effect: QueuedRoomEffect; flags
     && effect.assetVersionId,
   );
   const bundle = usePublishedCosmeticAsset(effect.assetId, effect.assetVersionId, enabled);
-  const rendererFlags = {
+  const rendererFlags = useMemo(() => ({
     ...flags,
     effectAudio: flags.effectAudio && flags.roomGiftAudio && effect.audioEnabled === true,
     video: flags.video && flags.roomGiftVideo,
-  };
+  }), [effect.audioEnabled, flags]);
   useEffect(() => {
     if (!flags.roomGiftAnimations || effect.hapticPolicy === 'off') return;
     const feedback = effect.hapticPolicy === 'success'
@@ -332,6 +440,38 @@ function TargetedGiftEffect({ effect, flags }: { effect: QueuedRoomEffect; flags
   );
 }
 
+function useSpeakingPulse(isSpeaking: boolean, reduceMotion: boolean) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!isSpeaking || reduceMotion) {
+      pulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          toValue: 1.08,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      pulse.setValue(1);
+    };
+  }, [isSpeaking, pulse, reduceMotion]);
+  return pulse;
+}
+
 function useReducedMotion() {
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
@@ -346,13 +486,6 @@ function useReducedMotion() {
     };
   }, []);
   return enabled;
-}
-
-function stageHeight(count: number) {
-  if (count <= 5) return 148;
-  if (count <= 10) return 210;
-  if (count <= 15) return 252;
-  return 286;
 }
 
 function fallbackPosition(seatNumber: number, count: number): RoomThemeSeatPositionV1 {
@@ -370,32 +503,39 @@ function fallbackPosition(seatNumber: number, count: number): RoomThemeSeatPosit
 
 const styles = StyleSheet.create({
   root: {
-    flexShrink: 1,
-    paddingTop: spacing.sm,
+    flex: 1,
+    minHeight: 240,
   },
-  heading: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
+  rootCompact: {
+    minHeight: 190,
   },
-  headingTitle: {
-    fontSize: typography.sizes.caption,
-    fontWeight: typography.weights.black,
-    writingDirection: 'rtl',
+  stage: {
+    backgroundColor: 'transparent',
+    flex: 1,
+    overflow: 'visible',
+    position: 'relative',
+    width: '100%',
+  },
+  stageArtwork: {
+    ...StyleSheet.absoluteFill,
+  },
+  modeAnchor: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 30,
   },
   modePill: {
     alignItems: 'center',
-    backgroundColor: 'rgba(3,2,7,0.72)',
+    backgroundColor: 'rgba(8, 4, 5, 0.7)',
     borderRadius: radius.full,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 5,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   liveDot: {
-    backgroundColor: colors.emerald,
     borderRadius: radius.full,
     height: 6,
     width: 6,
@@ -405,13 +545,6 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.bold,
     writingDirection: 'rtl',
   },
-  stage: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    overflow: 'hidden',
-    position: 'relative',
-    width: '100%',
-  },
   positionedSeat: {
     left: 0,
     position: 'absolute',
@@ -419,54 +552,82 @@ const styles = StyleSheet.create({
   },
   seatCell: {
     alignItems: 'center',
-    minHeight: 72,
-    width: 66,
+    minHeight: SEAT_HEIGHT,
+    width: SEAT_WIDTH,
   },
-  seatEffect: { height: 64, position: 'absolute', top: -5, width: 64, zIndex: 1 },
-  statusHalo: {
+  seatEffect: { height: 68, position: 'absolute', top: -6, width: 68, zIndex: 1 },
+  seatVisual: {
     alignItems: 'center',
-    borderColor: 'transparent',
     borderRadius: radius.full,
-    borderWidth: 2,
-    height: 54,
+    height: 62,
     justifyContent: 'center',
-    width: 54,
+    position: 'relative',
+    width: 62,
     zIndex: 2,
   },
   speakingHalo: {
-    borderColor: colors.emerald,
-    shadowColor: colors.emerald,
+    borderRadius: radius.full,
+    borderWidth: 2.5,
+    height: 62,
+    position: 'absolute',
     shadowOpacity: 0.9,
-    shadowRadius: 7,
+    shadowRadius: 12,
+    width: 62,
   },
   avatarFrame: {
     alignItems: 'center',
-    backgroundColor: '#17131A',
-    borderColor: 'rgba(255,255,255,0.26)',
     borderRadius: radius.full,
-    borderWidth: 1,
-    height: 48,
+    borderWidth: 1.5,
+    height: 50,
     justifyContent: 'center',
     position: 'relative',
-    width: 48,
+    width: 50,
   },
   avatarInner: {
     alignItems: 'center',
-    backgroundColor: '#120B19',
+    backgroundColor: '#130A0B',
     borderRadius: radius.full,
-    height: 42,
+    height: 44,
     justifyContent: 'center',
     overflow: 'hidden',
-    width: 42,
+    width: 44,
   },
-  speakingInner: {
-    backgroundColor: '#09261E',
+  emptySeatShell: {
+    alignItems: 'center',
+    borderRadius: radius.full,
+    borderWidth: 1.5,
+    height: 54,
+    justifyContent: 'center',
+    overflow: 'visible',
+    position: 'relative',
+    width: 54,
   },
-  ownedAvatarFrame: {
-    height: 60,
+  emptySeatArtwork: {
+    bottom: -3,
+    left: -3,
+    opacity: 0.95,
     position: 'absolute',
-    width: 60,
-    zIndex: 4,
+    right: -3,
+    top: -3,
+  },
+  emptySeatNumberBadge: {
+    alignItems: 'center',
+    backgroundColor: '#0A0607',
+    borderColor: 'rgba(244, 213, 138, 0.58)',
+    borderRadius: radius.full,
+    borderWidth: 1,
+    height: 19,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: -5,
+    top: -5,
+    width: 19,
+  },
+  emptySeatNumber: {
+    color: '#F4D58A',
+    fontSize: 9,
+    fontWeight: typography.weights.black,
+    writingDirection: 'ltr',
   },
   lockedFrame: {
     opacity: 0.56,
@@ -479,7 +640,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   avatarText: {
-    color: colors.goldSoft,
+    color: '#F4D58A',
     fontSize: 17,
     fontWeight: typography.weights.black,
   },
@@ -491,8 +652,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 17,
     justifyContent: 'center',
-    left: -2,
     position: 'absolute',
+    right: -2,
     top: -3,
     width: 17,
     zIndex: 7,
@@ -522,26 +683,30 @@ const styles = StyleSheet.create({
     zIndex: 8,
   },
   name: {
-    color: colors.textMuted,
-    fontSize: 9,
+    color: '#FFF4DE',
+    fontSize: 10,
     fontWeight: typography.weights.bold,
-    marginTop: 1,
-    maxWidth: 66,
+    maxWidth: 70,
     textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
     writingDirection: 'rtl',
   },
-  nameShell: { alignItems: 'center', flexDirection: 'row', height: 16, justifyContent: 'center', marginTop: 1, maxWidth: 72, position: 'relative' },
+  speakingName: {
+    color: SPEAKING_STATUS_COLOR,
+  },
+  nameShell: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    height: 18,
+    justifyContent: 'center',
+    marginTop: 3,
+    maxWidth: 76,
+    position: 'relative',
+  },
   seatNameplate: { bottom: 0, left: 0, opacity: 0.68, position: 'absolute', right: 0, top: 0 },
   seatCosmeticBadge: { height: 14, width: 14 },
-  speakingName: {
-    color: colors.emerald,
-  },
-  seatNumber: {
-    color: colors.textSubtle,
-    fontSize: 8,
-    marginTop: -1,
-    writingDirection: 'ltr',
-  },
   targetedGift: {
     alignItems: 'center',
     height: 94,

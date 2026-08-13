@@ -124,46 +124,94 @@ export function DirectChatComposerTools({
 
 function VoiceRecordButton({ disabled, onRecorded }: { disabled: boolean; onRecorded: (attachment: DirectChatLocalAttachment) => void }) {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const state = useAudioRecorderState(recorder, 100);
+  const state = useAudioRecorderState(recorder, 250);
+  const alive = useRef(true);
   const held = useRef(false);
   const started = useRef(false);
-  useEffect(() => () => {
-    held.current = false;
-    if (recorder.isRecording) void recorder.stop();
-    void setAudioModeAsync({ allowsRecording: false, interruptionMode: 'doNotMix', playsInSilentMode: true, shouldPlayInBackground: false, shouldRouteThroughEarpiece: false });
+  const durationMillis = useRef(0);
+  const busy = useRef(false);
+
+  useEffect(() => {
+    durationMillis.current = state.durationMillis;
+  }, [state.durationMillis]);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      held.current = false;
+      started.current = false;
+      void releaseRecorder(recorder);
+    };
   }, [recorder]);
+
   const start = async () => {
+    if (disabled || busy.current) return;
     held.current = true;
+    busy.current = true;
     try {
       if (!(await requestRecordingPermissionsAsync()).granted) throw new Error('Microphone permission is required.');
-      if (!held.current) return;
-      await setAudioModeAsync({ allowsRecording: true, interruptionMode: 'doNotMix', playsInSilentMode: true, shouldPlayInBackground: false, shouldRouteThroughEarpiece: false });
+      if (!held.current || !alive.current) return;
+      await setAudioModeAsync({
+        allowsRecording: true,
+        interruptionMode: 'doNotMix',
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        shouldRouteThroughEarpiece: false,
+      });
+      if (!held.current || !alive.current) return;
       await recorder.prepareToRecordAsync();
-      if (!held.current) return;
+      if (!held.current || !alive.current) {
+        await releaseRecorder(recorder);
+        return;
+      }
       started.current = true;
       recorder.record({ forDuration: DIRECT_CHAT_VOICE_MAX_SECONDS });
     } catch (cause) {
       held.current = false;
       started.current = false;
-      void setAudioModeAsync({ allowsRecording: false, interruptionMode: 'doNotMix', playsInSilentMode: true, shouldPlayInBackground: false, shouldRouteThroughEarpiece: false });
-      Alert.alert('Voice message', cause instanceof Error ? cause.message : 'Unable to start recording.');
+      await releaseRecorder(recorder);
+      if (alive.current) {
+        Alert.alert('Voice message', cause instanceof Error ? cause.message : 'Unable to start recording.');
+      }
+    } finally {
+      busy.current = false;
     }
   };
+
   const stop = async () => {
     held.current = false;
-    if (!started.current) return;
-    if (recorder.isRecording) await recorder.stop();
+    if (!started.current || busy.current) return;
+    busy.current = true;
     started.current = false;
-    await setAudioModeAsync({ allowsRecording: false, interruptionMode: 'doNotMix', playsInSilentMode: true, shouldPlayInBackground: false, shouldRouteThroughEarpiece: false });
-    const uri = recorder.uri;
-    if (!uri || state.durationMillis < 300) return;
-    const file = new File(uri);
-    if (!file.exists || file.size > DIRECT_CHAT_VOICE_MAX_BYTES) {
-      Alert.alert('Voice message', 'Recording is larger than 5 MB.');
-      return;
+    try {
+      let uri: string | null = null;
+      try {
+        await recorder.stop();
+        uri = typeof recorder.uri === 'string' ? recorder.uri : null;
+      } catch {
+        return;
+      }
+      if (!alive.current) return;
+      await setAudioModeAsync({
+        allowsRecording: false,
+        interruptionMode: 'doNotMix',
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        shouldRouteThroughEarpiece: false,
+      }).catch(() => undefined);
+      if (!uri || durationMillis.current < 300) return;
+      const file = new File(uri);
+      if (!file.exists || file.size > DIRECT_CHAT_VOICE_MAX_BYTES) {
+        Alert.alert('Voice message', 'Recording is larger than 5 MB.');
+        return;
+      }
+      onRecorded({ contentType: 'audio/mp4', kind: 'voice-note', sizeBytes: file.size, uri });
+    } finally {
+      busy.current = false;
     }
-    onRecorded({ contentType: 'audio/mp4', kind: 'voice-note', sizeBytes: file.size, uri });
   };
+
   return (
     <Pressable
       accessibilityHint="Press and hold to record, release to preview"
@@ -178,6 +226,25 @@ function VoiceRecordButton({ disabled, onRecorded }: { disabled: boolean; onReco
       {state.isRecording ? <Text style={styles.recordingTime}>{Math.min(120, Math.ceil(state.durationMillis / 1000))}s</Text> : null}
     </Pressable>
   );
+}
+
+async function releaseRecorder(recorder: ReturnType<typeof useAudioRecorder>) {
+  try {
+    await recorder.stop();
+  } catch {
+    // Recorder may already be stopped or native object already released.
+  }
+  try {
+    await setAudioModeAsync({
+      allowsRecording: false,
+      interruptionMode: 'doNotMix',
+      playsInSilentMode: true,
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
+    });
+  } catch {
+    // Ignore audio-mode reset failures during teardown.
+  }
 }
 
 function AttachmentPreview({ attachment, error, onCancel, onRetry, progress, uploading }: { attachment: DirectChatLocalAttachment; error: string; onCancel: () => void; onRetry: () => void; progress: number; uploading: boolean }) {

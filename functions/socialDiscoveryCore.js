@@ -83,6 +83,8 @@ function mapDiscoveryProfile(profile) {
     displayName: profile.displayName,
     ...(readPublicAvatarFrameProjection(profile) ? { equippedAvatarFrame: readPublicAvatarFrameProjection(profile) } : {}),
     friendCount: readCount(profile.friendCount),
+    followerCount: readCount(profile.followerCount),
+    followingCount: readCount(profile.followingCount),
     ...(profile.gender === 'male' || profile.gender === 'female' ? { gender: profile.gender } : {}),
     giftScore: readCount(profile.giftScore),
     moderationStatus: profile.moderationStatus,

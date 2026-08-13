@@ -108,11 +108,23 @@ async function getDailyLoginStatus({ clock, db, input, uid }) {
     lastStreakPosition: state.streakPosition,
     today: day.value,
   });
+  if (!position.ok) return dailyLoginError(position.code);
   const receipt = todaySnapshot.exists ? mapSafeReceipt(todaySnapshot.data(), uid, day.value.dayId) : undefined;
-  const alreadyClaimed = Boolean(receipt) || position.value?.alreadyClaimed === true;
-  const claimable = enabled && compatible && !alreadyClaimed;
+  const receiptConflict = todaySnapshot.exists && !receipt;
+  const stateConflict = position.value.alreadyClaimed && !todaySnapshot.exists;
+  const alreadyClaimed = Boolean(receipt) || position.value.alreadyClaimed;
+  const streakPosition = receipt?.streakPosition || position.value.position;
+  const effectiveReward = resolveEffectiveReward(
+    campaign.value.rewards[streakPosition - 1].reward,
+    itemRewardsEnabled,
+  );
+  const claimable = enabled
+    && compatible
+    && !alreadyClaimed
+    && !receiptConflict
+    && effectiveReward.ok;
   return {
-      result: {
+    result: {
       alreadyClaimed,
       calendar: publicDailyLoginCalendar(campaign.value, itemRewardsEnabled),
       campaignRevision: campaign.value.revision,
@@ -125,12 +137,18 @@ async function getDailyLoginStatus({ clock, db, input, uid }) {
       ...(receipt ? { lastReceipt: receipt } : {}),
       reason: pointer.value.claimsPaused
         ? 'CLAIMS_PAUSED'
-        : claimable
-          ? ''
-          : alreadyClaimed
-            ? 'ALREADY_CLAIMED'
-            : 'CLIENT_INCOMPATIBLE',
-      streakPosition: position.value?.position || 1,
+        : receiptConflict
+          ? 'CLAIM_CONFLICT'
+          : stateConflict
+            ? 'CLAIM_STATE_CONFLICT'
+            : alreadyClaimed
+              ? 'ALREADY_CLAIMED'
+              : !compatible
+                ? 'CLIENT_INCOMPATIBLE'
+                : !effectiveReward.ok
+                  ? effectiveReward.code
+                  : '',
+      streakPosition,
       timeZone: day.value.timeZone,
       todayDayId: day.value.dayId,
     },
@@ -194,18 +212,7 @@ async function claimDailyLoginReward({ clock, db, fieldValue, input, uid }) {
     if (receiptSnapshot.exists) {
       const receipt = mapSafeReceipt(receiptSnapshot.data(), uid, day.value.dayId);
       if (!receipt) return dailyLoginError('CLAIM_CONFLICT');
-      const result = receiptSnapshot.data().result;
-      if (!result) return dailyLoginError('CLAIM_CONFLICT');
-      transaction.create(refs.command, {
-        action: command.value.action,
-        createdAt: fieldValue.serverTimestamp(),
-        dayId: day.value.dayId,
-        replayOfReceiptId: receipt.receiptId,
-        requestId: command.value.requestId,
-        result,
-        uid,
-      });
-      return { replayed: true, result };
+      return { replayed: true, result: receipt.result };
     }
 
     const features = featuresSnapshot.exists ? featuresSnapshot.data() : {};
@@ -268,7 +275,10 @@ async function claimDailyLoginReward({ clock, db, fieldValue, input, uid }) {
       campaign.value.rewards[position.value.position - 1].reward,
       features.daily_login_reward_items === true,
     );
-    if (!reward.ok) return dailyLoginError(reward.code);
+    if (!reward.ok) {
+      writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
+      return dailyLoginError(reward.code);
+    }
     const itemRefs = reward.value.items.map((item) => ({
       catalog: db.doc(`storeCatalog/${item.itemId}`),
       ownership: db.doc(`storeOwnerships/${uid}/items/${item.itemId}`),
@@ -294,12 +304,20 @@ async function claimDailyLoginReward({ clock, db, fieldValue, input, uid }) {
         || catalog.availability !== 'available'
         || !REWARDABLE_STORE_CATEGORIES.includes(catalog.category)
         || (catalog.stock.kind === 'limited' && catalog.stock.remaining === 0)
-      ) return dailyLoginError('ITEM_NOT_REWARDABLE');
-      if (ownershipSnapshot.exists && !ownership) return dailyLoginError('OWNERSHIP_INVALID');
+      ) {
+        writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
+        return dailyLoginError('ITEM_NOT_REWARDABLE');
+      }
+      if (ownershipSnapshot.exists && !ownership) {
+        writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
+        return dailyLoginError('OWNERSHIP_INVALID');
+      }
       if (ownership && ownership.category !== catalog.category) {
+        writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
         return dailyLoginError('OWNERSHIP_CATALOG_MISMATCH');
       }
       if (ownership && catalog.duration.kind === 'permanent' && !itemRefs[index].reward.duplicateFallback) {
+        writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
         return dailyLoginError('DUPLICATE_FALLBACK_REQUIRED');
       }
       catalogs.push(catalog);
@@ -333,7 +351,10 @@ async function claimDailyLoginReward({ clock, db, fieldValue, input, uid }) {
       const amount = currencyCredits[currency];
       if (amount === 0) continue;
       const credit = applyWalletMutation(wallet, { amount, currency, type: 'credit' });
-      if (!credit.ok) return dailyLoginError('WALLET_LIMIT');
+      if (!credit.ok) {
+        writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
+        return dailyLoginError('WALLET_LIMIT');
+      }
       wallet = credit.value.wallet;
       walletCredits.push({ amount, balanceAfter: credit.value.balanceAfter, currency });
     }
@@ -344,7 +365,10 @@ async function claimDailyLoginReward({ clock, db, fieldValue, input, uid }) {
       streakPosition: position.value.position,
       uid,
     });
-    if (!fingerprint || settlementSnapshot.exists) return dailyLoginError('CLAIM_CONFLICT');
+    if (!fingerprint || settlementSnapshot.exists) {
+      writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
+      return dailyLoginError('CLAIM_CONFLICT');
+    }
 
     const timestamp = fieldValue.serverTimestamp();
     const result = {
@@ -359,13 +383,7 @@ async function claimDailyLoginReward({ clock, db, fieldValue, input, uid }) {
       streakPosition: position.value.position,
       walletCredits,
     };
-    transaction.set(refs.rateLimit, {
-      attemptsMs: rateLimit.value.attemptsMs,
-      count: rateLimit.value.count,
-      updatedAt: timestamp,
-      uid,
-      windowStartedAt: clock.timestampFromMillis(rateLimit.value.attemptsMs[0]),
-    });
+    writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate: rateLimit.value, refs, transaction, uid });
     if (walletCredits.length > 0) {
       transaction.set(refs.wallet, buildWalletDocument(wallet, {
         createdAt: walletSnapshot.exists && walletSnapshot.data()?.createdAt
@@ -602,6 +620,16 @@ function disabledStatus({ day, enabled, presentationVisible = false, reason }) {
   };
 }
 
+function writeDailyLoginRateLimitAttempt({ clock, fieldValue, rate, refs, transaction, uid }) {
+  transaction.set(refs.rateLimit, {
+    attemptsMs: rate.attemptsMs,
+    count: rate.count,
+    updatedAt: fieldValue.serverTimestamp(),
+    uid,
+    windowStartedAt: clock.timestampFromMillis(rate.attemptsMs[0]),
+  });
+}
+
 function mapSafeReceipt(data, uid, dayId) {
   if (
     !data
@@ -609,6 +637,19 @@ function mapSafeReceipt(data, uid, dayId) {
     || data.dayId !== dayId
     || data.receiptId !== createDailyLoginReceiptId({ dayId, uid })
     || data.settlementId !== createDailyLoginSettlementId({ dayId, uid })
+    || !Number.isSafeInteger(data.campaignRevision)
+    || data.campaignRevision < 1
+    || !Number.isSafeInteger(data.streakPosition)
+    || data.streakPosition < 1
+    || data.streakPosition > 7
+    || !data.result
+    || typeof data.result !== 'object'
+    || Array.isArray(data.result)
+    || data.result.dayId !== data.dayId
+    || data.result.receiptId !== data.receiptId
+    || data.result.settlementId !== data.settlementId
+    || data.result.campaignRevision !== data.campaignRevision
+    || data.result.streakPosition !== data.streakPosition
   ) return undefined;
   return {
     campaignRevision: data.campaignRevision,

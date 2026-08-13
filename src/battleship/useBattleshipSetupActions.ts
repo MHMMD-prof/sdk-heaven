@@ -20,6 +20,7 @@ type UseBattleshipSetupActionsOptions = {
   mode: MiniGameMode;
   notifyError: () => void;
   notifySuccess: () => void;
+  onOnlineFleetConfirmed?: (targets: MiniGameTarget[]) => void;
   phase: GamePhase;
   playInvalidSound: () => void;
   playTapSound: () => void;
@@ -50,6 +51,7 @@ export function useBattleshipSetupActions({
   mode,
   notifyError,
   notifySuccess,
+  onOnlineFleetConfirmed,
   phase,
   playInvalidSound,
   playTapSound,
@@ -206,6 +208,11 @@ export function useBattleshipSetupActions({
     notifySuccess();
     setSelectedTargetId(undefined);
     resetPlacementPreview();
+
+    if (onOnlineFleetConfirmed) {
+      onOnlineFleetConfirmed(setupTargets);
+      return;
+    }
 
     if (phase === 'setup-player-1') {
       setPhase('handoff-to-player-2');

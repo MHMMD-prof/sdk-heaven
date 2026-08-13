@@ -1,12 +1,15 @@
 const { inspectPublicProfile } = require('./socialProfileCore');
 const {
   buildArabicNotification,
+  buildDirectChatNotificationContent,
+  createDirectChatCoalesceId,
   createNotificationDeliveryId,
   mapNotificationPreferences,
   normalizeNotificationPreferencesInput,
   normalizePushDeviceInput,
   normalizeUnregisterPushDeviceInput,
   notificationCategoryForKind,
+  shouldCoalesceDirectChatNotification,
 } = require('./socialNotificationsCore');
 
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
@@ -159,6 +162,141 @@ async function deliverSocialNotification({ actorUid, db, fieldValue, kind, recip
   const content = buildArabicNotification(kind, actorProfile.data()?.displayName, actorUid);
   if (!content) return { status: 'skipped' };
   const deviceDocuments = devices.docs.filter((document) => typeof document.data()?.token === 'string');
+  return submitExpoDelivery({
+    actorUid,
+    category,
+    content,
+    db,
+    deviceDocuments,
+    fieldValue,
+    fetchImpl,
+    kind,
+    recipientUid,
+    requestId,
+  });
+}
+
+async function deliverDirectChatNotification({
+  actorUid,
+  conversationId,
+  db,
+  fieldValue,
+  fetchImpl = fetch,
+  kind,
+  messageKind,
+  nowMs = Date.now(),
+  recipientUid,
+  requestId,
+  text,
+}) {
+  const category = notificationCategoryForKind(kind);
+  if (!category || typeof recipientUid !== 'string' || !recipientUid || recipientUid === actorUid) return { status: 'skipped' };
+  if (typeof conversationId !== 'string' || !conversationId || typeof requestId !== 'string' || !requestId) {
+    return { status: 'skipped' };
+  }
+
+  const [
+    feature,
+    preferencesSnapshot,
+    actorProfile,
+    recipientProfile,
+    devices,
+    memberProjection,
+    blockedByActor,
+    blockedByRecipient,
+  ] = await Promise.all([
+    db.doc('appConfig/socialFeatures').get(),
+    db.doc(`notificationPreferences/${recipientUid}`).get(),
+    db.doc(`publicProfiles/${actorUid}`).get(),
+    db.doc(`publicProfiles/${recipientUid}`).get(),
+    db.collection(`pushDevices/${recipientUid}/tokens`).where('active', '==', true).limit(MAX_PUSH_DEVICES).get(),
+    db.doc(`directConversationMembers/${recipientUid}/items/${conversationId}`).get(),
+    db.doc(`blocks/${actorUid}/blocked/${recipientUid}`).get(),
+    db.doc(`blocks/${recipientUid}/blocked/${actorUid}`).get(),
+  ]);
+
+  if (feature.data()?.pushNotifications !== true) return { status: 'disabled' };
+  const preferences = mapNotificationPreferences(preferencesSnapshot.exists ? preferencesSnapshot.data() : undefined);
+  if (preferences[category] !== true) return { status: 'preference-disabled' };
+  if (!recipientProfile.exists || recipientProfile.data()?.moderationStatus !== 'active') return { status: 'skipped' };
+  if (blockedByActor.exists || blockedByRecipient.exists) return { status: 'blocked' };
+  if (memberProjection.exists && memberProjection.data()?.muted === true) return { status: 'muted' };
+
+  const content = buildDirectChatNotificationContent({
+    actorDisplayName: actorProfile.data()?.displayName,
+    actorUid,
+    kind,
+    messageKind,
+    showMessagePreview: preferences.showMessagePreview,
+    text,
+  });
+  if (!content) return { status: 'skipped' };
+
+  const coalesceId = createDirectChatCoalesceId(recipientUid, conversationId);
+  const coalesceRef = db.doc(`notificationCoalesce/${coalesceId}`);
+  const coalesceSnapshot = await coalesceRef.get();
+  const lastSentAtMs = Number(coalesceSnapshot.exists ? coalesceSnapshot.data()?.lastSentAtMs : Number.NaN);
+  const coalesce = shouldCoalesceDirectChatNotification({ lastSentAtMs, nowMs });
+
+  const deviceDocuments = devices.docs.filter((document) => typeof document.data()?.token === 'string');
+  const deliveryId = createNotificationDeliveryId(actorUid, requestId);
+  const deliveryRef = db.doc(`notificationDeliveries/${deliveryId}`);
+  const timestamp = fieldValue.serverTimestamp();
+
+  try {
+    await deliveryRef.create({
+      actorUid,
+      category,
+      conversationId,
+      createdAt: timestamp,
+      deviceCount: deviceDocuments.length,
+      kind,
+      recipientUid,
+      requestId,
+      status: coalesce ? 'coalesced' : (deviceDocuments.length ? 'sending' : 'no-devices'),
+      updatedAt: timestamp,
+    });
+  } catch (error) {
+    if (isAlreadyExistsError(error)) return { status: 'duplicate' };
+    throw error;
+  }
+
+  if (coalesce) return { status: 'coalesced' };
+  if (deviceDocuments.length === 0) return { status: 'no-devices' };
+
+  const submitted = await sendExpoPush({
+    content,
+    deliveryRef,
+    deviceDocuments,
+    fieldValue,
+    fetchImpl,
+    recipientUid,
+    timestamp,
+    db,
+  });
+  if (submitted.status === 'submitted') {
+    await coalesceRef.set({
+      conversationId,
+      lastSentAtMs: nowMs,
+      recipientUid,
+      updatedAt: timestamp,
+    }, { merge: true });
+  }
+  return submitted;
+}
+
+async function submitExpoDelivery({
+  actorUid,
+  category,
+  content,
+  db,
+  deviceDocuments,
+  fieldValue,
+  fetchImpl,
+  kind,
+  recipientUid,
+  requestId,
+}) {
   const deliveryId = createNotificationDeliveryId(actorUid, requestId);
   const deliveryRef = db.doc(`notificationDeliveries/${deliveryId}`);
   const timestamp = fieldValue.serverTimestamp();
@@ -181,13 +319,16 @@ async function deliverSocialNotification({ actorUid, db, fieldValue, kind, recip
   }
 
   if (deviceDocuments.length === 0) return { status: 'no-devices' };
+  return sendExpoPush({ content, db, deliveryRef, deviceDocuments, fieldValue, fetchImpl, recipientUid, timestamp });
+}
 
+async function sendExpoPush({ content, db, deliveryRef, deviceDocuments, fieldValue, fetchImpl, recipientUid, timestamp }) {
   try {
     const response = await fetchImpl(EXPO_PUSH_ENDPOINT, {
       body: JSON.stringify(deviceDocuments.map((document) => ({
         body: content.body,
         channelId: 'social',
-        data: { actorUid, kind, route: content.route, targetUid: actorUid },
+        data: { actorUid: content.actorUid, kind: content.kind, route: content.route, targetUid: content.actorUid },
         sound: 'default',
         title: content.title,
         to: document.data().token,
@@ -309,6 +450,7 @@ module.exports = {
   EXPO_RECEIPTS_ENDPOINT,
   MAX_PUSH_DEVICES,
   NOTIFICATION_MUTATION_WINDOW_LIMIT,
+  deliverDirectChatNotification,
   deliverNotificationForCommand,
   deliverSocialNotification,
   getNotificationSettings,

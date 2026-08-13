@@ -22,6 +22,8 @@ const {
   normalizeAdminAuditQuery,
   normalizeAdminAuditLookup,
   normalizeAdminClientError,
+  normalizeAdminCosmeticsRendererDisable,
+  normalizeAdminDirectChatRetentionSet,
   normalizeAdminFeatureFlagUpdate,
   normalizeRoomGiftPolicyUpdate,
   normalizeAdministratorAction,
@@ -214,7 +216,26 @@ describe('adminDashboardCore', () => {
     expect(normalizeAdminSettingsUpdate({ density: 'compact', notifications: { flaggedRooms: false }, reduceMotion: true, requestId: 'settings_request_1234' })).toMatchObject({ ok: true, value: { density: 'compact', reduceMotion: true } });
     expect(normalizeAdministratorAction({ administratorAction: 'grant-role', email: ' Admin@Example.com ', reason: 'new operator', requestId: 'administrator_req_1', role: 'support' })).toMatchObject({ ok: true, value: { email: 'admin@example.com', role: 'support' } });
     expect(normalizeAdminFeatureFlagUpdate({ enabled: true, expectedUpdatedAt: 'missing', flag: 'wallet', reason: 'release ready', requestId: 'feature_request_123' })).toMatchObject({ ok: true });
+    expect(normalizeAdminFeatureFlagUpdate({ enabled: false, expectedUpdatedAt: 'missing', flag: 'directMessages', reason: 'emergency kill', requestId: 'feature_request_dm01' })).toMatchObject({ ok: true });
+    expect(normalizeAdminFeatureFlagUpdate({ enabled: false, expectedUpdatedAt: 'missing', flag: 'directMessageRequests', reason: 'pause requests', requestId: 'feature_request_dm02' })).toMatchObject({ ok: true });
+    expect(normalizeAdminFeatureFlagUpdate({ enabled: false, expectedUpdatedAt: 'missing', flag: 'directMessageMedia', reason: 'pause media', requestId: 'feature_request_dm03' })).toMatchObject({ ok: true });
+    expect(normalizeAdminFeatureFlagUpdate({ enabled: false, expectedUpdatedAt: 'missing', flag: 'personalChatsFrontendV2', reason: 'frontend rollback', requestId: 'feature_request_ui01' })).toMatchObject({ ok: true });
     expect(normalizeAdminFeatureFlagUpdate({ enabled: true, flag: 'unsafeFlag', reason: 'no', requestId: 'feature_request_123' })).toMatchObject({ ok: false, status: 400 });
+    expect(normalizeAdminDirectChatRetentionSet({
+      messageRetentionDays: 90,
+      reason: 'ops adjust',
+      requestId: 'retention_request_1234',
+    })).toMatchObject({ ok: true, value: { messageRetentionDays: 90 } });
+    expect(normalizeAdminDirectChatRetentionSet({ reason: 'ops adjust', requestId: 'retention_request_1234' })).toMatchObject({ ok: false, status: 400 });
+    expect(normalizeAdminDirectChatRetentionSet({ messageRetentionDays: 1.5, reason: 'ops adjust', requestId: 'retention_request_1234' })).toMatchObject({ ok: false, status: 400 });
+    expect(resolveAdminDashboardRequest({ body: { action: 'direct-chat-retention-get' }, decodedToken: adminToken })).toMatchObject({ ok: true });
+    expect(resolveAdminDashboardRequest({ body: { action: 'direct-chat-ops-status' }, decodedToken: adminToken })).toMatchObject({ ok: true });
+    expect(resolveAdminDashboardRequest({ body: { action: 'direct-chat-retention-set' }, decodedToken: { ...adminToken, adminRole: 'auditor' } })).toMatchObject({ ok: false, status: 403 });
+    expect(normalizeAdminCosmeticsRendererDisable({ enabled: false, flag: 'cosmetics_couple_effects', reason: 'Emergency rollback', requestId: 'cosmetics_flag_req_01' })).toMatchObject({ ok: true });
+    expect(normalizeAdminCosmeticsRendererDisable({ enabled: false, flag: 'cosmetics_custom_submissions', reason: 'Emergency rollback', requestId: 'cosmetics_flag_req_04' })).toMatchObject({ ok: true });
+    expect(normalizeAdminCosmeticsRendererDisable({ enabled: false, flag: 'cosmetics_custom_rendering', reason: 'Emergency rollback', requestId: 'cosmetics_flag_req_05' })).toMatchObject({ ok: true });
+    expect(normalizeAdminCosmeticsRendererDisable({ enabled: true, flag: 'cosmetics_couple_effects', reason: 'Unsafe enable', requestId: 'cosmetics_flag_req_02' })).toMatchObject({ ok: false, status: 400 });
+    expect(normalizeAdminCosmeticsRendererDisable({ enabled: false, flag: 'cosmetics_shared_renderer', reason: 'Wrong scope', requestId: 'cosmetics_flag_req_03' })).toMatchObject({ ok: false, status: 400 });
     expect(normalizeRoomGiftPolicyUpdate({
       commissionBps: 1250,
       expectedVersion: 3,
@@ -248,6 +269,22 @@ describe('adminDashboardCore', () => {
       adminAuditEvents: 1,
       gameRooms: 2,
       generatedAt: '2026-07-08T00:00:00.000Z',
+      growthHealth: {
+        emptyRoomJoinRate: 0,
+        emptyRoomJoins: 0,
+        giftGmvCoins: 0,
+        giftGmvDiamonds: 0,
+        matchAttempts: 0,
+        matchRoomLandings: 0,
+        matchToRoomRate: 0,
+        nonemptyRoomJoins: 0,
+        softMatchAttempts: 0,
+        softMatchPaired: 0,
+        softMatchPairRate: 0,
+        stageId: 0,
+        stageName: 'dark',
+        vipConversions: 0,
+      },
       moderationEvents: 4,
       privateRooms: 5,
       reports: 0,

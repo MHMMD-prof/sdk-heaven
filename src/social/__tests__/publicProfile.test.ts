@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createSocialRequestId,
+  formatCoupleRelationshipStatus,
   mapPublicUserProfile,
   validatePublicProfilePresentation,
 } from '../publicProfile';
@@ -26,9 +27,15 @@ describe('public profile mapping', () => {
     expect(mapPublicUserProfile({ ...validProfile, specialId: '0000777' }, 'u1')).toMatchObject({
       countryCode: 'IQ',
       displayName: 'علي',
+      followerCount: 0,
+      followingCount: 0,
       publicId: '1234567',
       specialId: '0000777',
       uid: 'u1',
+    });
+    expect(mapPublicUserProfile({ ...validProfile, followerCount: 8, followingCount: 3 }, 'u1')).toMatchObject({
+      followerCount: 8,
+      followingCount: 3,
     });
   });
 
@@ -59,6 +66,26 @@ describe('public profile mapping', () => {
     });
   });
 
+  it('maps the exact public couple effect projection without partner identity', () => {
+    const coupleEffect = {
+      assetId: 'couple-hearts',
+      assetVersionId: 'v1-123456789abc',
+      borderMode: 'static',
+      coupleIdHash: 'a'.repeat(64),
+      entranceMode: 'off',
+      fallbackAssetId: 'couple-hearts',
+      fallbackAssetVersionId: 'v1-123456789abc',
+      format: 'png',
+      itemId: 'couple-hearts-item',
+      profileMode: 'static',
+    };
+    expect(mapPublicUserProfile({ ...validProfile, coupleEffect }, 'u1')?.coupleEffect).toEqual(coupleEffect);
+    expect(mapPublicUserProfile({
+      ...validProfile,
+      coupleEffect: { ...coupleEffect, partnerUid: 'u2' },
+    }, 'u1')?.coupleEffect).toBeUndefined();
+  });
+
   it('ignores malformed optional special IDs without invalidating the functional account ID', () => {
     expect(mapPublicUserProfile({ ...validProfile, specialId: '@ali' }, 'u1')).toMatchObject({
       publicId: '1234567',
@@ -85,5 +112,13 @@ describe('public profile mapping', () => {
 
   it('creates callable-safe request IDs', () => {
     expect(createSocialRequestId('profile', 1_000, 0.5)).toMatch(/^[A-Za-z0-9_-]{16,80}$/);
+  });
+
+  it('formats coupleLevel as coupled status, not a progression level', () => {
+    expect(formatCoupleRelationshipStatus(0)).toBe('غير مرتبط');
+    expect(formatCoupleRelationshipStatus(1)).toBe('مرتبط');
+    expect(formatCoupleRelationshipStatus(9)).toBe('مرتبط');
+    expect(formatCoupleRelationshipStatus(-1)).toBe('غير مرتبط');
+    expect(formatCoupleRelationshipStatus(1.5)).toBe('غير مرتبط');
   });
 });

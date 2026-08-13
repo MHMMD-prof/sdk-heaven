@@ -7,12 +7,16 @@ import { PublicProfilePage } from '../components/PublicProfilePage';
 import {
   requestCoupleMutation,
   requestCoupleStatus,
+  requestFollowMutation,
+  requestFollowStatus,
   requestFriendMutation,
   requestFriendshipStatus,
 } from '../social/requestSocialCommand';
 import type {
   CoupleMutationAction,
   CoupleRelationshipStatus,
+  FollowMutationAction,
+  FollowRelationshipStatus,
   FriendMutationAction,
   FriendRelationshipStatus,
 } from '../social/types';
@@ -28,6 +32,9 @@ export function UserProfileScreen({ navigation, route }: UserProfileScreenProps)
   const [friendBusy, setFriendBusy] = useState(false);
   const [friendStatus, setFriendStatus] = useState<FriendRelationshipStatus>('none');
   const [friendStatusLoading, setFriendStatusLoading] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [followStatus, setFollowStatus] = useState<FollowRelationshipStatus>('none');
+  const [followStatusLoading, setFollowStatusLoading] = useState(false);
   const [coupleBusy, setCoupleBusy] = useState(false);
   const [coupleStatus, setCoupleStatus] = useState<CoupleRelationshipStatus>('none');
   const [coupleUnavailable, setCoupleUnavailable] = useState(false);
@@ -51,6 +58,24 @@ export function UserProfileScreen({ navigation, route }: UserProfileScreenProps)
       active = false;
     };
   }, [flags.friends, route.params.uid, user?.uid]);
+
+  useEffect(() => {
+    if (!flags.following || !user?.uid || user.uid === route.params.uid) {
+      return undefined;
+    }
+
+    let active = true;
+    setFollowStatusLoading(true);
+    void requestFollowStatus(route.params.uid).then((response) => {
+      if (!active) return;
+      if (response.ok) setFollowStatus(response.result.status);
+      setFollowStatusLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [flags.following, route.params.uid, user?.uid]);
 
   useEffect(() => {
     if (!flags.couples || !user?.uid || user.uid === route.params.uid) return undefined;
@@ -96,7 +121,31 @@ export function UserProfileScreen({ navigation, route }: UserProfileScreenProps)
     void executeFriendAction(action);
   };
 
+  const executeFollowAction = async (action: FollowMutationAction) => {
+    setFollowBusy(true);
+    const response = await requestFollowMutation(action, route.params.uid);
+    setFollowBusy(false);
+    if (response.ok) {
+      setFollowStatus(response.result.status);
+      retry();
+    } else {
+      Alert.alert('تعذر تنفيذ الطلب', response.error.messageAr);
+    }
+  };
+
+  const onFollowPress = () => {
+    if (followStatus === 'following') {
+      Alert.alert('إلغاء المتابعة', 'هل تريد إلغاء متابعة هذا المستخدم؟', [
+        { style: 'cancel', text: 'تراجع' },
+        { style: 'destructive', text: 'إلغاء المتابعة', onPress: () => void executeFollowAction('unfollow-user') },
+      ]);
+      return;
+    }
+    void executeFollowAction('follow-user');
+  };
+
   const showFriendAction = flags.friends && Boolean(user?.uid) && user?.uid !== route.params.uid;
+  const showFollowAction = flags.following && Boolean(user?.uid) && user?.uid !== route.params.uid;
 
   const executeCoupleAction = async (action: CoupleMutationAction) => {
     setCoupleBusy(true);
@@ -138,6 +187,11 @@ export function UserProfileScreen({ navigation, route }: UserProfileScreenProps)
         label: coupleActionLabel(coupleStatus, coupleBusy || coupleStatusLoading, coupleUnavailable),
         onPress: onCouplePress,
       } : undefined}
+      followAction={showFollowAction ? {
+        disabled: followBusy || followStatusLoading,
+        label: followActionLabel(followStatus, followBusy || followStatusLoading),
+        onPress: onFollowPress,
+      } : undefined}
       friendAction={showFriendAction ? {
         disabled: friendBusy || friendStatusLoading,
         label: friendActionLabel(friendStatus, friendBusy || friendStatusLoading),
@@ -148,6 +202,9 @@ export function UserProfileScreen({ navigation, route }: UserProfileScreenProps)
       } : undefined}
       loadError={errorMessage}
       onBack={navigation.goBack}
+      onOpenFollowing={flags.following
+        ? (tab) => navigation.navigate('Following', { tab, uid: route.params.uid })
+        : undefined}
       onRetry={retry}
       profile={profile}
       status={status}
@@ -170,4 +227,10 @@ function friendActionLabel(status: FriendRelationshipStatus, loading: boolean) {
   if (status === 'incoming') return 'قبول طلب الصداقة';
   if (status === 'outgoing') return 'إلغاء طلب الصداقة';
   return 'إضافة صديق';
+}
+
+function followActionLabel(status: FollowRelationshipStatus, loading: boolean) {
+  if (loading) return 'جارٍ التحقق...';
+  if (status === 'following') return 'إلغاء المتابعة';
+  return 'متابعة';
 }

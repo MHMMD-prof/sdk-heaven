@@ -1,8 +1,8 @@
 const admin = require('firebase-admin');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
-
-admin.initializeApp();
+const { createProductionRoomThemeLayouts } = require('../roomThemeProductionLayouts');
 
 const themes = [
   { id: 'majlis-default', ar: 'المجلس', en: 'Majlis Default', layout: 'majlis' },
@@ -19,35 +19,35 @@ async function main() {
   const apply = process.argv.includes('--apply');
   const actorUid = readArgument('--actor-uid');
   const bucketName = readArgument('--bucket');
+  const credentialFile = readArgument('--credential-file');
   const grantRoomId = readArgument('--grant-room');
   if (apply && (!actorUid || !bucketName)) throw new Error('--actor-uid and --bucket are required with --apply.');
+  if (credentialFile) {
+    const resolvedCredentialFile = path.resolve(credentialFile);
+    if (!fs.existsSync(resolvedCredentialFile)) throw new Error('--credential-file was not found.');
+    const serviceAccount = JSON.parse(fs.readFileSync(resolvedCredentialFile, 'utf8'));
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: serviceAccount.project_id,
+      storageBucket: bucketName,
+    });
+  } else {
+    admin.initializeApp({ storageBucket: bucketName });
+  }
   const db = admin.firestore();
   if (apply) await requirePlatformOwner(db, actorUid);
   console.info(JSON.stringify({ apply, bucketName, grantRoomId, themes: themes.map((theme) => theme.id) }));
   if (!apply) return;
   const bucket = admin.storage().bucket(bucketName);
   for (const theme of themes) {
-    const storagePath = `room-theme-assets/${theme.id}/v1/background.png`;
-    const file = bucket.file(storagePath);
-    const [exists] = await file.exists();
-    let token = crypto.randomUUID();
-    if (!exists) {
-      await bucket.upload(path.resolve(__dirname, `../../assets/room-themes/${theme.id}/background-v1.png`), {
-        destination: storagePath,
-        metadata: {
-          cacheControl: 'public,max-age=31536000,immutable',
-          contentType: 'image/png',
-          metadata: { firebaseStorageDownloadTokens: token },
-        },
-      });
-    } else {
-      const [metadata] = await file.getMetadata();
-      token = metadata.metadata?.firebaseStorageDownloadTokens || token;
-    }
-    const backgroundUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+    const stageUrl = await uploadImmutableAsset({
+      bucket,
+      localPath: path.resolve(__dirname, `../../assets/room-themes/${theme.id}/stage-v2.png`),
+      storagePath: `room-theme-assets/${theme.id}/v2/stage.png`,
+    });
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
     await db.doc(`roomThemes/${theme.id}`).set({
-      ...manifest(theme, backgroundUrl),
+      ...manifest(theme, stageUrl),
       createdAt: timestamp,
       lastEditorUid: actorUid,
       publishedAt: timestamp,
@@ -68,11 +68,11 @@ async function main() {
         lastEditorUid: actorUid,
         name: { ar: theme.ar, en: theme.en },
         order: theme.layout === 'theater' ? 30 : 31,
-        previewAssetUrl: backgroundUrl,
+        previewAssetUrl: stageUrl,
         prices: theme.prices,
         purchasingEnabled: false,
         stock: { kind: 'unlimited' },
-        thumbnailUrl: backgroundUrl,
+        thumbnailUrl: stageUrl,
         updatedAt: timestamp,
       }, { merge: true });
     }
@@ -101,19 +101,22 @@ async function main() {
   }
 }
 
-function manifest(theme, backgroundUrl) {
+function manifest(theme, stageUrl) {
   const royal = theme.layout === 'theater';
   const constellation = theme.layout === 'grid';
+  const compactLayouts = createProductionRoomThemeLayouts(theme.id, 'compact');
+  const standardLayouts = createProductionRoomThemeLayouts(theme.id, 'standard');
+  const tallLayouts = createProductionRoomThemeLayouts(theme.id, 'tall');
   return {
-    manifestVersion: 1,
+    manifestVersion: 3,
     themeId: theme.id,
     publicationStatus: 'published',
     renderingEnabled: true,
     purchasingEnabled: Boolean(theme.prices),
     minimumClientVersion: '1.0.0',
-    revision: 1,
+    revision: 8,
     assets: {
-      background: { uri: backgroundUrl, version: 1 },
+      background: { uri: stageUrl, version: 2 },
       stage: null,
       emptySeatFrame: null,
       badge: null,
@@ -131,67 +134,38 @@ function manifest(theme, backgroundUrl) {
       text: '#FFF4DE',
       textMuted: '#CDBB9D',
     },
-    layouts: Object.fromEntries([5, 10, 15, 20].map((count) => [
-      String(count),
-      theme.layout === 'theater' ? theater(count) : theme.layout === 'grid' ? grid(count) : majlis(count),
-    ])),
+    layouts: standardLayouts,
+    motion: { ambient: [], background: null },
+    scene: {
+      background: { fit: 'cover', focalX: 0.5, focalY: 0.5 },
+      stage: { fit: 'cover', focalX: 0.5, focalY: 0.5 },
+      profiles: {
+        compact: { layouts: compactLayouts },
+        standard: { layouts: standardLayouts },
+        tall: { layouts: tallLayouts },
+      },
+    },
   };
 }
 
-function majlis(count) {
-  if (count === 5) return points([[0.16, 0.34], [0.32, 0.18], [0.5, 0.13], [0.68, 0.18], [0.84, 0.34]]);
-  const rows = Math.ceil(count / 5);
-  const output = [];
-  for (let row = 0; row < rows; row += 1) {
-    const progress = rows === 1 ? 1 : row / (rows - 1);
-    output.push(...spread(
-      Math.min(5, count - output.length),
-      0.18 - progress * 0.08,
-      0.82 + progress * 0.08,
-      rows === 2 ? 0.22 + row * 0.48 : 0.1 + row * (0.78 / (rows - 1)),
-    ));
+async function uploadImmutableAsset({ bucket, localPath, storagePath }) {
+  const file = bucket.file(storagePath);
+  const [exists] = await file.exists();
+  let token = crypto.randomUUID();
+  if (!exists) {
+    await bucket.upload(localPath, {
+      destination: storagePath,
+      metadata: {
+        cacheControl: 'public,max-age=31536000,immutable',
+        contentType: 'image/png',
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+  } else {
+    const [metadata] = await file.getMetadata();
+    token = metadata.metadata?.firebaseStorageDownloadTokens || token;
   }
-  return points(output);
-}
-
-function theater(count) {
-  const rows = Math.ceil(count / 5);
-  const output = [];
-  for (let row = 0; row < rows; row += 1) {
-    const progress = rows === 1 ? 1 : row / (rows - 1);
-    output.push(...spread(
-      Math.min(5, count - output.length),
-      0.2 - progress * 0.1,
-      0.8 + progress * 0.1,
-      rows === 1 ? 0.42 : 0.12 + row * (0.76 / (rows - 1)),
-    ));
-  }
-  return points(output);
-}
-
-function grid(count) {
-  const output = [];
-  const rows = Math.ceil(count / 5);
-  for (let row = 0; row < rows; row += 1) {
-    output.push(...spread(Math.min(5, count - output.length), 0.11, 0.89, rows === 1 ? 0.4 : 0.16 + row * (0.68 / Math.max(1, rows - 1))));
-  }
-  return points(output);
-}
-
-function spread(count, start, end, y) {
-  if (count < 1) return [];
-  if (count === 1) return [[0.5, y]];
-  return Array.from({ length: count }, (_, index) => [start + ((end - start) * index) / (count - 1), y]);
-}
-
-function points(values) {
-  return values.map(([x, y], index) => ({
-    seatNumber: index + 1,
-    x: Math.round(x * 1000) / 1000,
-    y: Math.round(y * 1000) / 1000,
-    scale: 1,
-    z: index + 1,
-  }));
+  return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
 }
 
 async function requirePlatformOwner(db, actorUid) {

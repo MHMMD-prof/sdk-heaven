@@ -47,7 +47,7 @@ export function WeeklyIncentiveIntegrityPanel({ permissions, user }: { permissio
     setBusy(apply ? 'apply' : 'dry-run');
     try {
       const result = await reconcileAdminWeeklyIncentives(user, { apply, reason });
-      setPreview(`${result.scanned} scanned · ${result.unbalanced} drift`);
+      setPreview(`${result.scanned} مفحوص · ${result.unbalanced} انحراف`);
       if (apply) await load();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'فشلت المطابقة.'); }
     finally { setBusy(''); }
@@ -56,8 +56,9 @@ export function WeeklyIncentiveIntegrityPanel({ permissions, user }: { permissio
   if (!value) return <AdminCollectionState children={null} empty={false} emptyMessage="" error={error || undefined} loading={!error} loadingMessage="جارٍ تحميل مراقبة الحوافز…" onRetry={() => void load()} />;
   const health = value.health;
   return (
-    <AdminSurface className="settings-card">
-      <div className="settings-row"><div><h3>سلامة الحوافز الأسبوعية</h3><small>مطابقة الدفاتر، احتجاز المخاطر، وتأخر العمال المجدولة</small></div><button className="secondary-button compact" onClick={() => void load()} type="button">تحديث</button></div>
+    <section className="incentives-embedded-panel">
+      <AdminSurface className="settings-card">
+      <div className="settings-row"><div><h3>مراقبة المطابقة والمخاطر</h3><small>مطابقة الدفاتر، احتجاز المخاطر، وتأخر العمال المجدولة</small></div><button className="secondary-button compact" onClick={() => void load()} type="button">تحديث</button></div>
       <div className="settings-kpis">
         <Metric label="تسويات محتجزة" value={health.heldPayoutCount} danger={health.heldPayoutCount > 0} />
         <Metric label="قيمة محتجزة" value={health.heldValueCoins} danger={health.heldValueCoins > 0} />
@@ -74,10 +75,11 @@ export function WeeklyIncentiveIntegrityPanel({ permissions, user }: { permissio
         <button className="primary-button" disabled={!canManage || Boolean(busy) || reason.trim().length < 4} onClick={() => void reconcile(true)} type="button">تطبيق وتسجيل</button>
         {preview && <small>{preview}</small>}
       </div>
-      {value.assessments.map((assessment) => <div className="settings-row" key={assessment.id}><div><strong dir="ltr">{assessment.settlementId}</strong><small>Risk {assessment.riskScore || 0} · {(assessment.signals || []).map((signal) => signal.code).join(', ')}</small></div><div className="button-row"><button className="secondary-button compact" disabled={!canManage || Boolean(busy) || reason.trim().length < 4} onClick={() => void review('approve-settlement', assessment)} type="button">اعتماد</button><button className="danger-button compact" disabled={!canManage || Boolean(busy) || reason.trim().length < 4} onClick={() => void review('reject-settlement', assessment)} type="button">رفض</button></div></div>)}
+      {value.assessments.map((assessment) => <div className="settings-row" key={assessment.id}><div><strong dir="ltr">{assessment.settlementId}</strong><small>المخاطر {assessment.riskScore || 0} · {(assessment.signals || []).map((signal) => signal.code).join(', ')}</small></div><div className="button-row"><button className="secondary-button compact" disabled={!canManage || Boolean(busy) || reason.trim().length < 4} onClick={() => void review('approve-settlement', assessment)} type="button">اعتماد</button><button className="danger-button compact" disabled={!canManage || Boolean(busy) || reason.trim().length < 4} onClick={() => void review('reject-settlement', assessment)} type="button">رفض</button></div></div>)}
       {value.assessments.length === 0 && <p className="field-hint">لا توجد تسويات بانتظار المراجعة.</p>}
       {error && <p className="danger-text">{error}</p>}
-    </AdminSurface>
+      </AdminSurface>
+    </section>
   );
 }
 

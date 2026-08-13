@@ -3,6 +3,7 @@ import {
   VoiceParticipant,
   VoiceRoomCommandResult,
 } from './types';
+import type { RoomReactionEnvelope } from './roomAmbientReactions';
 
 export type VoiceRoomSessionState = {
   roomId?: string;
@@ -14,6 +15,7 @@ export type VoiceRoomSessionState = {
   isMicMuted: boolean;
   isSpeakerEnabled: boolean;
   lastCommandResult?: VoiceRoomCommandResult;
+  latestRoomReaction?: RoomReactionEnvelope;
 };
 
 export type VoiceRoomSessionAction =
@@ -23,6 +25,7 @@ export type VoiceRoomSessionAction =
   | { type: 'publishAudioChanged'; canPublishAudio: boolean }
   | { type: 'participantsChanged'; participants: VoiceParticipant[] }
   | { type: 'speakingChanged'; participantIds: string[] }
+  | { type: 'roomReactionReceived'; envelope: RoomReactionEnvelope }
   | { type: 'micMutedChanged'; isMicMuted: boolean }
   | { type: 'speakerEnabledChanged'; isSpeakerEnabled: boolean }
   | { type: 'commandCompleted'; result: VoiceRoomCommandResult }
@@ -87,6 +90,13 @@ export function voiceRoomSessionReducer(
     };
   }
 
+  if (action.type === 'roomReactionReceived') {
+    return {
+      ...state,
+      latestRoomReaction: action.envelope,
+    };
+  }
+
   if (action.type === 'micMutedChanged') {
     return {
       ...state,
@@ -111,5 +121,7 @@ export function voiceRoomSessionReducer(
   return {
     ...initialVoiceRoomSessionState,
     connectionState: 'disconnected',
+    isMicMuted: state.isMicMuted,
+    isSpeakerEnabled: state.isSpeakerEnabled,
   };
 }

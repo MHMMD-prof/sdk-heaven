@@ -12,6 +12,22 @@ export default function App() {
     I18nManager.allowRTL(true);
   }, []);
 
+  const visualFixtureEnabled = __DEV__ && process.env.EXPO_PUBLIC_PERSONAL_CHAT_VISUAL_FIXTURE === '1';
+  if (visualFixtureEnabled) {
+    const fixtureRtl = process.env.EXPO_PUBLIC_PERSONAL_CHAT_FIXTURE_RTL !== '0';
+    I18nManager.allowRTL(true);
+    I18nManager.forceRTL(fixtureRtl);
+    const { PersonalChatVisualFixtureScreen } = require('./src/personalChat/PersonalChatVisualFixtureScreen') as typeof import('./src/personalChat/PersonalChatVisualFixtureScreen');
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <SafeAreaProvider>
+          <StatusBar style="light" />
+          <PersonalChatVisualFixtureScreen />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>

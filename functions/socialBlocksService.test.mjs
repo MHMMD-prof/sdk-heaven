@@ -11,8 +11,8 @@ describe('socialBlocksService', () => {
     const db = fakeDb();
     const conversationId = createDirectConversationId('user-1', 'user-2');
     const friendshipId = createFriendshipId('user-1', 'user-2');
-    db.write('publicProfiles/user-1', { moderationStatus: 'active', uid: 'user-1' });
-    db.write('publicProfiles/user-2', { moderationStatus: 'active', uid: 'user-2' });
+    db.write('publicProfiles/user-1', { moderationStatus: 'active', uid: 'user-1', friendCount: 1, followerCount: 0, followingCount: 0 });
+    db.write('publicProfiles/user-2', { moderationStatus: 'active', uid: 'user-2', friendCount: 1, followerCount: 0, followingCount: 0 });
     db.write(`friendships/${friendshipId}`, { memberUids: ['user-1', 'user-2'] });
     db.write(`friendRequests/${friendshipId}`, { status: 'pending' });
     db.write(`directConversations/${conversationId}`, { memberUids: ['user-1', 'user-2'], requestState: 'pending' });
@@ -31,6 +31,8 @@ describe('socialBlocksService', () => {
     expect(db.read('blocks/user-1/blocked/user-2')).toMatchObject({ blockerUid: 'user-1' });
     expect(db.read(`friendships/${friendshipId}`)).toBeUndefined();
     expect(db.read(`friendRequests/${friendshipId}`)).toBeUndefined();
+    expect(db.read('publicProfiles/user-1')).toMatchObject({ friendCount: 0 });
+    expect(db.read('publicProfiles/user-2')).toMatchObject({ friendCount: 0 });
     expect(db.read(`directMessageRequests/${conversationId}`)).toMatchObject({ blockedByUid: 'user-1', status: 'blocked' });
     expect(db.read(`directConversations/${conversationId}`)).toMatchObject({ requestState: 'blocked' });
   });
@@ -45,6 +47,7 @@ function fakeDb() {
     delete(reference) { values.delete(reference.path); },
     async get(reference) { return snapshot(reference); },
     set(reference, value, options) { values.set(reference.path, options?.merge ? { ...(values.get(reference.path) || {}), ...structuredClone(value) } : structuredClone(value)); },
+    update(reference, value) { values.set(reference.path, { ...(values.get(reference.path) || {}), ...structuredClone(value) }); },
   };
   return {
     doc: ref,

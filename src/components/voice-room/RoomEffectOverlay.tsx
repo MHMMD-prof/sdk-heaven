@@ -1,16 +1,21 @@
 import { useAudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { CosmeticAssetRenderer } from '../../cosmetics/CosmeticAssetRenderer';
 import { usePublishedCosmeticAsset } from '../../cosmetics/assetRegistry';
 import type { CosmeticsFeatureFlags } from '../../cosmetics/featureFlags';
+import { recordPairRuntimeEvent } from '../../cosmetics/runtimeTelemetry';
 import { colors, radius, spacing, typography } from '../../theme';
+import { resolveBottomEffectStageAssetSelection } from '../../voice/bottomEffectStage';
 import type { QueuedRoomEffect, RoomEffectViewerMode } from '../../voice/roomEffectsQueue';
+import { BottomEffectStage } from './BottomEffectStage';
+import { RocketMotionArtwork } from './RocketMotionArtwork';
 
-export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMode }: {
+export function RoomEffectOverlay({ bottomStageEnabled, effect, flags, onComplete, onError, viewerMode }: {
+  bottomStageEnabled: boolean;
   effect: QueuedRoomEffect;
   flags: CosmeticsFeatureFlags;
   onComplete?: () => void;
@@ -18,24 +23,36 @@ export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMo
   viewerMode: RoomEffectViewerMode;
 }) {
   const [artworkFailed, setArtworkFailed] = useState(false);
+  const majorGift = effect.kind === 'room-gift'
+    && (effect.giftPresentationTier === 'major' || effect.giftPresentationTier === 'global');
+  const bottomStageEffect = bottomStageEnabled && (effect.kind === 'room-entry' || majorGift);
   const giftMotionEnabled = effect.kind !== 'room-gift'
     || (flags.roomGiftAnimations && effect.animationEnabled === true);
   const entryMotionEnabled = effect.kind !== 'room-entry'
     || (flags.roomEntryAnimations && effect.animationEnabled === true);
   const entryFormatEnabled = effect.kind !== 'room-entry'
-    || (effect.visualFormat === 'mp4'
-      ? flags.roomEntryVideo && flags.video
-      : flags.lottie);
-  const canonicalEnabled = Boolean(
+    || (effect.coupleEntrance
+      ? flags.coupleEntrances
+        && flags.coupleEffects
+        && (effect.coupleAssetFormat === 'png' || flags.lottie)
+      : effect.visualFormat === 'mp4'
+        ? flags.roomEntryVideo && flags.video
+        : flags.lottie);
+  const customEntryAllowed = effect.kind !== 'room-entry'
+    || effect.customSource !== true
+    || flags.customRendering === true;
+  const canonicalLookupEnabled = Boolean(
     flags.assetRegistry
     && flags.sharedRenderer
-    && giftMotionEnabled
-    && entryMotionEnabled
-    && entryFormatEnabled
+    && customEntryAllowed
     && effect.assetId
     && effect.assetVersionId,
   );
-  const rendererFlags = effect.kind === 'room-gift'
+  const canonicalEnabled = canonicalLookupEnabled
+    && giftMotionEnabled
+    && entryMotionEnabled
+    && entryFormatEnabled;
+  const rendererFlags = useMemo(() => effect.kind === 'room-gift'
     ? {
       ...flags,
       effectAudio: flags.effectAudio && flags.roomGiftAudio && effect.audioEnabled === true,
@@ -47,11 +64,25 @@ export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMo
         effectAudio: flags.effectAudio && flags.roomEntryAudio && effect.audioEnabled === true,
         video: flags.video && flags.roomEntryVideo,
       }
-      : flags;
+      : flags, [effect.audioEnabled, effect.kind, flags]);
   const bundle = usePublishedCosmeticAsset(
     effect.assetId,
     effect.assetVersionId,
-    canonicalEnabled,
+    canonicalEnabled || (bottomStageEffect && canonicalLookupEnabled),
+  );
+  const customBundleAllowed = !bundle?.primary
+    || bundle.primary.ownerType !== 'user'
+    || flags.customRendering === true;
+  const exactPairBundle = !effect.coupleEntrance || Boolean(
+    bundle?.primary.category === 'couple-effect'
+    && bundle.primary.assetId === effect.assetId
+    && bundle.primary.assetVersionId === effect.assetVersionId
+    && bundle.primary.format === effect.coupleAssetFormat
+    && (effect.coupleAssetFormat === 'png'
+      ? effect.fallbackAssetId === effect.assetId
+        && effect.fallbackAssetVersionId === effect.assetVersionId
+      : bundle.fallback?.assetId === effect.fallbackAssetId
+        && bundle.fallback?.assetVersionId === effect.fallbackAssetVersionId),
   );
   const player = useAudioPlayer(
     effect.kind === 'room-rocket' && effect.presentation === 'visual'
@@ -59,10 +90,30 @@ export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMo
       ? effect.soundUrl
       : undefined,
   );
-
   useEffect(() => {
     setArtworkFailed(false);
   }, [effect.eventId]);
+
+  useEffect(() => {
+    if (!effect.coupleEntrance) return;
+    const render = effect.presentation === 'visual'
+      && canonicalEnabled
+      && Boolean(bundle?.primary)
+      && exactPairBundle
+      && !artworkFailed;
+    recordPairRuntimeEvent(
+      render ? 'pair-entrance-render' : 'pair-entrance-fallback',
+      render ? undefined : artworkFailed ? 'renderer-error' : canonicalEnabled ? 'asset-unavailable' : 'flag-disabled',
+    );
+  }, [
+    artworkFailed,
+    bundle?.primary,
+    canonicalEnabled,
+    effect.coupleEntrance,
+    effect.eventId,
+    effect.presentation,
+    exactPairBundle,
+  ]);
 
   useEffect(() => {
     if (
@@ -95,8 +146,8 @@ export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMo
   const artwork = (
     <CosmeticAssetRenderer
       compatibilityUri={effect.thumbnailUrl}
-      descriptor={bundle?.primary}
-      fallbackDescriptor={bundle?.fallback}
+      descriptor={canonicalEnabled ? bundle?.primary : undefined}
+      fallbackDescriptor={canonicalEnabled ? bundle?.fallback : undefined}
       flags={rendererFlags}
       contentFit="contain"
       onComplete={effect.kind === 'room-gift' ? undefined : onComplete}
@@ -106,11 +157,11 @@ export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMo
       }}
       style={effect.kind === 'room-rocket'
         ? styles.rocketArtwork
-        : effect.kind === 'room-entry' ? styles.entryArtwork : styles.thumbnail}
+        : styles.thumbnail}
       viewerMode={viewerMode}
     />
   );
-  const audio = bundle?.audio ? (
+  const audio = canonicalEnabled && bundle?.audio ? (
     <CosmeticAssetRenderer
       descriptor={bundle.audio}
       flags={rendererFlags}
@@ -119,56 +170,75 @@ export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMo
     />
   ) : null;
 
-  if (effect.kind === 'room-entry') {
-    const showMotion = effect.presentation === 'visual'
-      && canonicalEnabled
-      && Boolean(bundle?.primary)
-      && !artworkFailed;
-    if (!showMotion) {
-      return (
-        <View accessibilityLabel={effect.label} accessibilityLiveRegion="polite" accessible pointerEvents="none" style={styles.compact}>
-          {effect.thumbnailUrl && !artworkFailed ? (
-            <CosmeticAssetRenderer compatibilityUri={effect.thumbnailUrl} flags={flags} style={styles.thumbnail} viewerMode={viewerMode === 'off' ? 'reduced' : viewerMode} />
-          ) : null}
-          <Text style={styles.compactText}>{effect.label}</Text>
-        </View>
-      );
-    }
+  if (bottomStageEffect) {
+    const exactAssetAllowed = effect.kind !== 'room-entry' || exactPairBundle;
+    const bundleAllowed = customBundleAllowed && exactAssetAllowed && !artworkFailed;
+    const selection = resolveBottomEffectStageAssetSelection({
+      hasCompatibility: effect.presentation === 'visual'
+        && Boolean(effect.thumbnailUrl)
+        && !artworkFailed,
+      hasFallback: bundleAllowed && Boolean(bundle?.fallback),
+      motionAllowed: effect.presentation === 'visual'
+        && canonicalEnabled
+        && bundleAllowed,
+      primaryFormat: bundleAllowed ? bundle?.primary?.format : undefined,
+    });
+    const selectedDescriptor = selection.source === 'primary'
+      ? bundle?.primary
+      : selection.source === 'fallback' ? bundle?.fallback : undefined;
+    const selectedFallback = selection.source === 'primary' ? bundle?.fallback : undefined;
+    const compatibilityUri = selection.source === 'compatibility' ? effect.thumbnailUrl : undefined;
+
     return (
-      <View accessibilityLabel={effect.label} accessibilityLiveRegion="polite" accessible pointerEvents="none" style={styles.entryRoot}>
-        <LinearGradient colors={['rgba(9,4,14,0)', 'rgba(25,8,35,0.82)', 'rgba(9,4,14,0)']} style={styles.entryBackdrop}>
-          {audio}
-          {artwork}
-          <Text style={styles.entryLabel}>{effect.label}</Text>
-        </LinearGradient>
-      </View>
+      <BottomEffectStage
+        audio={audio}
+        effect={effect}
+        fallbackReason={selection.source === 'fallback' || selection.source === 'compatibility'
+          ? 'asset-unavailable'
+          : undefined}
+        media={selection.media}
+        onComplete={onComplete}
+        onRendererError={() => setArtworkFailed(true)}
+        renderArtwork={selection.source === 'none' ? undefined : ({
+          onComplete: completeStage,
+          onError: failStage,
+          onFallback: fallbackStage,
+          onShown: showStage,
+        }) => (
+          <CosmeticAssetRenderer
+            compatibilityUri={compatibilityUri}
+            contentFit="cover"
+            descriptor={selectedDescriptor}
+            fallbackDescriptor={selectedFallback}
+            flags={rendererFlags}
+            onComplete={completeStage}
+            onError={failStage}
+            onFirstFrame={() => showStage(selection.media === 'motion' ? 'motion' : 'static')}
+            onStateChange={(state, source) => {
+              if (
+                selection.source === 'primary'
+                && (source === 'fallback' || source === 'compatibility')
+              ) {
+                fallbackStage('renderer-error');
+              }
+              if (state === 'ready') {
+                showStage(
+                  source === 'fallback' || source === 'compatibility' || selection.media !== 'motion'
+                    ? 'static'
+                    : 'motion',
+                );
+              }
+            }}
+            style={styles.stageArtwork}
+            viewerMode={viewerMode}
+          />
+        )}
+        viewerMode={viewerMode}
+      />
     );
   }
 
   if (effect.kind !== 'room-rocket') {
-    const majorGift = effect.kind === 'room-gift'
-      && effect.presentation === 'visual'
-      && (effect.giftPresentationTier === 'major' || effect.giftPresentationTier === 'global');
-    if (majorGift) {
-      return (
-        <View
-          accessibilityLabel={effect.label}
-          accessibilityLiveRegion="polite"
-          accessible
-          pointerEvents="none"
-          style={[styles.giftMajorRoot, effect.giftPresentationTier === 'global' && styles.giftGlobalRoot]}
-        >
-          <LinearGradient colors={['rgba(15,5,22,0.12)', 'rgba(54,13,70,0.86)', 'rgba(8,3,13,0.94)']} style={styles.giftMajorBackdrop}>
-            {audio}
-            {(bundle?.primary || effect.thumbnailUrl) && !artworkFailed ? artwork : (
-              <Text style={styles.giftFallbackIcon}>🎁</Text>
-            )}
-            <Text style={styles.giftMajorTitle}>{effect.label}</Text>
-            {effect.comboCount && effect.comboCount > 1 ? <Text style={styles.giftCombo}>COMBO ×{effect.comboCount}</Text> : null}
-          </LinearGradient>
-        </View>
-      );
-    }
     return (
       <View
         accessibilityLabel={effect.label}
@@ -212,8 +282,23 @@ export function RoomEffectOverlay({ effect, flags, onComplete, onError, viewerMo
         <View style={styles.ringOuter} />
         <View style={styles.ringInner} />
         {audio}
-        {(bundle?.primary || effect.thumbnailUrl) && !artworkFailed ? (
-          artwork
+        {!artworkFailed && (bundle?.primary || effect.thumbnailUrl || effect.posterUrl) ? (
+          bundle?.primary ? (
+            artwork
+          ) : (
+            <RocketMotionArtwork
+              flags={flags}
+              format={effect.visualFormat}
+              motionUri={effect.thumbnailUrl}
+              onComplete={onComplete}
+              onError={() => {
+                setArtworkFailed(true);
+                onError?.();
+              }}
+              posterUri={effect.posterUrl}
+              style={styles.rocketArtwork}
+            />
+          )
         ) : (
           <Text accessibilityLabel="صاروخ" style={styles.fallbackRocket}>🚀</Text>
         )}
@@ -247,56 +332,7 @@ const styles = StyleSheet.create({
   compactText: { color: colors.goldSoft, fontSize: 12, fontWeight: typography.weights.bold, textAlign: 'right' },
   compactCombo: { color: '#FFFFFF', fontSize: 12, fontWeight: typography.weights.black },
   targeted: { borderColor: '#D58CFF', borderWidth: 2, bottom: 170 },
-  entryRoot: {
-    bottom: 104,
-    height: 260,
-    left: 12,
-    overflow: 'hidden',
-    position: 'absolute',
-    right: 12,
-    zIndex: 44,
-  },
-  entryBackdrop: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-    paddingBottom: spacing.sm,
-  },
-  entryArtwork: { height: 220, width: '100%' },
-  entryLabel: {
-    backgroundColor: 'rgba(12,5,14,0.88)',
-    borderColor: colors.borderGold,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    bottom: spacing.sm,
-    color: colors.goldSoft,
-    fontSize: 12,
-    fontWeight: typography.weights.black,
-    maxWidth: '90%',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    position: 'absolute',
-    textAlign: 'center',
-  },
-  giftMajorRoot: {
-    bottom: 88,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    zIndex: 45,
-  },
-  giftGlobalRoot: { zIndex: 46 },
-  giftMajorBackdrop: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-  },
-  giftFallbackIcon: { fontSize: 96 },
-  giftMajorTitle: { color: '#FFF0CC', fontSize: 22, fontWeight: typography.weights.black, marginTop: spacing.md, textAlign: 'center' },
-  giftCombo: { color: '#F3C4FF', fontSize: 18, fontWeight: typography.weights.black, marginTop: spacing.sm },
+  stageArtwork: { bottom: 0, left: 0, position: 'absolute', right: 0, top: 0 },
   rocketReduced: {
     alignItems: 'center',
     alignSelf: 'center',

@@ -12,9 +12,22 @@ function mapUserRelationship(id, data = {}, uid, kind) {
   const memberUids = Array.isArray(data.memberUids) ? data.memberUids.filter((value) => typeof value === 'string') : [];
   const peerUid = kind === 'friend'
     ? memberUids.find((value) => value !== uid) || ''
-    : data.senderUid === uid ? data.recipientUid : data.senderUid;
+    : kind === 'following'
+      ? (typeof data.targetUid === 'string' ? data.targetUid : id)
+      : kind === 'follower'
+        ? (typeof data.followerUid === 'string' ? data.followerUid : id)
+        : data.senderUid === uid ? data.recipientUid : data.senderUid;
   if (!id || typeof peerUid !== 'string' || !peerUid || peerUid === uid) return null;
-  return { createdAt: readTimestampIso(data.createdAt), id, kind, peerUid, status: typeof data.status === 'string' ? data.status : kind === 'friend' ? 'active' : 'pending', updatedAt: readTimestampIso(data.updatedAt) };
+  return {
+    createdAt: readTimestampIso(data.createdAt),
+    id,
+    kind,
+    peerUid,
+    status: typeof data.status === 'string'
+      ? data.status
+      : (kind === 'friend' || kind === 'following' || kind === 'follower') ? 'active' : 'pending',
+    updatedAt: readTimestampIso(data.updatedAt || data.createdAt),
+  };
 }
 
 function mapUserGiftEvent(id, data = {}, uid, channel = 'social') {

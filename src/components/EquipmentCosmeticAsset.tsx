@@ -21,9 +21,19 @@ export function EquipmentCosmeticAsset({
   style?: StyleProp<ViewStyle>;
   viewerMode?: CosmeticViewerMode;
 }) {
-  const allowed = Boolean(enabled && flags.assetRegistry && flags.sharedRenderer && projection);
+  const isCustom = projection?.source === 'custom';
+  const allowed = Boolean(
+    enabled
+    && flags.assetRegistry
+    && flags.sharedRenderer
+    && projection
+    && (!isCustom || flags.customRendering),
+  );
   const bundle = usePublishedCosmeticAsset(projection?.assetId, projection?.assetVersionId, allowed);
   if (!allowed || !bundle || bundle.primary.category !== category || ['mp4', 'm4a-aac'].includes(bundle.primary.format)) return null;
+  // User-owned bundles fail closed when custom rendering is dark (mirror room overlay).
+  if (bundle.primary.ownerType === 'user' && !flags.customRendering) return null;
+  if (isCustom && bundle.primary.ownerType !== 'user') return null;
   const rendererFlags = { ...flags, effectAudio: false, video: false };
   return (
     <View pointerEvents="none" style={style}>

@@ -2,37 +2,19 @@ import Constants from 'expo-constants';
 
 import { getCurrentFirebaseIdToken } from '../auth/getCurrentFirebaseIdToken';
 import { VoiceProviderConfig } from './types';
-import { RoomThemeId, RoomThemeManifestV1 } from './roomThemeContract';
+import { RoomThemeId } from './roomThemeContract';
+import {
+  RoomThemeInventory,
+  ensureDefaultRoomThemeInventory,
+} from './roomThemeInventory';
 import { createRoomCommandRequestId } from './requestRoomCommand';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
-export type RoomThemeInventoryState = 'free' | 'owned' | 'locked' | 'expired';
-
-export type RoomThemeInventoryEntry = {
-  catalog: {
-    itemId: string;
-    name: { ar: string; en: string };
-    prices: { coins?: number; diamonds?: number };
-    previewAssetUrl: string;
-    thumbnailUrl: string;
-  } | null;
-  entitlement: {
-    acquiredAt: unknown;
-    expiresAt: unknown;
-    itemId: string;
-    roomId: string;
-    state: 'active' | 'expired';
-    themeId: RoomThemeId;
-  } | null;
-  manifest: RoomThemeManifestV1 | null;
-  state: RoomThemeInventoryState;
-  themeId?: RoomThemeId;
-};
-
-export type RoomThemeInventory = {
-  equippedThemeId: RoomThemeId;
-  inventory: RoomThemeInventoryEntry[];
-  roomId: string;
-};
+export type {
+  RoomThemeInventory,
+  RoomThemeInventoryEntry,
+  RoomThemeInventoryState,
+} from './roomThemeInventory';
 
 type RoomThemeCommandResult = RoomThemeInventory | {
   balances?: { coins: number; diamonds: number };
@@ -72,6 +54,7 @@ export async function requestRoomThemeCommand(
     headers: {
       Authorization: `Bearer ${await getCurrentFirebaseIdToken()}`,
       'Content-Type': 'application/json',
+      ...(await getVoiceAppCheckHeader()),
     },
     body: JSON.stringify({
       ...input,
@@ -87,7 +70,9 @@ export async function requestRoomThemeCommand(
       response.status,
     );
   }
-  return payload.result;
+  return 'inventory' in payload.result
+    ? ensureDefaultRoomThemeInventory(payload.result)
+    : payload.result;
 }
 
 async function readPayload(response: Response): Promise<{

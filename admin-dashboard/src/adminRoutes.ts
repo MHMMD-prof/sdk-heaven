@@ -1,4 +1,4 @@
-export type AdminRouteKey = 'overview' | 'users' | 'rooms' | 'reports' | 'store' | 'cosmetics' | 'incentives' | 'representatives' | 'audit' | 'settings';
+export type AdminRouteKey = 'overview' | 'users' | 'rooms' | 'reports' | 'store' | 'cosmetics' | 'incentives' | 'representatives' | 'notifications' | 'audit' | 'settings';
 
 export type DashboardRoute = {
   detail: string;
@@ -73,6 +73,15 @@ export const adminRoutes: readonly DashboardRoute[] = [
     path: '/representatives',
     subtitle: 'التحويلات والحدود والاسترجاع',
     title: 'عمليات الوكلاء',
+  },
+  {
+    detail: 'اكتب العنوان والنص، اختر الجمهور، وعاين الإشعار على الهاتف قبل الإرسال.',
+    key: 'notifications',
+    label: 'الإشعارات',
+    navigation: 'primary',
+    path: '/notifications',
+    subtitle: 'إرسال فوري للجمهور',
+    title: 'إرسال إشعار فوري',
   },
   {
     detail: 'لا توجد أحداث تدقيق محمّلة.',

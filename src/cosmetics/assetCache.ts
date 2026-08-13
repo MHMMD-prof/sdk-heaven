@@ -1,5 +1,6 @@
 import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 
 import type { CosmeticAssetDescriptorV1 } from './contracts';
 import {
@@ -16,7 +17,7 @@ export type PreparedCosmeticAsset = {
   uri: string;
 };
 
-const cacheDirectory = new Directory(Paths.cache, 'cosmetics-v1');
+let cacheDirectory: Directory | undefined;
 const verifiedThisSession = new Set<string>();
 
 export async function prepareCosmeticAsset(
@@ -24,9 +25,9 @@ export async function prepareCosmeticAsset(
   signal?: AbortSignal,
 ): Promise<PreparedCosmeticAsset> {
   throwIfAborted(signal);
-  ensureCacheDirectory();
+  const directory = ensureCacheDirectory();
   const fileName = cosmeticAssetCacheFileName(descriptor);
-  const file = new File(cacheDirectory, fileName);
+  const file = new File(directory, fileName);
   const startedAt = Date.now();
 
   if (file.exists && Number(file.size || 0) === descriptor.byteSize) {
@@ -74,8 +75,9 @@ export async function prepareCosmeticAsset(
 }
 
 export function isCosmeticAssetCached(descriptor: CosmeticAssetDescriptorV1) {
-  ensureCacheDirectory();
-  const file = new File(cacheDirectory, cosmeticAssetCacheFileName(descriptor));
+  if (Platform.OS === 'web') return false;
+  const directory = ensureCacheDirectory();
+  const file = new File(directory, cosmeticAssetCacheFileName(descriptor));
   return file.exists && Number(file.size || 0) === descriptor.byteSize;
 }
 
@@ -118,21 +120,25 @@ async function verifyFile(file: File, expectedSha256: string) {
 }
 
 function ensureCacheDirectory() {
+  if (Platform.OS === 'web') throw new CosmeticAssetPreparationError('unsupported-platform');
+  cacheDirectory ??= new Directory(Paths.cache, 'cosmetics-v1');
   if (!cacheDirectory.exists) {
     cacheDirectory.create({ idempotent: true, intermediates: true });
   }
+  return cacheDirectory;
 }
 
 function pruneCosmeticCache(keepName: string) {
   try {
-    const files = cacheDirectory.list().filter((item): item is File => item instanceof File);
+    const directory = ensureCacheDirectory();
+    const files = directory.list().filter((item): item is File => item instanceof File);
     const evictions = selectCosmeticCacheEvictions(files.map((file) => ({
       modificationTime: Number(file.modificationTime || 0),
       name: file.name,
       size: Number(file.size || 0),
     })), keepName);
     evictions.forEach((name) => {
-      const file = new File(cacheDirectory, name);
+      const file = new File(directory, name);
       if (file.exists) file.delete();
       verifiedThisSession.delete(name);
     });

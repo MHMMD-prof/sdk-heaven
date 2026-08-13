@@ -37,16 +37,23 @@ export type DrawingGuessControlPayload =
   | {
       type: 'guess-scored';
       guessId: string;
+      playerId: string;
       text: string;
       now: number;
+      isCorrect: boolean;
+      pointsAwarded: number;
     }
   | {
       type: 'canvas-cleared';
     }
   | {
+      type: 'stroke-undone';
+    }
+  | {
       type: 'round-ended';
       now: number;
       reason?: DrawingGuessRoundEndReason;
+      revealedPrompt?: DrawingGuessPrompt;
     }
   | {
       type: 'round-advanced';
@@ -221,13 +228,23 @@ export const mapInboundMessageToReducerEvent = (
     };
   }
 
-  if (payload.type === 'guess-scored' && payload.guessId && typeof payload.text === 'string' && payload.now) {
+  if (
+    payload.type === 'guess-scored' &&
+    payload.guessId &&
+    payload.playerId &&
+    typeof payload.text === 'string' &&
+    typeof payload.now === 'number' &&
+    typeof payload.isCorrect === 'boolean' &&
+    typeof payload.pointsAwarded === 'number'
+  ) {
     return {
-      type: 'submit-guess',
-      actorId: message.senderId,
+      type: 'apply-scored-guess',
       guessId: payload.guessId,
+      playerId: payload.playerId,
       text: payload.text,
       now: payload.now,
+      isCorrect: payload.isCorrect,
+      pointsAwarded: payload.pointsAwarded,
     };
   }
 
@@ -238,12 +255,20 @@ export const mapInboundMessageToReducerEvent = (
     };
   }
 
+  if (payload.type === 'stroke-undone') {
+    return {
+      type: 'undo-latest-stroke',
+      actorId: message.senderId,
+    };
+  }
+
   if (payload.type === 'round-ended' && payload.now) {
     return {
       type: 'end-round',
       actorId: message.senderId,
       now: payload.now,
       reason: payload.reason,
+      revealedPrompt: payload.revealedPrompt,
     };
   }
 

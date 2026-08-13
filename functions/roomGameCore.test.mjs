@@ -70,6 +70,13 @@ describe('roomGameCore', () => {
       maxPlayers: 1,
       sessionMode: 'host-local',
     });
+    expect(ROOM_GAME_REGISTRY['naval-duel']).toMatchObject({
+      clientRoute: 'MiniGame',
+      maxPlayers: 2,
+      minPlayers: 2,
+      sessionMode: 'multiplayer',
+      capabilities: expect.arrayContaining(['naval', 'fog-of-war', 'realtime']),
+    });
     expect(CLOSED_LOOP_REWARD_POLICY).toMatchObject({
       cashRedemption: false,
       currency: 'gameRewards',
@@ -207,5 +214,103 @@ describe('roomGameCore', () => {
     expect(first).not.toBe(otherTarget);
     expect(first).not.toBe(otherSession);
     expect(first).toMatch(/^rgr_[a-f0-9]{24}$/);
+  });
+
+  it('gates coin entry behind roomGameEconomy and Drawing Guess only', () => {
+    expect(resolveCreateRoomGameInvite({
+      actorMembership: baseMember,
+      command: { amount: 25, clientVersion: '1.0.0', gameId: 'drawing-guess', roomId },
+      featureFlags: { voice_room_games: true },
+      growthFeatures: {},
+      nowMs,
+      publicProfile: baseProfile,
+      room: baseRoom,
+      senderUid: 'user-1',
+      sessionId,
+    }).code).toBe('ECONOMY_DISABLED');
+
+    const paid = resolveCreateRoomGameInvite({
+      actorMembership: baseMember,
+      command: { amount: 25, clientVersion: '1.0.0', gameId: 'drawing-guess', roomId },
+      featureFlags: { voice_room_games: true },
+      growthFeatures: { roomGameEconomy: true },
+      nowMs,
+      publicProfile: baseProfile,
+      room: baseRoom,
+      senderUid: 'user-1',
+      sessionId,
+    });
+    expect(paid.ok).toBe(true);
+    expect(paid.value.entryDebit).toEqual({ amount: 25, currency: 'coins', uid: 'user-1' });
+    expect(paid.value.session.economy).toMatchObject({
+      entryFeeCoins: 25,
+      poolCoins: 25,
+      settled: false,
+    });
+
+    expect(resolveCreateRoomGameInvite({
+      actorMembership: baseMember,
+      command: { amount: 25, clientVersion: '1.0.0', gameId: 'carrom-royal', roomId },
+      featureFlags: { voice_room_games: true },
+      growthFeatures: { roomGameEconomy: true },
+      nowMs,
+      publicProfile: baseProfile,
+      room: baseRoom,
+      senderUid: 'user-1',
+      sessionId,
+    }).code).toBe('ENTRY_FEE_UNSUPPORTED');
+  });
+
+  it('refunds lobby leavers and raffles prizes for active end', () => {
+    const session = {
+      economy: {
+        currency: 'coins',
+        entryFeeCoins: 10,
+        paidEntries: { 'user-1': 10, 'user-2': 10 },
+        poolCoins: 20,
+        settled: false,
+      },
+      expiresAtMs: nowMs + 60_000,
+      hostUid: 'user-1',
+      maxPlayers: 8,
+      minPlayers: 2,
+      playerCount: 2,
+      playerUids: ['user-1', 'user-2'],
+      roomId,
+      sessionId,
+      sessionMode: 'multiplayer',
+      status: 'lobby',
+    };
+    const left = resolveLeaveRoomGame({
+      nowMs,
+      senderUid: 'user-2',
+      session,
+    });
+    expect(left.value.economyCredits).toEqual([
+      { amount: 10, currency: 'coins', kind: 'refund', uid: 'user-2' },
+    ]);
+    expect(left.value.sessionPatch.economy.poolCoins).toBe(10);
+
+    const active = {
+      ...session,
+      economy: {
+        ...session.economy,
+        paidEntries: { 'user-1': 10, 'user-2': 10 },
+        poolCoins: 20,
+      },
+      status: 'active',
+    };
+    const ended = resolveEndRoomGame({
+      actorMembership: { status: 'active', uid: 'user-1' },
+      decodedToken: { uid: 'user-1' },
+      nowMs,
+      room: baseRoom,
+      senderUid: 'user-1',
+      session: active,
+    });
+    expect(ended.value.economyCredits).toHaveLength(1);
+    expect(ended.value.economyCredits[0].amount).toBe(20);
+    expect(ended.value.economyCredits[0].kind).toBe('prize');
+    expect(['user-1', 'user-2']).toContain(ended.value.economyCredits[0].uid);
   });
 });

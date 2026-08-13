@@ -9,6 +9,8 @@ describe('adminUserContextCore', () => {
   it('maps relationships without exposing the subject as the peer', () => {
     expect(mapUserRelationship('pair', { createdAt: timestamp('2026-07-20T10:00:00Z'), memberUids: ['user-1', 'user-2'], updatedAt: timestamp('2026-07-21T10:00:00Z') }, 'user-1', 'friend')).toMatchObject({ kind: 'friend', peerUid: 'user-2', status: 'active' });
     expect(mapUserRelationship('request', { recipientUid: 'user-1', senderUid: 'user-2', status: 'pending' }, 'user-1', 'friend-request-incoming')).toMatchObject({ peerUid: 'user-2' });
+    expect(mapUserRelationship('peer-2', { createdAt: timestamp('2026-07-20T10:00:00Z'), targetUid: 'peer-2' }, 'user-1', 'following')).toMatchObject({ kind: 'following', peerUid: 'peer-2', status: 'active' });
+    expect(mapUserRelationship('peer-3', { createdAt: timestamp('2026-07-20T10:00:00Z'), followerUid: 'peer-3' }, 'user-1', 'follower')).toMatchObject({ kind: 'follower', peerUid: 'peer-3', status: 'active' });
     expect(mapUserRelationship('broken', { memberUids: ['user-1'] }, 'user-1', 'friend')).toBeNull();
   });
 

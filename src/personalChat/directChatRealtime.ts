@@ -14,6 +14,7 @@ export type DirectChatRealtimeProjection = {
   recipientUid: string;
   requestState: string;
   requesterUid: string;
+  retentionPurgedThroughSequence: number;
   unreadCount: number;
   updatedAtMs: number;
 };
@@ -34,8 +35,10 @@ export type DirectChatRealtimeMessage = {
   sticker?: { assetId: string; assetVersionId: string; itemId: string };
   systemType: string;
   text: string;
-  visibilityState: 'visible' | 'unsent';
+  visibilityState: 'visible' | 'unsent' | 'removed';
 };
+
+export const DIRECT_CHAT_ONLINE_PRESENCE_REFRESH_MS = 45_000;
 
 type ListenerOptions<T> = {
   onData: (items: T[]) => void;
@@ -61,9 +64,11 @@ export async function subscribeDirectChatInbox(
   );
 }
 
+// floorSequence is the higher of the member's own delete-for-me marker and the conversation-wide
+// retention watermark, so the listener never asks for rows retention has already deleted.
 export async function subscribeDirectChatThreadTail(
   conversationId: string,
-  clearedThroughSequence: number,
+  floorSequence: number,
   options: ListenerOptions<DirectChatRealtimeMessage> & { limit?: number },
 ) {
   const [{ firebaseDb }, firestore] = await Promise.all([import('../auth/firebase'), import('firebase/firestore')]);
@@ -71,7 +76,7 @@ export async function subscribeDirectChatThreadTail(
   return firestore.onSnapshot(
     firestore.query(
       firestore.collection(firebaseDb, 'directConversations', conversationId, 'messages'),
-      firestore.where('sequence', '>', Math.max(0, clearedThroughSequence)),
+      firestore.where('sequence', '>', Math.max(0, floorSequence)),
       firestore.orderBy('sequence', 'desc'),
       firestore.limit(pageSize),
     ),
@@ -88,7 +93,8 @@ export async function subscribeDirectChatUnreadSummary(uid: string, onValue: (to
       const value = snapshot.data();
       onValue(value?.uid === uid ? safeInteger(value.totalUnreadCount) : 0);
     },
-    () => onValue(0),
+    // Keep the last confirmed count while offline; a listener error is not evidence that every chat was read.
+    () => undefined,
   );
 }
 
@@ -115,15 +121,49 @@ export async function subscribeDirectChatPresence(
   onValue: (active: boolean) => void,
 ) {
   const [{ firebaseDb }, firestore] = await Promise.all([import('../auth/firebase'), import('firebase/firestore')]);
-  return firestore.onSnapshot(
+  let expirationTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearExpirationTimer = () => {
+    if (expirationTimer) clearTimeout(expirationTimer);
+    expirationTimer = undefined;
+  };
+  const unsubscribe = firestore.onSnapshot(
     firestore.doc(firebaseDb, 'directChatPresence', conversationId, kind, peerUid),
     (snapshot) => {
+      clearExpirationTimer();
       const value = snapshot.data();
-      const expiresAtMs = timestampMillis(value?.expiresAt);
-      onValue(Boolean(value?.uid === peerUid && expiresAtMs > Date.now() && (kind === 'typing' ? value?.value === true : value?.value === 'online')));
+      const presence = resolveDirectChatPresence(value, kind, peerUid);
+      onValue(presence.active);
+      if (presence.active) {
+        expirationTimer = setTimeout(() => {
+          expirationTimer = undefined;
+          onValue(false);
+        }, Math.max(1, presence.expiresAtMs - Date.now() + 25));
+      }
     },
-    () => onValue(false),
+    () => {
+      clearExpirationTimer();
+      onValue(false);
+    },
   );
+  return () => {
+    clearExpirationTimer();
+    unsubscribe();
+  };
+}
+
+export function resolveDirectChatPresence(
+  value: Record<string, unknown> | undefined,
+  kind: 'online' | 'typing',
+  peerUid: string,
+  nowMs = Date.now(),
+) {
+  const expiresAtMs = timestampMillis(value?.expiresAt);
+  const active = Boolean(
+    value?.uid === peerUid
+    && expiresAtMs > nowMs
+    && (kind === 'typing' ? value?.value === true : value?.value === 'online'),
+  );
+  return { active, expiresAtMs };
 }
 
 export async function setDirectChatPresence({
@@ -172,14 +212,15 @@ export function mapRealtimeProjection(value: Record<string, unknown>, ownerUid: 
     recipientUid: safeString(value.recipientUid),
     requestState: safeString(value.requestState),
     requesterUid: safeString(value.requesterUid),
+    retentionPurgedThroughSequence: safeInteger(value.retentionPurgedThroughSequence),
     unreadCount: safeInteger(value.unreadCount),
     updatedAtMs: timestampMillis(value.updatedAt),
   };
 }
 
 export function mapRealtimeMessage(value: Record<string, unknown>, id: string): DirectChatRealtimeMessage | undefined {
-  if (!Number.isSafeInteger(value.sequence) || !['visible', 'unsent'].includes(String(value.visibilityState))) return undefined;
-  const visibilityState = value.visibilityState as 'visible' | 'unsent';
+  if (!Number.isSafeInteger(value.sequence) || !['visible', 'unsent', 'removed'].includes(String(value.visibilityState))) return undefined;
+  const visibilityState = value.visibilityState as DirectChatRealtimeMessage['visibilityState'];
   return {
     attachmentId: safeString(value.attachmentId),
     createdAtMs: timestampMillis(value.createdAt),

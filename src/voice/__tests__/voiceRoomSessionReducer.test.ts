@@ -117,7 +117,7 @@ describe('voiceRoomSessionReducer', () => {
     expect(next.lastCommandResult).toBe(result);
   });
 
-  it('resets to a clean disconnected state', () => {
+  it('resets connection data while preserving explicit audio preferences', () => {
     const dirtyState = {
       ...initialVoiceRoomSessionState,
       roomId: 'room-1',
@@ -134,8 +134,8 @@ describe('voiceRoomSessionReducer', () => {
       participants: [],
       speakingParticipantIds: [],
       canPublishAudio: true,
-      isMicMuted: false,
-      isSpeakerEnabled: true,
+      isMicMuted: true,
+      isSpeakerEnabled: false,
     });
   });
 });

@@ -1,10 +1,15 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const {
+  ROOM_EFFECT_COPY_TEMPLATE_VERSION,
+  resolveRoomEffectSurface,
+} = require('./roomEffectPresentationCore');
 
 const GIFT_PRESENTATION_TIERS = Object.freeze(['inline', 'targeted', 'major', 'global']);
 const GIFT_SOUND_POLICIES = Object.freeze(['off', 'soft', 'full']);
 const GIFT_HAPTIC_POLICIES = Object.freeze(['off', 'light', 'success']);
+const GIFT_APPROVAL_MODES = Object.freeze(['simple', 'strict']);
 const PERFORMANCE_TIERS = Object.freeze(['low', 'standard', 'high']);
 const ASSET_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{2,79}$/;
 const VERSION_ID_PATTERN = /^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/;
@@ -12,15 +17,17 @@ const CLIENT_VERSION_PATTERN = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
 const RECEIPT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{15,159}$/;
 const STATIC_FORMATS = Object.freeze(['png', 'jpeg', 'legacy-webp']);
 const VISUAL_FORMATS = Object.freeze(['lottie-json', 'mp4']);
+const SIMPLE_VISUAL_FORMATS = Object.freeze(['mp4']);
 const COMBO_WINDOW_MS = 4_000;
 const MAX_COMBO_COUNT = 999;
 const MIN_GIFT_DURATION_MS = 1_500;
 const MAX_GIFT_DURATION_MS = 6_000;
+const MEBIBYTE = 1024 * 1024;
 
 function mapGiftPresentation(value) {
   if (!isRecord(value)) return undefined;
   if (Object.keys(value).some((key) => ![
-    'animationEnabled', 'audioAsset', 'audioFormat', 'durationMs', 'fallbackAsset', 'fallbackFormat', 'hapticPolicy',
+    'animationEnabled', 'approvalMode', 'audioAsset', 'audioFormat', 'durationMs', 'fallbackAsset', 'fallbackFormat', 'hapticPolicy',
     'minimumClientVersion', 'performanceTier', 'physicalApprovalReceiptId',
     'schemaVersion', 'soundPolicy', 'tier', 'visualAsset', 'visualFormat',
   ].includes(key))) return undefined;
@@ -43,7 +50,13 @@ function mapGiftPresentation(value) {
   ) return undefined;
 
   if (!value.animationEnabled) {
-    if (value.visualAsset !== undefined || value.fallbackAsset !== undefined || value.audioAsset !== undefined || value.physicalApprovalReceiptId !== undefined) {
+    if (
+      value.visualAsset !== undefined
+      || value.fallbackAsset !== undefined
+      || value.audioAsset !== undefined
+      || value.physicalApprovalReceiptId !== undefined
+      || value.approvalMode !== undefined
+    ) {
       return undefined;
     }
     return {
@@ -58,20 +71,33 @@ function mapGiftPresentation(value) {
     };
   }
 
+  const approvalMode = resolveGiftApprovalMode(value);
+  if (!approvalMode) return undefined;
+
   const visualAsset = mapAssetReference(value.visualAsset);
   const fallbackAsset = mapAssetReference(value.fallbackAsset);
   const audioAsset = value.audioAsset === undefined ? undefined : mapAssetReference(value.audioAsset);
   const physicalApprovalReceiptId = readString(value.physicalApprovalReceiptId);
-  if (!visualAsset || !fallbackAsset || (value.audioAsset !== undefined && !audioAsset) || !RECEIPT_ID_PATTERN.test(physicalApprovalReceiptId)) {
+  if (!visualAsset || !fallbackAsset || (value.audioAsset !== undefined && !audioAsset)) {
+    return undefined;
+  }
+  if (approvalMode === 'strict' && !RECEIPT_ID_PATTERN.test(physicalApprovalReceiptId)) {
+    return undefined;
+  }
+  if (approvalMode === 'simple' && physicalApprovalReceiptId) {
     return undefined;
   }
   if (soundPolicy !== 'off' && !audioAsset) return undefined;
   if (soundPolicy === 'off' && audioAsset) return undefined;
   if (value.visualFormat !== undefined && !VISUAL_FORMATS.includes(value.visualFormat)) return undefined;
+  if (approvalMode === 'simple' && value.visualFormat !== undefined && !SIMPLE_VISUAL_FORMATS.includes(value.visualFormat)) {
+    return undefined;
+  }
   if (value.fallbackFormat !== undefined && !STATIC_FORMATS.includes(value.fallbackFormat)) return undefined;
   if (value.audioFormat !== undefined && value.audioFormat !== 'm4a-aac') return undefined;
   return {
     animationEnabled: true,
+    approvalMode,
     ...(value.audioFormat ? { audioFormat: value.audioFormat } : {}),
     ...(audioAsset ? { audioAsset } : {}),
     durationMs,
@@ -80,13 +106,22 @@ function mapGiftPresentation(value) {
     hapticPolicy,
     minimumClientVersion,
     performanceTier,
-    physicalApprovalReceiptId,
+    ...(approvalMode === 'strict' ? { physicalApprovalReceiptId } : {}),
     schemaVersion: 1,
     soundPolicy,
     tier,
     visualAsset,
     ...(value.visualFormat ? { visualFormat: value.visualFormat } : {}),
   };
+}
+
+function resolveGiftApprovalMode(value) {
+  const explicit = readString(value?.approvalMode);
+  if (explicit) return GIFT_APPROVAL_MODES.includes(explicit) ? explicit : '';
+  // Legacy animated gifts with a physical receipt stay on the safe path.
+  if (RECEIPT_ID_PATTERN.test(readString(value?.physicalApprovalReceiptId))) return 'strict';
+  // Owner-friendly default for new animated gifts: MP4 + assets, no device paperwork.
+  return 'simple';
 }
 
 function buildLegacyGiftPresentation() {
@@ -111,18 +146,28 @@ function mapAssetReference(value) {
     : undefined;
 }
 
-function inspectApprovedGiftPresentation({ presentation, records }) {
+function inspectGiftPresentationAssets({ presentation, records, visualFormats = VISUAL_FORMATS }) {
   if (!presentation?.animationEnabled) return { ok: true, presentation: presentation || buildLegacyGiftPresentation() };
   const visual = inspectApprovedAsset(records?.visual, presentation.visualAsset, {
     category: 'gift-effect',
-    formats: VISUAL_FORMATS,
+    formats: visualFormats,
   });
   if (!visual.ok) return visual;
+  if (presentation.visualFormat && presentation.visualFormat !== records.visual.version.format) {
+    return { ok: false, code: 'PRESENTATION_VISUAL_FORMAT_MISMATCH' };
+  }
+  const visualProfile = inspectGiftVisualProfile(records.visual.version, presentation);
+  if (!visualProfile.ok) return visualProfile;
   const fallback = inspectApprovedAsset(records?.fallback, presentation.fallbackAsset, {
     category: 'gift-effect',
     formats: STATIC_FORMATS,
   });
   if (!fallback.ok) return fallback;
+  if (presentation.fallbackFormat && presentation.fallbackFormat !== records.fallback.version.format) {
+    return { ok: false, code: 'PRESENTATION_FALLBACK_FORMAT_MISMATCH' };
+  }
+  const fallbackProfile = inspectGiftFallbackProfile(records.fallback.version);
+  if (!fallbackProfile.ok) return fallbackProfile;
   if (
     records.visual.version.fallbackAssetId !== presentation.fallbackAsset.assetId
     || records.visual.version.fallbackAssetVersionId !== presentation.fallbackAsset.assetVersionId
@@ -134,10 +179,88 @@ function inspectApprovedGiftPresentation({ presentation, records }) {
     })
     : { ok: true };
   if (!audio.ok) return audio;
+  if (presentation.audioAsset && presentation.audioFormat && presentation.audioFormat !== records.audio.version.format) {
+    return { ok: false, code: 'PRESENTATION_AUDIO_FORMAT_MISMATCH' };
+  }
+  if (presentation.audioAsset) {
+    const audioProfile = inspectGiftAudioProfile(records.audio.version, presentation.durationMs);
+    if (!audioProfile.ok) return audioProfile;
+  }
   if (presentation.audioAsset && (
     records.visual.version.audioAssetId !== presentation.audioAsset.assetId
     || records.visual.version.audioAssetVersionId !== presentation.audioAsset.assetVersionId
   )) return { ok: false, code: 'PRESENTATION_AUDIO_MISMATCH' };
+
+  return {
+    ok: true,
+    presentation: {
+      ...presentation,
+      audioFormat: records?.audio?.version?.format || '',
+      fallbackFormat: records.fallback.version.format,
+      visualFormat: records.visual.version.format,
+    },
+  };
+}
+
+function inspectGiftVisualProfile(version, presentation) {
+  const maximumBytes = version.format === 'lottie-json' ? MEBIBYTE : 5 * MEBIBYTE;
+  if (
+    !Number.isSafeInteger(version.byteSize)
+    || version.byteSize < 1
+    || version.byteSize > maximumBytes
+    || version.width !== 1280
+    || version.height !== 720
+    || version.durationMs !== presentation.durationMs
+    || typeof version.frameRate !== 'number'
+    || version.frameRate <= 0
+    || version.frameRate > 30
+    || version.usage !== 'one-shot'
+    || version.loop !== false
+  ) return { ok: false, code: 'PRESENTATION_MEDIA_PROFILE_INVALID' };
+  if (version.format === 'mp4' && version.audioCodec !== '') {
+    return { ok: false, code: 'PRESENTATION_EMBEDDED_AUDIO_FORBIDDEN' };
+  }
+  if (
+    (version.format === 'mp4' && (version.videoCodec !== 'h264' || version.transparent !== false))
+    || (version.format === 'lottie-json' && (version.videoCodec !== '' || version.audioCodec !== '' || version.transparent !== true))
+  ) return { ok: false, code: 'PRESENTATION_MEDIA_PROFILE_INVALID' };
+  return { ok: true };
+}
+
+function inspectGiftFallbackProfile(version) {
+  if (
+    !Number.isSafeInteger(version.byteSize)
+    || version.byteSize < 1
+    || version.byteSize > 3 * MEBIBYTE
+    || version.width !== 1280
+    || version.height !== 720
+    || version.durationMs !== 0
+    || version.usage !== 'static'
+    || version.loop !== false
+  ) return { ok: false, code: 'PRESENTATION_FALLBACK_PROFILE_INVALID' };
+  return { ok: true };
+}
+
+function inspectGiftAudioProfile(version, durationMs) {
+  if (
+    !Number.isSafeInteger(version.byteSize)
+    || version.byteSize < 1
+    || version.byteSize > 500 * 1024
+    || !Number.isSafeInteger(version.durationMs)
+    || version.durationMs < 1
+    || version.durationMs > durationMs
+    || version.audioCodec !== 'aac'
+    || version.videoCodec !== ''
+    || version.usage !== 'one-shot'
+    || version.loop !== false
+  ) return { ok: false, code: 'PRESENTATION_AUDIO_PROFILE_INVALID' };
+  return { ok: true };
+}
+
+function inspectApprovedGiftPresentation({ presentation, records }) {
+  if (!presentation?.animationEnabled) return { ok: true, presentation: presentation || buildLegacyGiftPresentation() };
+  const assets = inspectGiftPresentationAssets({ presentation, records, visualFormats: VISUAL_FORMATS });
+  if (!assets.ok) return assets;
 
   const receipt = records?.physicalReceipt;
   if (
@@ -156,6 +279,11 @@ function inspectApprovedGiftPresentation({ presentation, records }) {
     || receipt.performanceTier !== presentation.performanceTier
     || receipt.soundPolicy !== presentation.soundPolicy
     || receipt.tier !== presentation.tier
+    || receipt.controlsSafeZonePassed !== true
+    || (receipt.copyTemplateVersion !== undefined
+      && receipt.copyTemplateVersion !== ROOM_EFFECT_COPY_TEMPLATE_VERSION)
+    || (receipt.presentationSurface !== undefined
+      && receipt.presentationSurface !== resolveRoomEffectSurface('room-gift', presentation.tier))
     || receipt.androidPassed !== true
     || receipt.iosPassed !== true
     || readString(receipt.androidDevice).length < 2
@@ -169,15 +297,25 @@ function inspectApprovedGiftPresentation({ presentation, records }) {
     || receipt.audioChecksum !== records.audio.version.sha256
   )) return { ok: false, code: 'PHYSICAL_APPROVAL_REQUIRED' };
 
-  return {
-    ok: true,
-    presentation: {
-      ...presentation,
-      audioFormat: records?.audio?.version?.format || '',
-      fallbackFormat: records.fallback.version.format,
-      visualFormat: records.visual.version.format,
-    },
-  };
+  return assets;
+}
+
+function inspectGiftPresentation({ presentation, records }) {
+  if (!presentation?.animationEnabled) {
+    return { ok: true, presentation: presentation || buildLegacyGiftPresentation() };
+  }
+  const approvalMode = resolveGiftApprovalMode(presentation);
+  if (approvalMode === 'simple') {
+    return inspectGiftPresentationAssets({
+      presentation: { ...presentation, approvalMode: 'simple' },
+      records,
+      visualFormats: SIMPLE_VISUAL_FORMATS,
+    });
+  }
+  return inspectApprovedGiftPresentation({
+    presentation: { ...presentation, approvalMode: 'strict' },
+    records,
+  });
 }
 
 function inspectApprovedAsset(record, reference, options) {
@@ -208,15 +346,36 @@ function inspectApprovedAsset(record, reference, options) {
   return { ok: true };
 }
 
-function createGiftPhysicalApprovalReceiptId(giftId, visualAssetVersionId) {
-  return `gift_physical_${createHash('sha256').update(`${giftId}|${visualAssetVersionId}`).digest('hex').slice(0, 32)}`;
+function createGiftPhysicalApprovalReceiptId(giftId, visualAssetVersionId, presentation) {
+  const scope = isRecord(presentation)
+    ? [
+      presentation.visualAsset?.assetId || '',
+      presentation.visualAsset?.assetVersionId || visualAssetVersionId,
+      presentation.fallbackAsset?.assetId || '',
+      presentation.fallbackAsset?.assetVersionId || '',
+      presentation.audioAsset?.assetId || '',
+      presentation.audioAsset?.assetVersionId || '',
+      presentation.durationMs || '',
+      presentation.tier || '',
+      presentation.soundPolicy || '',
+      presentation.hapticPolicy || '',
+      presentation.performanceTier || '',
+      presentation.minimumClientVersion || '',
+      presentation.visualFormat || '',
+      presentation.fallbackFormat || '',
+      presentation.audioFormat || '',
+      ROOM_EFFECT_COPY_TEMPLATE_VERSION,
+      resolveRoomEffectSurface('room-gift', presentation.tier),
+    ].join('|')
+    : visualAssetVersionId;
+  return `gift_physical_${createHash('sha256').update(`${giftId}|${scope}`).digest('hex').slice(0, 32)}`;
 }
 
 function createGiftComboId({ giftId, senderUid, targetUid }) {
   return `combo_${createHash('sha256').update(`${senderUid}|${targetUid}|${giftId}`).digest('hex').slice(0, 32)}`;
 }
 
-function resolveGiftComboState({ existing, giftId, nowMs, quantity, senderUid, targetUid, tier }) {
+function resolveGiftComboState({ existing, giftId, nowMs, quantity, requestId, senderUid, targetUid, tier }) {
   const comboId = createGiftComboId({ giftId, senderUid, targetUid });
   const compatible = isRecord(existing)
     && existing.comboId === comboId
@@ -231,10 +390,18 @@ function resolveGiftComboState({ existing, giftId, nowMs, quantity, senderUid, t
   const previousSequence = compatible && Number.isSafeInteger(existing.sequence)
     ? Math.max(0, existing.sequence)
     : 0;
+  const existingWindowId = compatible && /^gcw_[a-f0-9]{24}$/.test(readString(existing.comboWindowId))
+    ? existing.comboWindowId
+    : '';
+  const comboWindowId = existingWindowId || `gcw_${createHash('sha256')
+    .update(`${comboId}|${requestId || nowMs}`)
+    .digest('hex')
+    .slice(0, 24)}`;
   return {
     comboCount: Math.min(MAX_COMBO_COUNT, previousCount + quantity),
     comboId,
     comboKey: comboId,
+    comboWindowId,
     giftId,
     senderUid,
     sequence: previousSequence + 1,
@@ -318,16 +485,21 @@ function isRecord(value) {
 
 module.exports = {
   COMBO_WINDOW_MS,
+  GIFT_APPROVAL_MODES,
   GIFT_HAPTIC_POLICIES,
   GIFT_PRESENTATION_TIERS,
   GIFT_SOUND_POLICIES,
   MAX_COMBO_COUNT,
+  SIMPLE_VISUAL_FORMATS,
   buildLegacyGiftPresentation,
   createGiftComboId,
   createGiftPhysicalApprovalReceiptId,
   inspectApprovedGiftPresentation,
+  inspectGiftPresentation,
+  inspectGiftPresentationAssets,
   isEligibleGlobalGiftCampaign,
   mapGiftPresentation,
+  resolveGiftApprovalMode,
   resolveGiftComboState,
   resolveGiftPresentationDelivery,
 };

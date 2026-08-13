@@ -1,5 +1,6 @@
 import { VoiceProviderConfig } from './types';
 import Constants from 'expo-constants';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomGiftAction = 'get-room-gift-center' | 'quote-room-gift' | 'send-room-gift';
 
@@ -29,6 +30,16 @@ export type RoomGiftCatalogItem = {
   presentation: RoomGiftPresentation;
   scoreValue: number;
   status: 'available' | 'disabled';
+  theater?: {
+    luckyTableId?: string;
+    tags: Array<'combo' | 'storm' | 'lucky' | 'magic'>;
+  };
+};
+
+export type RoomGiftMagicFrameTemplate = {
+  accentColor: string;
+  labelAr: string;
+  templateId: string;
 };
 
 export type RoomGiftQuote = {
@@ -67,6 +78,12 @@ export type RoomGiftEffect = {
   giftId: string;
   hapticPolicy: 'off' | 'light' | 'success';
   iconKey: string;
+  luckyOutcome?: {
+    kind: 'none' | 'display-crumb';
+    labelAr: string;
+    oddsLabelAr: string;
+  };
+  magicFrame?: RoomGiftMagicFrameTemplate;
   nameAr: string;
   presentationTier: RoomGiftPresentationTier;
   priority: number;
@@ -77,11 +94,13 @@ export type RoomGiftEffect = {
   senderDisplayName: string;
   senderUid: string;
   soundPolicy: 'off' | 'soft' | 'full';
+  theaterKind?: 'standard' | 'combo' | 'storm' | 'lucky' | 'magic';
 };
 
 export type RoomGiftCommandRequest = {
   action: RoomGiftAction;
   giftId?: string;
+  magicFrameTemplateId?: string;
   quantity?: number;
   quoteId?: string;
   requestId?: string;
@@ -100,6 +119,19 @@ export type RoomGiftCommandResult = {
   };
   effect?: RoomGiftEffect;
   eventId?: string;
+  luckyOdds?: {
+    entries: Array<{
+      id: string;
+      kind: 'none' | 'display-crumb';
+      labelAr: string;
+      oddsLabelAr: string;
+      weight: number;
+    }>;
+    tableId: string;
+    totalWeight: number;
+    version: number;
+  };
+  magicFrameTemplates?: RoomGiftMagicFrameTemplate[];
   policy?: {
     commissionBps: number;
     policyVersion: number;
@@ -108,6 +140,11 @@ export type RoomGiftCommandResult = {
   receiptId?: string;
   requestId: string;
   roomId: string;
+  theaterFlags?: {
+    giftCombos: boolean;
+    luckyGifts: boolean;
+    magicGiftTemplates: boolean;
+  };
 };
 
 export class RoomGiftRequestError extends Error {
@@ -146,6 +183,7 @@ export async function requestRoomGiftCommand(
         requestId,
         roomId: request.roomId,
         ...(request.giftId ? { giftId: request.giftId } : {}),
+        ...(request.magicFrameTemplateId ? { magicFrameTemplateId: request.magicFrameTemplateId } : {}),
         ...(request.quoteId ? { quoteId: request.quoteId } : {}),
         ...(request.targetUid ? { targetUid: request.targetUid, targetMode: 'member' } : {}),
         ...(request.action !== 'get-room-gift-center' ? { quantity: request.quantity ?? 1 } : {}),
@@ -153,6 +191,7 @@ export async function requestRoomGiftCommand(
       headers: {
         Authorization: `Bearer ${await getIdToken(true)}`,
         'Content-Type': 'application/json',
+        ...(await getVoiceAppCheckHeader()),
       },
       method: 'POST',
       signal: controller.signal,

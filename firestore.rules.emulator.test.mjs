@@ -5,7 +5,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   Timestamp,
   collection,
@@ -48,6 +48,7 @@ beforeEach(async () => {
       allowedRegionCodes: [],
       allowedUids: [],
       audienceMode: 'public',
+      broadReleaseReady: true,
       minimumClientVersion: '1.0.0',
       recordingDecision: 'rejected',
       stageId: 10,
@@ -57,11 +58,30 @@ beforeEach(async () => {
 });
 
 describe('firestore.rules auth waves', () => {
+  it('restricts deletion-pending accounts to their lifecycle status', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'accountLifecycles', 'uid-1'), { state: 'deletion-pending', uid: 'uid-1' });
+    });
+    const pendingDb = userDb('uid-1', 'salem@example.com', { accountDeletionPending: true });
+    await assertFails(getDoc(doc(pendingDb, 'users', 'uid-1')));
+    await assertSucceeds(getDoc(doc(pendingDb, 'accountLifecycles', 'uid-1')));
+    await assertFails(setDoc(doc(pendingDb, 'publicProfiles', 'uid-1'), publicProfilePayload('uid-1')));
+  });
+
   it('allows owner profile reads and denies other users', async () => {
     await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
 
     await assertSucceeds(getDoc(doc(userDb('uid-1', 'salem@example.com'), 'users', 'uid-1')));
     await assertFails(getDoc(doc(userDb('uid-2', 'dana@example.com'), 'users', 'uid-1')));
+  });
+
+  it('routes private presentation changes through the server command', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await assertFails(updateDoc(doc(userDb('uid-1', 'salem@example.com'), 'users', 'uid-1'), {
+      displayName: 'Changed',
+      updatedAt: now,
+    }));
   });
 
   it('allows authenticated non-blocked public profile reads and denies anonymous access', async () => {
@@ -108,13 +128,28 @@ describe('firestore.rules auth waves', () => {
     await assertFails(getDoc(doc(userDb('uid-2', 'dana@example.com'), 'publicProfiles', 'uid-1')));
   });
 
-  it('allows safe owner presentation updates but protects identity, counters, and moderation', async () => {
+  it('routes all public-profile updates through server commands', async () => {
     await seedPublicProfile('uid-1', { publicId: '1234567' });
     const profileRef = doc(userDb('uid-1', 'salem@example.com'), 'publicProfiles', 'uid-1');
 
-    await assertSucceeds(updateDoc(profileRef, { bio: 'نبذة قصيرة', countryCode: 'LB', updatedAt: now }));
+    await assertFails(updateDoc(profileRef, { bio: 'نبذة قصيرة', countryCode: 'LB', updatedAt: now }));
     await assertFails(updateDoc(profileRef, { countryCode: 'US', updatedAt: now }));
     await assertFails(updateDoc(profileRef, { giftScore: 99, updatedAt: now }));
+    await assertFails(updateDoc(profileRef, {
+      coupleEffect: {
+        assetId: 'forged-pair',
+        assetVersionId: 'v1-123456789abc',
+        borderMode: 'static',
+        coupleIdHash: 'a'.repeat(64),
+        entranceMode: 'static',
+        fallbackAssetId: 'forged-pair',
+        fallbackAssetVersionId: 'v1-123456789abc',
+        format: 'png',
+        itemId: 'forged-pair',
+        profileMode: 'static',
+      },
+      updatedAt: now,
+    }));
     await assertFails(updateDoc(profileRef, {
       representativeBadge: { active: true, updatedAt: now },
       updatedAt: now,
@@ -126,6 +161,18 @@ describe('firestore.rules auth waves', () => {
 
   it('accepts bounded Wave 6 projections but rejects unrecognized cosmetic authority fields', async () => {
     await seedPublicProfile('uid-1', {
+      coupleEffect: {
+        assetId: 'safe-pair',
+        assetVersionId: 'v1-123456789abc',
+        borderMode: 'looping',
+        coupleIdHash: 'a'.repeat(64),
+        entranceMode: 'one-shot',
+        fallbackAssetId: 'safe-pair-static',
+        fallbackAssetVersionId: 'v1-abcdef123456',
+        format: 'lottie-json',
+        itemId: 'safe-pair-item',
+        profileMode: 'static',
+      },
       equippedCosmetics: {
         chatBubble: { assetId: 'safe-bubble', assetVersionId: 'v1-123456789abc', itemId: 'safe-bubble-item' },
         seatEffect: { assetId: 'safe-seat', assetVersionId: 'v1-123456789abc', itemId: 'safe-seat-item' },
@@ -138,7 +185,7 @@ describe('firestore.rules auth waves', () => {
         staffBadge: { assetId: 'fake-staff', assetVersionId: 'v1-123456789abc', itemId: 'fake-staff-item' },
       },
     });
-    await assertFails(getDoc(doc(userDb('uid-1', 'salem@example.com'), 'publicProfiles', 'uid-2')));
+    await assertFails(getDoc(doc(userDb('uid-2', 'layla@example.com'), 'publicProfiles', 'uid-1')));
   });
 
   it('denies direct public identity and reserved social collection writes', async () => {
@@ -163,6 +210,16 @@ describe('firestore.rules auth waves', () => {
     await assertFails(setDoc(doc(db, 'coupleRequests', 'couple-request-1'), { senderUid: 'uid-1' }));
     await assertFails(setDoc(doc(db, 'couples', 'couple-1'), { memberUids: ['uid-1', 'uid-2'] }));
     await assertFails(setDoc(doc(db, 'coupleMemberships', 'uid-1'), { partnerUid: 'uid-2' }));
+    await assertFails(setDoc(doc(db, 'coupleEffectOwnerships', 'rel_123', 'items', 'effect-1'), { itemId: 'effect-1' }));
+    await assertFails(setDoc(doc(db, 'coupleEffectEquipment', 'rel_123'), { itemId: 'effect-1' }));
+    await assertFails(setDoc(doc(db, 'coupleEffectTransactions', 'tx-1'), { itemId: 'effect-1' }));
+    await assertFails(setDoc(doc(db, 'coupleEffectAuditEvents', 'event-1'), { action: 'equip' }));
+    await assertFails(getDoc(doc(db, 'coupleEffectOwnerships', 'rel_123', 'items', 'effect-1')));
+    await assertFails(getDoc(doc(db, 'coupleEffectEquipment', 'rel_123')));
+    await assertFails(getDoc(doc(db, 'coupleEffectTransactions', 'tx-1')));
+    await assertFails(getDoc(doc(db, 'coupleEffectAuditEvents', 'event-1')));
+    await assertFails(setDoc(doc(db, 'rooms', 'room-1', 'coupleEntryClaims', 'claim-1'), { eventId: 'claim-1' }));
+    await assertFails(getDoc(doc(db, 'rooms', 'room-1', 'coupleEntryClaims', 'claim-1')));
     await assertFails(setDoc(doc(db, 'walletTransactions', 'tx-1'), { amount: 100 }));
     await assertFails(setDoc(doc(db, 'dailyLoginCampaign', 'current'), { activeRevision: 1 }));
     await assertFails(setDoc(doc(db, 'dailyLoginStates', 'uid-1'), { streakPosition: 1, uid: 'uid-1' }));
@@ -265,6 +322,148 @@ describe('firestore.rules auth waves', () => {
     await assertFails(setDoc(doc(ownerDb, 'directChatRetention', 'current'), { retentionDays: 90 }));
   });
 
+  it('keeps Personal Chat Wave 6A report cases and evidence unreachable from any client', async () => {
+    await seedDirectChatWave3();
+    const reportId = `dmr_${'a'.repeat(40)}`;
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'reports', reportId), {
+        category: 'threat',
+        createdAt: now,
+        reporterUid: 'uid-1',
+        source: 'direct-chat-safety-v1',
+        status: 'open',
+        subjectType: 'direct-message',
+        targetUid: 'uid-2',
+        updatedAt: now,
+      });
+      await setDoc(doc(db, 'directChatReports', reportId), {
+        accessPolicy: 'staff-only',
+        conversationId: 'conversation-1',
+        legalHold: false,
+        reporterUid: 'uid-1',
+        targetUid: 'uid-2',
+      });
+      await setDoc(doc(db, 'directChatReports', reportId, 'evidence', 'message-1'), {
+        conversationId: 'conversation-1',
+        messageId: 'message-1',
+        selected: true,
+        senderUid: 'uid-1',
+        text: 'hello',
+      });
+    });
+
+    const reporterDb = userDb('uid-1', 'salem@example.com');
+    const reportedDb = userDb('uid-2', 'dana@example.com');
+    const staffDb = userDb('staff-1', 'staff@example.com', { admin: true, adminRole: 'super-moderator' });
+
+    // The reporter can still read their own conversation, but never the captured case or evidence.
+    await assertSucceeds(getDoc(doc(reporterDb, 'directConversations', 'conversation-1', 'messages', 'message-1')));
+    for (const db of [reporterDb, reportedDb, staffDb]) {
+      await assertFails(getDoc(doc(db, 'reports', reportId)));
+      await assertFails(getDocs(query(collection(db, 'reports'), where('reporterUid', '==', 'uid-1'))));
+      await assertFails(getDoc(doc(db, 'directChatReports', reportId)));
+      await assertFails(getDocs(query(collection(db, 'directChatReports'), where('status', '==', 'open'))));
+      await assertFails(getDoc(doc(db, 'directChatReports', reportId, 'evidence', 'message-1')));
+      await assertFails(getDocs(collection(db, 'directChatReports', reportId, 'evidence')));
+    }
+
+    // A client cannot author its own evidence, forge a case, or clear a legal hold.
+    await assertFails(setDoc(doc(reporterDb, 'reports', `dmr_${'b'.repeat(40)}`), { reporterUid: 'uid-1', targetUid: 'uid-2' }));
+    await assertFails(setDoc(doc(reporterDb, 'directChatReports', `dmr_${'c'.repeat(40)}`), { reporterUid: 'uid-1', targetUid: 'uid-2' }));
+    await assertFails(setDoc(doc(reporterDb, 'directChatReports', reportId, 'evidence', 'forged'), { messageId: 'forged', text: 'planted' }));
+    await assertFails(updateDoc(doc(reporterDb, 'directChatReports', reportId), { legalHold: true }));
+    await assertFails(updateDoc(doc(staffDb, 'directChatReports', reportId), { legalHold: false }));
+    await assertFails(deleteDoc(doc(reporterDb, 'directChatReports', reportId, 'evidence', 'message-1')));
+    await assertFails(setDoc(doc(reporterDb, 'directChatRateLimits', 'uid-1'), { reportCount: 0 }));
+  });
+
+  it('keeps Personal Chat Wave 6B restrictions backend-only and lets a bounded restriction expire', async () => {
+    await seedDirectChatWave3();
+    const restrictedUntil = Timestamp.fromMillis(Date.now() + (72 * 60 * 60 * 1_000));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'directChatRestrictions', 'uid-1'), {
+        actorUid: 'platform-owner',
+        endsAt: restrictedUntil,
+        reason: 'Confirmed harassment',
+        reportId: `dmr_${'a'.repeat(40)}`,
+        startsAt: Timestamp.fromMillis(Date.now() - 1_000),
+        state: 'restricted',
+        uid: 'uid-1',
+      });
+    });
+
+    const restrictedDb = userDb('uid-1', 'salem@example.com');
+    const peerDb = userDb('uid-2', 'dana@example.com');
+    const staffDb = userDb('staff-1', 'staff@example.com', { admin: true, adminRole: 'owner' });
+
+    // A production writer now exists, so confirm it did not open the collection to anyone.
+    for (const db of [restrictedDb, peerDb, staffDb]) {
+      await assertFails(getDoc(doc(db, 'directChatRestrictions', 'uid-1')));
+      await assertFails(getDocs(query(collection(db, 'directChatRestrictions'), where('state', '==', 'restricted'))));
+    }
+    await assertFails(setDoc(doc(restrictedDb, 'directChatRestrictions', 'uid-1'), { state: 'cleared', uid: 'uid-1' }));
+    await assertFails(updateDoc(doc(restrictedDb, 'directChatRestrictions', 'uid-1'), { state: 'cleared' }));
+    await assertFails(deleteDoc(doc(restrictedDb, 'directChatRestrictions', 'uid-1')));
+    await assertFails(setDoc(doc(staffDb, 'directChatRestrictions', 'uid-2'), { state: 'restricted', uid: 'uid-2' }));
+
+    // The restriction blocks the client surfaces the rules gate, here typing presence.
+    const presence = directChatPresencePayload('typing', 'uid-1', true, Timestamp.fromMillis(Date.now() + 60_000));
+    const typingRef = doc(restrictedDb, 'directChatPresence', 'conversation-1', 'typing', 'uid-1');
+    await assertFails(setDoc(typingRef, presence));
+
+    // endsAt must be stored as a Timestamp: the rules compare it to request.time, so a raw millis
+    // number would make an expired restriction evaluate as an error and never lift.
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'directChatRestrictions', 'uid-1'), {
+        actorUid: 'platform-owner',
+        endsAt: Timestamp.fromMillis(Date.now() - 1_000),
+        reason: 'Confirmed harassment',
+        startsAt: Timestamp.fromMillis(Date.now() - (60 * 60 * 1_000)),
+        state: 'restricted',
+        uid: 'uid-1',
+      });
+    });
+    await assertSucceeds(setDoc(typingRef, presence));
+  });
+
+  it('keeps the Personal Chat Wave 6C retention policy and sweep cursor backend-only', async () => {
+    await seedDirectChatWave3();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'directChatRetention', 'current'), {
+        evidenceRetentionDays: 90,
+        legalHoldRetentionDays: 180,
+        messageRetentionDays: 365,
+        policyVersion: 1,
+        updatedBy: 'platform-owner',
+      });
+      await setDoc(doc(db, 'directChatRetention', 'sweepState'), { cursor: 'conversation-1', scanned: 1, wrapped: false });
+    });
+
+    const memberDb = userDb('uid-1', 'salem@example.com');
+    const ownerDb = userDb('staff-1', 'staff@example.com', { admin: true, adminRole: 'owner' });
+    for (const db of [memberDb, ownerDb]) {
+      for (const documentId of ['current', 'sweepState']) {
+        await assertFails(getDoc(doc(db, 'directChatRetention', documentId)));
+        await assertFails(updateDoc(doc(db, 'directChatRetention', documentId), { messageRetentionDays: 1 }));
+        await assertFails(deleteDoc(doc(db, 'directChatRetention', documentId)));
+      }
+      await assertFails(getDocs(collection(db, 'directChatRetention')));
+      await assertFails(setDoc(doc(db, 'directChatRetention', 'forged'), { messageRetentionDays: 1 }));
+    }
+    // Raising retention past the platform cap has to be impossible from the client, not just clamped.
+    await assertFails(setDoc(doc(memberDb, 'directChatRetention', 'current'), { messageRetentionDays: 100_000 }));
+
+    // The watermark the client reads from its own projection stays read-only.
+    await assertSucceeds(getDoc(doc(memberDb, 'directConversationMembers', 'uid-1', 'items', 'conversation-1')));
+    await assertFails(updateDoc(
+      doc(memberDb, 'directConversationMembers', 'uid-1', 'items', 'conversation-1'),
+      { retentionPurgedThroughSequence: 0 },
+    ));
+    await assertFails(updateDoc(doc(memberDb, 'directConversations', 'conversation-1'), { retentionPurgedThroughSequence: 0 }));
+  });
+
   it('exposes Personal Chat Wave 3 reads only to participants and keeps persistent writes backend-only', async () => {
     await seedDirectChatWave3();
     const firstDb = userDb('uid-1', 'salem@example.com');
@@ -337,6 +536,11 @@ describe('firestore.rules auth waves', () => {
         publicationStatus: 'draft',
         themeId: 'draft-theme',
       });
+      await setDoc(doc(db, 'roomThemes', 'animated-theme'), {
+        manifestVersion: 2,
+        publicationStatus: 'published',
+        themeId: 'animated-theme',
+      });
       await setDoc(doc(db, 'rooms', 'theme-room', 'themeEntitlements', 'royal-theater'), {
         roomId: 'theme-room',
         state: 'active',
@@ -345,6 +549,7 @@ describe('firestore.rules auth waves', () => {
     });
     const db = userDb('uid-1', 'salem@example.com');
     await assertSucceeds(getDoc(doc(db, 'roomThemes', 'majlis-default')));
+    await assertSucceeds(getDoc(doc(db, 'roomThemes', 'animated-theme')));
     await assertFails(getDoc(doc(db, 'roomThemes', 'draft-theme')));
     await assertFails(setDoc(doc(db, 'roomThemes', 'new-theme'), {
       manifestVersion: 1,
@@ -366,6 +571,12 @@ describe('firestore.rules auth waves', () => {
         representativeTransfers: false,
         updatedAt: now,
       });
+      await setDoc(doc(context.firestore(), 'appConfig', 'personalChatsFrontendRollout'), {
+        percentage: 0,
+        salt: '',
+        schemaVersion: 1,
+        stage: 'off',
+      });
       await setDoc(doc(context.firestore(), 'appConfig', 'cosmeticsFeatures'), {
         cosmetics_animated_avatar_frames: false,
         cosmetics_asset_registry: false,
@@ -377,13 +588,17 @@ describe('firestore.rules auth waves', () => {
       });
     });
     const signedInRef = doc(userDb('uid-1', 'salem@example.com'), 'appConfig', 'socialFeatures');
+    const rolloutRef = doc(userDb('uid-1', 'salem@example.com'), 'appConfig', 'personalChatsFrontendRollout');
     const cosmeticsRef = doc(userDb('uid-1', 'salem@example.com'), 'appConfig', 'cosmeticsFeatures');
 
     await assertSucceeds(getDoc(signedInRef));
+    await assertSucceeds(getDoc(rolloutRef));
     await assertSucceeds(getDoc(cosmeticsRef));
     await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'appConfig', 'socialFeatures')));
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'appConfig', 'personalChatsFrontendRollout')));
     await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'appConfig', 'cosmeticsFeatures')));
     await assertFails(updateDoc(signedInRef, { friends: true }));
+    await assertFails(updateDoc(rolloutRef, { stage: 'global' }));
     await assertFails(updateDoc(cosmeticsRef, { cosmetics_shared_renderer: true }));
   });
 
@@ -639,7 +854,12 @@ describe('firestore.rules auth waves', () => {
     await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'events', 'entry-2'), { status: 'ready' }));
     await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'entryEffectRequests', 'request-1'), { uid: 'uid-1' }));
     await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'entryEffectClaims', 'claim-1'), { uid: 'uid-1' }));
+    await assertFails(getDoc(doc(memberDb, 'rooms', 'effects-room', 'coupleEntryClaims', 'pair-claim-1')));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'coupleEntryClaims', 'pair-claim-1'), { uid: 'uid-1' }));
     await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'entryEffectRateLimits', 'uid-1'), { count: 1 }));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'reactionRequests', 'request-1'), { uid: 'uid-1' }));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'reactionRateLimits', 'uid-1'), { count: 1 }));
+    await assertFails(setDoc(doc(memberDb, 'rooms', 'effects-room', 'reactionRoomRateLimits', 'default'), { count: 1 }));
   });
 
   it('allows an unverified signed-in owner to create their onboarding profile', async () => {
@@ -668,13 +888,13 @@ describe('firestore.rules auth waves', () => {
     );
   });
 
-  it('allows owner account deletion requests and denies forged request identity', async () => {
+  it('routes account deletion requests through the lifecycle command', async () => {
     await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
 
     const db = userDb('uid-1', 'salem@example.com');
     const requestRef = doc(db, 'users', 'uid-1', 'accountDeletionRequests', 'request-1');
 
-    await assertSucceeds(
+    await assertFails(
       setDoc(requestRef, {
         uid: 'uid-1',
         email: 'salem@example.com',
@@ -1258,6 +1478,77 @@ describe('firestore.rules auth waves', () => {
     await assertFails(setDoc(doc(ownerDb, 'roomSafetyRateLimits', 'uid-1'), { reportCount: 0 }));
   });
 
+  it('denies client reads and writes for follow graph edges', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedPublicProfile('uid-1', { publicId: '1234567' });
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'following', 'uid-1', 'items', 'uid-2'), {
+        createdAt: now,
+        targetUid: 'uid-2',
+      });
+      await setDoc(doc(context.firestore(), 'followers', 'uid-1', 'items', 'uid-2'), {
+        createdAt: now,
+        followerUid: 'uid-2',
+      });
+    });
+    const ownerDb = userDb('uid-1', 'salem@example.com');
+    await assertFails(getDoc(doc(ownerDb, 'following', 'uid-1', 'items', 'uid-2')));
+    await assertFails(getDoc(doc(ownerDb, 'followers', 'uid-1', 'items', 'uid-2')));
+    await assertFails(setDoc(doc(ownerDb, 'following', 'uid-1', 'items', 'uid-3'), {
+      createdAt: now,
+      targetUid: 'uid-3',
+    }));
+    await assertFails(deleteDoc(doc(ownerDb, 'followers', 'uid-1', 'items', 'uid-2')));
+  });
+
+
+  it('denies client reads and writes for soft-match collections', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'softMatchQueue', 'uid-1'), { status: 'waiting', expiresAtMs: Date.now() + 60_000 });
+      await setDoc(doc(db, 'softMatchSessions', 'sms_test'), { status: 'active', expiresAtMs: Date.now() + 60_000 });
+      await setDoc(doc(db, 'softMatchRequests', 'softmatch_abcdefghijk1'), { uid: 'uid-1' });
+      await setDoc(doc(db, 'softMatchRateLimits', 'uid-1'), { count: 1 });
+    });
+    const db = userDb('uid-1', 'salem@example.com');
+    await assertFails(getDoc(doc(db, 'softMatchQueue', 'uid-1')));
+    await assertFails(setDoc(doc(db, 'softMatchQueue', 'uid-1'), { status: 'waiting' }));
+    await assertFails(getDoc(doc(db, 'softMatchSessions', 'sms_test')));
+    await assertFails(getDoc(doc(db, 'softMatchRequests', 'softmatch_abcdefghijk1')));
+    await assertFails(getDoc(doc(db, 'softMatchRateLimits', 'uid-1')));
+  });
+
+  it('denies client member create on soft-match rooms', async () => {
+    await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
+    await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
+    await seedRoom('soft-match-room', {
+      softMatch: true,
+      visibility: 'private',
+      inviteCode: 'ABCD12',
+      schemaVersion: 2,
+      revision: 1,
+      availability: 'active',
+      ownerUid: 'uid-1',
+      seatMode: 'locked',
+      seatTargetCount: 5,
+    });
+    await seedMember('soft-match-room', 'uid-1', 'Salem', 'S', 'host', true, {
+      schemaVersion: 2,
+      authorityRole: 'owner',
+      seatId: null,
+      privileges: { canManageMusic: false },
+    });
+    const outsiderDb = userDb('uid-2', 'dana@example.com');
+    await assertFails(setDoc(doc(outsiderDb, 'rooms', 'soft-match-room', 'members', 'uid-2'), {
+      ...memberPayload('uid-2', 'Dana', 'D', 'listener', false, 'ABCD12'),
+      schemaVersion: 2,
+      authorityRole: 'member',
+      seatId: null,
+      privileges: { canManageMusic: false },
+    }));
+  });
+
   it('gates room game sessions to active members and denies all operational writes', async () => {
     await seedProfile('uid-1', 'salem@example.com', 'Salem', 'S');
     await seedProfile('uid-2', 'dana@example.com', 'Dana', 'D');
@@ -1422,6 +1713,42 @@ describe('firestore.rules auth waves', () => {
       ));
     });
 
+    it('allows get of owner-bound published customs but excludes them from catalog lists', async () => {
+      await seedPublicProfile('uid-1', { publicId: '1234567' });
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'cosmeticAssets/cu-pr-aaaaaaaaaaaaaaaaaaaa'), {
+          assetId: 'cu-pr-aaaaaaaaaaaaaaaaaaaa',
+          ownerType: 'user',
+          ownerUid: 'uid-2',
+          publicationStatus: 'published',
+          publishedVersionId: 'v1-123456789abc',
+          renderingEnabled: true,
+          schemaVersion: 1,
+          visibility: 'owner-bound',
+        });
+        await setDoc(
+          doc(context.firestore(), 'cosmeticAssets/cu-pr-aaaaaaaaaaaaaaaaaaaa/versions/v1-123456789abc'),
+          {
+            assetId: 'cu-pr-aaaaaaaaaaaaaaaaaaaa',
+            assetVersionId: 'v1-123456789abc',
+            schemaVersion: 1,
+          },
+        );
+      });
+      const db = userDb('uid-1', 'salem@example.com');
+      await assertSucceeds(getDoc(doc(db, 'cosmeticAssets/cu-pr-aaaaaaaaaaaaaaaaaaaa')));
+      await assertSucceeds(getDoc(
+        doc(db, 'cosmeticAssets/cu-pr-aaaaaaaaaaaaaaaaaaaa/versions/v1-123456789abc'),
+      ));
+      // Query is fully constrained to owner-bound published assets, which list rules deny.
+      await assertFails(getDocs(query(
+        collection(db, 'cosmeticAssets'),
+        where('publicationStatus', '==', 'published'),
+        where('renderingEnabled', '==', true),
+        where('visibility', '==', 'owner-bound'),
+      )));
+    });
+
     it('denies client approval, receipt, publication, and registry writes', async () => {
       await seedPublicProfile('uid-1', { publicId: '1234567' });
       const db = userDb('uid-1', 'salem@example.com');
@@ -1466,6 +1793,37 @@ describe('firestore.rules auth waves', () => {
       await assertFails(setDoc(
         doc(userDb('uid-1', 'salem@example.com'), 'cosmeticSubmissions/forged'),
         { ownerUid: 'uid-1', status: 'approved' },
+      ));
+    });
+
+    it('keeps custom eligibility and ownership server-owned', async () => {
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'cosmeticCustomEligibility/uid-1'), {
+          active: true,
+          uid: 'uid-1',
+        });
+        await setDoc(doc(context.firestore(), 'cosmeticCustomOwnerships/uid-1/items/cu-pr-aaaaaaaaaaaaaaaaaaaa'), {
+          assetId: 'cu-pr-aaaaaaaaaaaaaaaaaaaa',
+          state: 'active',
+          uid: 'uid-1',
+        });
+      });
+      await assertSucceeds(getDoc(
+        doc(userDb('uid-1', 'salem@example.com'), 'cosmeticCustomEligibility/uid-1'),
+      ));
+      await assertFails(getDoc(
+        doc(userDb('uid-2', 'dana@example.com'), 'cosmeticCustomEligibility/uid-1'),
+      ));
+      await assertFails(setDoc(
+        doc(userDb('uid-1', 'salem@example.com'), 'cosmeticCustomEligibility/uid-1'),
+        { active: true, uid: 'uid-1' },
+      ));
+      await assertSucceeds(getDoc(
+        doc(userDb('uid-1', 'salem@example.com'), 'cosmeticCustomOwnerships/uid-1/items/cu-pr-aaaaaaaaaaaaaaaaaaaa'),
+      ));
+      await assertFails(setDoc(
+        doc(userDb('uid-1', 'salem@example.com'), 'cosmeticCustomOwnerships/uid-1/items/forged'),
+        { assetId: 'forged', state: 'active', uid: 'uid-1' },
       ));
     });
   });

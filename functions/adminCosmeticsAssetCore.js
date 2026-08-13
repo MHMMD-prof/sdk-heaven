@@ -4,6 +4,9 @@ const {
   extensionForFormat,
   validateAssetIdentityDraft,
 } = require('./cosmeticsAssetValidationCore');
+const {
+  normalizeAdminCustomSubmissionMutation,
+} = require('./cosmeticCustomSubmissionCore');
 
 const ASSET_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{2,79}$/;
 const VERSION_ID_PATTERN = /^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/;
@@ -16,6 +19,11 @@ const OPERATIONS = Object.freeze([
   'emergency-disable',
   'suspend',
   'rollback-version',
+  'approve-custom-submission',
+  'reject-custom-submission',
+  'suspend-custom-submission',
+  'grant-custom-eligibility',
+  'revoke-custom-eligibility',
 ]);
 
 function normalizeAdminCosmeticsAssetQuery(body = {}) {
@@ -51,6 +59,16 @@ function normalizeAdminCosmeticsAssetQuery(body = {}) {
 
 function normalizeAdminCosmeticsAssetMutation(body = {}) {
   const operation = readString(body.operation);
+  if ([
+    'approve-custom-submission',
+    'reject-custom-submission',
+    'suspend-custom-submission',
+    'grant-custom-eligibility',
+    'revoke-custom-eligibility',
+  ].includes(operation)) {
+    return normalizeAdminCustomSubmissionMutation(body);
+  }
+
   const requestId = readString(body.requestId);
   const reason = readString(body.reason).slice(0, 300);
   const expectedRevision = Number.isSafeInteger(body.expectedRevision)
@@ -76,6 +94,18 @@ function normalizeAdminCosmeticsAssetMutation(body = {}) {
       || hasAudioVersion !== ASSET_ID_PATTERN.test(audioAssetId)
     ) {
       return invalid('Asset references require both asset and version IDs.');
+    }
+    if (
+      draft.value.category === 'couple-effect'
+      && (
+        !['png', 'lottie-json'].includes(draft.value.format)
+        || hasAudioVersion
+        || audioAssetId
+        || (draft.value.format === 'png' && (hasFallbackVersion || fallbackAssetId))
+        || (draft.value.format === 'lottie-json' && (!hasFallbackVersion || !fallbackAssetId))
+      )
+    ) {
+      return invalid('Couple effects require PNG, or Lottie with one exact PNG fallback, and never audio.');
     }
     return {
       ok: true,

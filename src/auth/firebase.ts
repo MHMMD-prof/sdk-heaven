@@ -9,10 +9,12 @@ import { getFirestore, initializeFirestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 import { readFirebaseConfig } from './firebaseConfig';
+import { initializeFirebaseAppCheck } from './appCheck';
 
 const firebaseConfig = readFirebaseConfig();
 
 export const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+export const firebaseAppCheck = initializeFirebaseAppCheck(firebaseApp);
 export const firebaseDb = (() => {
   if (Platform.OS === 'web') {
     return getFirestore(firebaseApp);

@@ -1,10 +1,9 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { validateAccountDeletionRequest } from '../auth/accountLifecycle';
 import { useAuth } from '../auth/AuthProvider';
-import { validateProfileInput } from '../auth/profile';
 import { GlassCard } from '../components/GlassCard';
 import { LuxuryButton } from '../components/LuxuryButton';
 import { LuxuryInput } from '../components/LuxuryInput';
@@ -15,43 +14,18 @@ import { RootStackParamList } from '../types/navigation';
 type AccountSettingsScreenProps = NativeStackScreenProps<RootStackParamList, 'AccountSettings'>;
 
 export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps) {
-  const { profile, requestAccountDeletion, saveProfile, sendPasswordResetForCurrentUser, signOut, user } = useAuth();
-  const [avatarLabel, setAvatarLabel] = useState(profile?.avatarLabel ?? deriveAvatarLabel(user?.email));
+  const { requestAccountDeletion, sendPasswordResetForCurrentUser, signOut, user } = useAuth();
   const [deletionReason, setDeletionReason] = useState('');
-  const [displayName, setDisplayName] = useState(profile?.displayName ?? '');
+  const [deletionPassword, setDeletionPassword] = useState('');
   const [message, setMessage] = useState('');
   const [isDeletionRequested, setIsDeletionRequested] = useState(false);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
 
-  const profileValidation = useMemo(
-    () => validateProfileInput({ avatarLabel, displayName }),
-    [avatarLabel, displayName],
-  );
   const deletionValidation = useMemo(
     () => validateAccountDeletionRequest({ reason: deletionReason }),
     [deletionReason],
   );
-
-  const saveProfileChanges = async () => {
-    if (!profileValidation.ok) {
-      setMessage(profileValidation.message);
-      return;
-    }
-
-    setIsSavingProfile(true);
-    setMessage('');
-
-    try {
-      await saveProfile(profileValidation.value);
-      setMessage('تم تحديث الملف الشخصي.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'تعذر تحديث الملف الشخصي.');
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
 
   const sendReset = async () => {
     setIsSendingReset(true);
@@ -77,9 +51,9 @@ export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps
     setMessage('');
 
     try {
-      await requestAccountDeletion(deletionValidation.value);
+      await requestAccountDeletion(deletionValidation.value, deletionPassword);
       setIsDeletionRequested(true);
-      setMessage('تم إرسال طلب حذف الحساب. لن يتم حذف الحساب فورا حتى تتم مراجعته.');
+      setMessage('تم إيقاف الحساب. يمكنك استرجاعه خلال 30 يوماً قبل الحذف النهائي.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'تعذر إرسال طلب حذف الحساب.');
     } finally {
@@ -100,30 +74,6 @@ export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps
       </View>
 
       <GlassCard style={styles.card}>
-        <Text style={styles.sectionTitle}>الملف الشخصي</Text>
-        <LuxuryInput
-          autoCapitalize="words"
-          label="اسم العرض"
-          onChangeText={setDisplayName}
-          value={displayName}
-        />
-        <LuxuryInput
-          label="رمز الصورة"
-          maxLength={2}
-          onChangeText={setAvatarLabel}
-          value={avatarLabel}
-        />
-        <LuxuryButton
-          disabled={!profileValidation.ok}
-          loading={isSavingProfile}
-          onPress={() => {
-            void saveProfileChanges();
-          }}
-          title="حفظ التغييرات"
-        />
-      </GlassCard>
-
-      <GlassCard style={styles.card}>
         <Text style={styles.sectionTitle}>الأمان</Text>
         <Text style={styles.bodyText}>{user?.email ?? 'لا يوجد بريد مسجل'}</Text>
         <LuxuryButton
@@ -133,6 +83,18 @@ export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps
           }}
           title="إرسال رابط تغيير كلمة المرور"
         />
+        <LuxuryButton
+          onPress={() => navigation.navigate('BlockedUsers')}
+          title="المستخدمون المحظورون"
+        />
+      </GlassCard>
+
+      <GlassCard style={styles.card}>
+        <Text style={styles.sectionTitle}>القانون والمساعدة</Text>
+        <LegalRow label="سياسة الخصوصية" url={process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL} />
+        <LegalRow label="الشروط والأحكام" url={process.env.EXPO_PUBLIC_TERMS_URL} />
+        <LegalRow label="إرشادات المجتمع" url={process.env.EXPO_PUBLIC_COMMUNITY_GUIDELINES_URL} />
+        <LegalRow label="الدعم" url={process.env.EXPO_PUBLIC_SUPPORT_URL} />
       </GlassCard>
 
       {__DEV__ ? (
@@ -151,7 +113,7 @@ export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps
       <GlassCard style={[styles.card, styles.dangerCard]}>
         <Text style={styles.sectionTitle}>حذف الحساب</Text>
         <Text style={styles.bodyText}>
-          يرسل هذا طلبا للمراجعة ولا يحذف الحساب فورا. قد نحتاج إلى تأكيد هويتك قبل الإجراء النهائي.
+          سيُوقف الحساب ويُخفى ملفك العام فوراً. يمكنك استرجاع الحساب خلال 30 يوماً، ثم تُحذف البيانات المؤهلة وتُزال هويتك من السجلات التي يلزم الاحتفاظ بها.
         </Text>
         <LuxuryInput
           label="سبب اختياري"
@@ -160,8 +122,14 @@ export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps
           placeholder="اكتب السبب إن رغبت"
           value={deletionReason}
         />
+        <LuxuryInput
+          label="كلمة المرور للتأكيد"
+          onChangeText={setDeletionPassword}
+          secureTextEntry
+          value={deletionPassword}
+        />
         <LuxuryButton
-          disabled={isDeletionRequested || !deletionValidation.ok}
+          disabled={isDeletionRequested || !deletionValidation.ok || !deletionPassword}
           loading={isRequestingDeletion}
           onPress={() => {
             void requestDeletion();
@@ -184,9 +152,19 @@ export function AccountSettingsScreen({ navigation }: AccountSettingsScreenProps
   );
 }
 
-function deriveAvatarLabel(email?: string | null) {
-  const source = email?.trim() || 'أ';
-  return [...source][0] ?? 'أ';
+function LegalRow({ label, url }: { label: string; url?: string }) {
+  if (!url) return null;
+  return (
+    <Pressable
+      accessibilityHint="يفتح الرابط في المتصفح"
+      accessibilityRole="link"
+      onPress={() => void Linking.openURL(url)}
+      style={styles.legalRow}
+    >
+      <Text style={styles.legalArrow}>‹</Text>
+      <Text style={styles.legalLabel}>{label}</Text>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -236,6 +214,20 @@ const styles = StyleSheet.create({
   dangerCard: {
     borderColor: 'rgba(184, 41, 75, 0.42)',
   },
+  legalRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 48,
+  },
+  legalLabel: {
+    color: colors.text,
+    flex: 1,
+    fontSize: typography.sizes.body,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  legalArrow: { color: colors.gold, fontSize: 28 },
   sectionTitle: {
     color: colors.goldSoft,
     fontSize: typography.sizes.bodyLarge,

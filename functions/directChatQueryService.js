@@ -11,6 +11,7 @@ const {
 const {
   mapDirectChatMessage,
   mapDirectChatProjection,
+  resolveDirectChatThreadFloor,
   safeSequence,
 } = require('./directChatProjectionCore');
 const {
@@ -124,7 +125,7 @@ async function getDirectChatThread({ clock, command, db, fingerprint, uid }) {
     if (!response.ok) return recordReadCommand({ clock, command, commandRef, conversationId, fingerprint, now, response, transaction, uid });
 
     const projection = dataOf(projectionSnapshot);
-    const clearedThroughSequence = safeSequence(projection?.clearedThroughSequence);
+    const clearedThroughSequence = resolveDirectChatThreadFloor(projection, conversation);
     let query = conversationRef.collection('messages')
       .where('sequence', '>', clearedThroughSequence)
       .orderBy('sequence', 'desc');

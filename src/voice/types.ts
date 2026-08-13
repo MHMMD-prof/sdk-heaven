@@ -1,5 +1,6 @@
 import { VoiceRoom } from '../types/voice';
 import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
+import type { RoomReactionEnvelope } from './roomAmbientReactions';
 
 export type VoiceConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -25,6 +26,7 @@ export type VoiceConnectOptions = {
   token: string;
   serverUrl?: string;
   canPublishAudio?: boolean;
+  startMuted?: boolean;
   metadata?: Record<string, string>;
   mockRoom?: VoiceRoom;
 };
@@ -39,11 +41,14 @@ export type VoiceProviderConfig = {
     roomCommandEndpoint?: string;
     roomEntryEffectCommandEndpoint?: string;
     roomGameCommandEndpoint?: string;
+    roomPkCommandEndpoint?: string;
     roomGiftCommandEndpoint?: string;
     roomMediaCommandEndpoint?: string;
     roomMusicCommandEndpoint?: string;
+    roomWatchCommandEndpoint?: string;
     roomOwnershipCommandEndpoint?: string;
     roomRecordingCommandEndpoint?: string;
+    roomReactionCommandEndpoint?: string;
     roomThemeCommandEndpoint?: string;
     roomTargetCommandEndpoint?: string;
     roomAttendanceCommandEndpoint?: string;
@@ -85,6 +90,7 @@ export type VoiceRoomSession = {
   speakers: VoiceParticipant[];
   listeners: VoiceParticipant[];
   speakingParticipantIds: string[];
+  latestRoomReaction?: RoomReactionEnvelope;
 };
 
 export type VoiceClientEvent =
@@ -99,6 +105,10 @@ export type VoiceClientEvent =
   | {
       type: 'speakingChanged';
       participantIds: string[];
+    }
+  | {
+      type: 'roomReactionReceived';
+      envelope: RoomReactionEnvelope;
     }
   | {
       type: 'error';

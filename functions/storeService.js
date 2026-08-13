@@ -25,8 +25,9 @@ const {
 
 async function getStoreCatalog({ db, input, uid }) {
   if (input !== undefined) return { errorCode: 'INVALID_REQUEST' };
-  const [feature, profileSnapshot, walletSnapshot, storefrontSnapshot] = await db.getAll(
-    db.doc('appConfig/socialFeatures'), db.doc(`publicProfiles/${uid}`), db.doc(`walletSummaries/${uid}`), db.doc('appConfig/storefront'),
+  const [feature, cosmeticsFeature, profileSnapshot, walletSnapshot, storefrontSnapshot] = await db.getAll(
+    db.doc('appConfig/socialFeatures'), db.doc('appConfig/cosmeticsFeatures'), db.doc(`publicProfiles/${uid}`),
+    db.doc(`walletSummaries/${uid}`), db.doc('appConfig/storefront'),
   );
   if (feature.data()?.wallet !== true) return { errorCode: 'FEATURE_DISABLED' };
   const readiness = await validateActiveProfile(db, profileSnapshot, uid);
@@ -35,6 +36,8 @@ async function getStoreCatalog({ db, input, uid }) {
   const items = catalog.docs
     .map((document) => mapCustomerCatalogItem(document.data(), document.id))
     .filter(Boolean)
+    .filter((item) => !isMockItemId(item.itemId))
+    .filter((item) => item.category !== 'couple-effects' || cosmeticsFeature.data()?.cosmetics_couple_effects === true)
     .sort((left, right) => left.category.localeCompare(right.category) || left.order - right.order || left.itemId.localeCompare(right.itemId));
   const configuredFeaturedItemId = typeof storefrontSnapshot.data()?.featuredItemId === 'string'
     ? storefrontSnapshot.data().featuredItemId.trim()
@@ -49,6 +52,7 @@ async function purchaseStoreItem({ clock, db, fieldValue, input, requestId, uid 
   const validation = normalizeStorePurchaseInput(input);
   if (!validation.ok) return { errorCode: validation.code };
   const { currency, itemId } = validation.value;
+  if (itemId.startsWith('mock-') || itemId.startsWith('demo-')) return { errorCode: 'ITEM_UNAVAILABLE' };
   return db.runTransaction(async (transaction) => {
     const refs = {
       catalog: db.doc(`storeCatalog/${itemId}`),
@@ -78,6 +82,7 @@ async function purchaseStoreItem({ clock, db, fieldValue, input, requestId, uid 
     if (profile.moderationStatus !== 'active') return { errorCode: 'PERMISSION_DENIED' };
     const item = catalogSnapshot.exists ? mapStoreCatalogItem(catalogSnapshot.data(), itemId) : undefined;
     if (!item || item.availability !== 'available' || !item.purchasingEnabled) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (item.category === 'couple-effects') return { errorCode: 'ITEM_UNAVAILABLE' };
     if (!(await isApprovedCanonicalCosmetic({ db, item, transaction }))) return { errorCode: 'ITEM_UNAVAILABLE' };
     if (item.category === 'chat-themes') return { errorCode: 'ROOM_SELECTION_REQUIRED' };
     if (item.stock.kind === 'limited' && item.stock.remaining === 0) return { errorCode: 'OUT_OF_STOCK' };
@@ -149,7 +154,7 @@ async function getMyStoreItems({ db, input, uid }) {
   const readiness = await validateActiveProfile(db, profileSnapshot, uid);
   if (readiness.errorCode) return readiness;
   const snapshot = await db.collection(`storeOwnerships/${uid}/items`).limit(STORE_CATALOG_LIMIT).get();
-  const ownerships = snapshot.docs.map((document) => mapStoreOwnership(document.data(), document.id)).filter(Boolean);
+  const ownerships = snapshot.docs.map((document) => mapStoreOwnership(document.data(), document.id)).filter(Boolean).filter((ownership) => !isMockItemId(ownership.itemId));
   const catalogs = ownerships.length ? await db.getAll(...ownerships.map((ownership) => db.doc(`storeCatalog/${ownership.itemId}`))) : [];
   const catalogById = new Map(catalogs.map((document) => [document.id, document.exists ? mapStoreCatalogItem(document.data(), document.id) : undefined]));
   return {
@@ -163,6 +168,7 @@ async function equipStoreItem({ clock, db, fieldValue, input, requestId, uid }) 
   const validation = normalizeStoreEquipInput(input);
   if (!validation.ok) return { errorCode: validation.code };
   const { itemId } = validation.value;
+  if (itemId.startsWith('mock-') || itemId.startsWith('demo-')) return { errorCode: 'ITEM_UNAVAILABLE' };
   return db.runTransaction(async (transaction) => {
     const refs = {
       catalog: db.doc(`storeCatalog/${itemId}`),
@@ -186,6 +192,7 @@ async function equipStoreItem({ clock, db, fieldValue, input, requestId, uid }) 
     if (!ownership) return { errorCode: 'NOT_FOUND' };
     const item = catalogSnapshot.exists ? mapStoreCatalogItem(catalogSnapshot.data(), itemId) : undefined;
     if (!item || item.category !== ownership.category) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (item.category === 'couple-effects') return { errorCode: 'ITEM_UNAVAILABLE' };
     if (!(await isApprovedCanonicalCosmetic({ db, item, transaction }))) return { errorCode: 'ITEM_UNAVAILABLE' };
     if (item.category === 'chat-themes') return { errorCode: 'ROOM_SELECTION_REQUIRED' };
     if (ownership.state !== 'active' || (ownership.expiresAt?.toMillis?.() ?? Infinity) <= clock.nowMillis()) return { errorCode: 'ITEM_UNAVAILABLE' };
@@ -220,6 +227,7 @@ async function giftStoreItem({ clock, db, fieldValue, input, requestId, uid }) {
   const validation = normalizeStoreGiftInput(input);
   if (!validation.ok) return { errorCode: validation.code };
   const { currency, itemId, recipientPublicId } = validation.value;
+  if (itemId.startsWith('mock-') || itemId.startsWith('demo-')) return { errorCode: 'ITEM_UNAVAILABLE' };
   const recipientIdentity = await db.doc(`publicIds/${recipientPublicId}`).get();
   const recipientUid = recipientIdentity.exists && typeof recipientIdentity.data()?.uid === 'string' ? recipientIdentity.data().uid : '';
   if (!recipientUid || recipientUid === uid) return { errorCode: 'INVALID_RECIPIENT' };
@@ -253,6 +261,7 @@ async function giftStoreItem({ clock, db, fieldValue, input, requestId, uid }) {
     if (!inspectPublicProfile(recipient, identity.data(), recipientUid).ok || recipient.moderationStatus !== 'active') return { errorCode: 'INVALID_RECIPIENT' };
     const item = catalogSnapshot.exists ? mapStoreCatalogItem(catalogSnapshot.data(), itemId) : undefined;
     if (!item || item.availability !== 'available' || !item.purchasingEnabled) return { errorCode: 'ITEM_UNAVAILABLE' };
+    if (item.category === 'couple-effects') return { errorCode: 'ITEM_UNAVAILABLE' };
     if (!(await isApprovedCanonicalCosmetic({ db, item, transaction }))) return { errorCode: 'ITEM_UNAVAILABLE' };
     if (item.category === 'chat-themes') return { errorCode: 'GIFT_UNSUPPORTED' };
     if (item.stock.kind === 'limited' && item.stock.remaining === 0) return { errorCode: 'OUT_OF_STOCK' };
@@ -393,6 +402,10 @@ async function validateActiveProfile(db, profileSnapshot, uid) {
   if (!inspectPublicProfile(profile, reservation?.exists ? reservation.data() : undefined, uid).ok) return { errorCode: 'PROFILE_INCOMPLETE' };
   if (profile.moderationStatus !== 'active') return { errorCode: 'PERMISSION_DENIED' };
   return { profile };
+}
+
+function isMockItemId(itemId) {
+  return typeof itemId === 'string' && (itemId.startsWith('mock-') || itemId.startsWith('demo-'));
 }
 
 module.exports = { equipStoreItem, expireStoreOwnerships, getMyStoreItems, getStoreCatalog, giftStoreItem, purchaseStoreItem };

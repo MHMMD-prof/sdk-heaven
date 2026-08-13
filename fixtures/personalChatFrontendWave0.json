@@ -1,0 +1,124 @@
+{
+  "version": "personal-chat-frontend-wave0-v1",
+  "generatedAt": "2026-08-09",
+  "notice": "Disposable design fixtures only. Never use for production authorization or commands.",
+  "people": {
+    "sara": { "uid": "fixture-sara", "displayNameAr": "سارة", "displayNameEn": "Sara", "online": true },
+    "omar": { "uid": "fixture-omar", "displayNameAr": "عمر", "displayNameEn": "Omar", "online": false },
+    "noor": { "uid": "fixture-noor", "displayNameAr": "نور", "displayNameEn": "Noor", "online": true },
+    "deleted": { "uid": "fixture-deleted", "displayNameAr": "مستخدم محذوف", "displayNameEn": "Deleted user", "online": false }
+  },
+  "states": [
+    {
+      "id": "inbox-populated-ar",
+      "locale": "ar-IQ",
+      "direction": "rtl",
+      "screen": "inbox",
+      "filter": "all",
+      "totalUnread": 5,
+      "requestCount": 2,
+      "rows": [
+        { "peer": "sara", "preview": "وصلت الصورة، شكراً", "time": "١٢:٤٥", "unread": 2, "muted": false, "draft": false },
+        { "peer": "noor", "preview": "يكتب الآن…", "time": "١٢:٣٨", "unread": 3, "muted": false, "draft": false },
+        { "peer": "omar", "preview": "مسودة: سأعود بعد قليل", "time": "أمس", "unread": 0, "muted": true, "draft": true },
+        { "peer": "deleted", "preview": "تم إلغاء إرسال هذه الرسالة", "time": "السبت", "unread": 0, "muted": false, "draft": false }
+      ]
+    },
+    {
+      "id": "inbox-search-en",
+      "locale": "en",
+      "direction": "ltr",
+      "screen": "inbox",
+      "filter": "unread",
+      "query": "Sa",
+      "totalUnread": 2,
+      "requestCount": 0,
+      "rows": [
+        { "peer": "sara", "preview": "Photo · Thanks, got it", "time": "12:45 PM", "unread": 2, "muted": false, "draft": false }
+      ]
+    },
+    {
+      "id": "inbox-empty-ar",
+      "locale": "ar-IQ",
+      "direction": "rtl",
+      "screen": "inbox-empty",
+      "title": "لا توجد محادثات بعد",
+      "body": "ابدأ محادثة مع أحد أصدقائك.",
+      "action": "ابدأ محادثة"
+    },
+    {
+      "id": "requests-ar",
+      "locale": "ar-IQ",
+      "direction": "rtl",
+      "screen": "requests",
+      "requestCount": 2,
+      "rows": [
+        { "peer": "omar", "preview": "مرحباً، التقينا في غرفة الألعاب", "time": "١٢:٢٠" },
+        { "peer": "noor", "preview": "أود بدء محادثة", "time": "أمس" }
+      ]
+    },
+    {
+      "id": "thread-accepted-ar",
+      "locale": "ar-IQ",
+      "direction": "rtl",
+      "screen": "thread",
+      "peer": "sara",
+      "status": "متصلة الآن",
+      "messages": [
+        { "id": "m1", "sender": "peer", "kind": "text", "text": "مرحباً، هل أنتِ في الغرفة؟", "time": "١٢:٤٤" },
+        { "id": "m2", "sender": "self", "kind": "text", "text": "نعم، سأدخل الآن", "time": "١٢:٤٦", "delivery": "read" },
+        { "id": "m3", "sender": "self", "kind": "text", "text": "انتظريني دقيقة واحدة", "time": "١٢:٤٦", "delivery": "read" }
+      ],
+      "composer": { "value": "", "replyTo": null, "keyboardOpen": false }
+    },
+    {
+      "id": "thread-request-en",
+      "locale": "en",
+      "direction": "ltr",
+      "screen": "thread-request",
+      "peer": "omar",
+      "status": "Incoming chat request",
+      "messages": [
+        { "id": "m4", "sender": "peer", "kind": "text", "text": "Hi, we met in the games room.", "time": "12:20 PM" }
+      ],
+      "actions": ["Accept", "Reject", "Report", "Block"]
+    },
+    {
+      "id": "thread-media-ar",
+      "locale": "ar-IQ",
+      "direction": "rtl",
+      "screen": "thread",
+      "peer": "noor",
+      "status": "متصلة الآن",
+      "messages": [
+        { "id": "m5", "sender": "peer", "kind": "image", "text": "صورة", "time": "٩:٣٠" },
+        { "id": "m6", "sender": "self", "kind": "voice-note", "text": "رسالة صوتية ٠:٢٤", "time": "٩:٣٢", "delivery": "sent" },
+        { "id": "m7", "sender": "peer", "kind": "sticker", "text": "ملصق", "time": "٩:٣٣" }
+      ]
+    },
+    {
+      "id": "thread-failed-en",
+      "locale": "en",
+      "direction": "ltr",
+      "screen": "thread",
+      "peer": "sara",
+      "status": "Offline",
+      "messages": [
+        { "id": "m8", "sender": "self", "kind": "text", "text": "I will send the room link now.", "time": "12:52 PM", "delivery": "failed" }
+      ],
+      "composer": { "value": "", "replyTo": null, "keyboardOpen": false }
+    },
+    {
+      "id": "thread-keyboard-ar",
+      "locale": "ar-IQ",
+      "direction": "rtl",
+      "screen": "thread",
+      "peer": "sara",
+      "status": "تكتب الآن…",
+      "messages": [
+        { "id": "m9", "sender": "peer", "kind": "text", "text": "هل تريد الرد على الرسالة السابقة؟", "time": "١:٠١" }
+      ],
+      "composer": { "value": "نعم، كنت أكتب", "replyTo": "هل تريد الرد على الرسالة السابقة؟", "keyboardOpen": true }
+    }
+  ]
+}

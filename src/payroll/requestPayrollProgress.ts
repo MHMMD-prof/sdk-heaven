@@ -10,6 +10,8 @@ declare const process:
 export type PayrollProgress = {
   cycle: { cycleId: string; endAtMillis: number; startAtMillis: number; timeZone: string };
   enrolled: true;
+  /** True when `voice_room_payroll_payouts` is live (Wave 4 economic stage 7). */
+  payoutEnabled?: boolean;
   plan: {
     category: 'super-admin' | 'employee' | 'female-host';
     currency: 'coins' | 'diamonds';
@@ -33,6 +35,10 @@ export type PayrollProgress = {
     }>;
     qualified: boolean;
     result: string;
+  };
+  settlement?: {
+    mode: 'live' | 'report-only';
+    nextSettlementEstimateAtMillis: number;
   };
   uid: string;
 };

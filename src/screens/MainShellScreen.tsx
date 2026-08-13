@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { BottomNavigationBar } from '../components/BottomNavigationBar';
 import { DailyLoginHomeCard, DailyLoginRewardSheet } from '../dailyLogin/DailyLoginRewardsUi';
 import { useDailyLoginRewards } from '../dailyLogin/useDailyLoginRewards';
+import { EventsHomeStrip } from '../opsEvents/EventsHomeStrip';
 import { usePushNotificationCoordinator } from '../notifications/usePushNotificationCoordinator';
 import { useDirectChats } from '../personalChat/DirectChatProvider';
 import { parseDirectChatLink } from '../personalChat/directChatLinks';
@@ -50,6 +51,7 @@ export function MainShellScreen({ navigation }: MainShellScreenProps) {
           <HomeScreen
             bottomNavigation={bottomNavigation}
             dailyLoginEntry={<DailyLoginHomeCard controller={dailyLogin} />}
+            eventsEntry={<EventsHomeStrip uid={user?.uid} />}
             onOpenProfile={() => setActiveTab('me')}
             onOpenVoiceRoom={(roomId) => navigation.navigate('VoiceRoom', { roomId })}
           />
@@ -65,7 +67,11 @@ export function MainShellScreen({ navigation }: MainShellScreenProps) {
           <ChatsScreen bottomNavigation={bottomNavigation} navigation={navigation} />
         </View>
         <View style={[styles.tab, activeTab !== 'games' && styles.hiddenTab]}>
-          <GamesScreen bottomNavigation={bottomNavigation} navigation={navigation} />
+          <GamesScreen
+            bottomNavigation={bottomNavigation}
+            navigation={navigation}
+            onBrowseRooms={() => setActiveTab('rooms')}
+          />
         </View>
         <View style={[styles.tab, activeTab !== 'me' && styles.hiddenTab]}>
           <MeProfileScreen bottomNavigation={bottomNavigation} navigation={navigation} />

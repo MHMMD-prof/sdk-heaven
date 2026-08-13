@@ -49,6 +49,10 @@ describe('roomEntryPresentationCore', () => {
       ok: true,
       presentation: { fallbackFormat: 'png', visualFormat: 'lottie-json' },
     });
+    const legacyReceipt = approvedRecords('lottie-json');
+    delete legacyReceipt.physicalReceipt.copyTemplateVersion;
+    delete legacyReceipt.physicalReceipt.presentationSurface;
+    expect(inspectApprovedEntryPresentation({ presentation, records: legacyReceipt }).ok).toBe(true);
     expect(inspectApprovedEntryPresentation({
       presentation,
       records: {
@@ -91,6 +95,7 @@ function approvedRecords(format) {
       androidDevice: 'Pixel 9',
       androidPassed: true,
       controlsSafeZonePassed: true,
+      copyTemplateVersion: 1,
       durationMs: 4_000,
       fallbackAssetId: fallbackAsset.assetId,
       fallbackAssetVersionId: fallbackAsset.assetVersionId,
@@ -101,6 +106,7 @@ function approvedRecords(format) {
       minimumClientVersion: '1.0.0',
       opaqueCompositionPassed: false,
       performanceTier: 'standard',
+      presentationSurface: 'bottom-stage',
       soundPolicy: 'off',
       status: 'passed',
       testedClientVersion: '1.0.0',
@@ -138,7 +144,12 @@ function assetRecord(reference, category, format, checksum, extra) {
       assetVersionId: reference.assetVersionId,
       category,
       format,
-      ...(category === 'entry-effect' ? { height: 720, transparent: format === 'lottie-json', width: 1280 } : {}),
+      ...(category === 'entry-effect' ? {
+        ...(format === 'mp4' ? { audioCodec: '' } : {}),
+        height: 720,
+        transparent: format === 'lottie-json',
+        width: 1280,
+      } : {}),
       ...(['lottie-json', 'mp4'].includes(format) ? { durationMs: 4_000 } : {}),
       sha256: checksum,
       ...extra,

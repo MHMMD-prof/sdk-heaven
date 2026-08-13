@@ -23,7 +23,9 @@ import {
   getVoiceRoomHostName,
   selectHomeDiscoveryRooms,
 } from '../home/homeDiscovery';
-import { requestFriendsOverview } from '../social/requestSocialCommand';
+import { useGrowthFeatureFlags } from '../growth/featureFlags';
+import { setGrowthMatchMask } from '../growth/matchSession';
+import { requestFriendsOverview, requestQuickMatch } from '../social/requestSocialCommand';
 import { useSocialFeatureFlags } from '../social/useSocialFeatureFlags';
 import { colors, radius, spacing, typography } from '../theme';
 import { RoomCountryCode, VoiceRoom, VoiceRoomMember, VoiceRoomType } from '../types/voice';
@@ -85,6 +87,7 @@ export function RoomsScreen({
   onOpenVoiceRoom,
 }: RoomsScreenProps) {
   const cosmeticsFlags = useCosmeticsFeatureFlags();
+  const growthFlags = useGrowthFeatureFlags();
   const { width } = useWindowDimensions();
   const compact = width < 380;
   const socialFlags = useSocialFeatureFlags();
@@ -110,6 +113,7 @@ export function RoomsScreen({
   const [createInviteCode, setCreateInviteCode] = useState('');
   const [selectedCountryCode, setSelectedCountryCode] = useState<RoomCountryCode>('IQ');
   const [selectedRoomType, setSelectedRoomType] = useState<VoiceRoomType>('voice');
+  const [isMatching, setMatching] = useState(false);
   const visibleAvatarUids = useMemo(
     () => rooms.flatMap((room) => roomMembers(room).slice(0, 3).map((member) => member.id)),
     [rooms],
@@ -223,6 +227,34 @@ export function RoomsScreen({
     }
   };
 
+  const handleQuickMatch = async () => {
+    if (!growthFlags.quickMatch || isMatching) return;
+    setErrorMessage('');
+    setMatching(true);
+    try {
+      const response = await requestQuickMatch();
+      if (!response.ok) {
+        setErrorMessage(response.error.messageAr || 'تعذر إيجاد غرفة مناسبة الآن.');
+        return;
+      }
+      if (response.result.masked && response.result.mask) {
+        setGrowthMatchMask({
+          expiresAtMs: response.result.mask.expiresAtMs,
+          labelAr: response.result.mask.labelAr,
+          roomId: response.result.roomId,
+        });
+      }
+      setPendingRoomId(response.result.roomId);
+      const joinedRoom = await joinRoom(response.result.roomId);
+      onOpenVoiceRoom(joinedRoom.id);
+    } catch {
+      setErrorMessage('تعذر الانضمام بعد المطابقة. حاول مرة أخرى.');
+    } finally {
+      setPendingRoomId(undefined);
+      setMatching(false);
+    }
+  };
+
   const hasDiscoveryContent = Boolean(featuredRoom || liveRooms.length || friendRooms.length);
 
   return (
@@ -251,6 +283,14 @@ export function RoomsScreen({
                 if (isSearchVisible) setSearchQuery('');
               }}
             />
+            {growthFlags.quickMatch ? (
+              <HeaderAction
+                accessibilityLabel="مطابقة سريعة"
+                active={isMatching}
+                icon={{ ios: 'shuffle', android: 'shuffle', web: 'shuffle' }}
+                onPress={() => void handleQuickMatch()}
+              />
+            ) : null}
             <HeaderAction
               accessibilityLabel="إنشاء غرفة جديدة"
               emphasized

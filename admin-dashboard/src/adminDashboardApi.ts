@@ -39,6 +39,22 @@ export type AdminOverviewMetrics = {
   adminAuditEvents: number;
   gameRooms: number;
   generatedAt: string;
+  growthHealth: {
+    emptyRoomJoinRate: number;
+    emptyRoomJoins: number;
+    giftGmvCoins: number;
+    giftGmvDiamonds: number;
+    matchAttempts: number;
+    matchRoomLandings: number;
+    matchToRoomRate: number;
+    nonemptyRoomJoins: number;
+    softMatchAttempts: number;
+    softMatchPaired: number;
+    softMatchPairRate: number;
+    stageId: number;
+    stageName: string;
+    vipConversions: number;
+  };
   moderationEvents: number;
   privateRooms: number;
   reports: number;
@@ -103,8 +119,13 @@ export type AdminAuditExport = { count: number; csv: string; filename: string; t
 
 export type AdminStoreCatalogItem = {
   availability: 'available' | 'disabled' | 'unavailable';
-  category: 'game-items' | 'chat-themes' | 'avatar-frames' | 'profile-skins' | 'chat-bubbles' | 'nameplates' | 'cosmetic-badges' | 'seat-effects' | 'stickers' | 'cars' | 'custom-ids';
+  category: 'game-items' | 'chat-themes' | 'avatar-frames' | 'profile-skins' | 'chat-bubbles' | 'nameplates' | 'cosmetic-badges' | 'seat-effects' | 'couple-effects' | 'stickers' | 'cars' | 'custom-ids';
   cosmeticAsset?: { assetId: string; assetVersionId: string };
+  coupleEffectPresentation?: {
+    borderMode: 'off' | 'static' | 'looping';
+    entranceMode: 'off' | 'static' | 'one-shot';
+    profileMode: 'off' | 'static' | 'looping';
+  };
   customId?: string;
   createdAt: string;
   description: { ar: string; en: string };
@@ -161,7 +182,7 @@ export type AdminRoomThemeSeat = {
 };
 
 export type AdminRoomThemeManifest = {
-  manifestVersion: 1;
+  manifestVersion: 1 | 2 | 3;
   themeId: string;
   publicationStatus: 'draft' | 'published' | 'disabled';
   renderingEnabled: boolean;
@@ -171,6 +192,24 @@ export type AdminRoomThemeManifest = {
   assets: Record<'background' | 'stage' | 'emptySeatFrame' | 'badge' | 'dock' | 'drawer', { uri: string; version: number } | null>;
   colors: Record<'background' | 'panel' | 'panelRaised' | 'ruby' | 'rubyBright' | 'gold' | 'goldSoft' | 'text' | 'textMuted', string>;
   layouts: Record<'5' | '10' | '15' | '20', AdminRoomThemeSeat[]>;
+  motion?: {
+    background: { assetId: string; assetVersionId: string } | null;
+    ambient: Array<{
+      id: string;
+      asset: { assetId: string; assetVersionId: string };
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }>;
+  };
+  scene?: {
+    background: { fit: 'cover' | 'contain'; focalX: number; focalY: number };
+    stage: { fit: 'cover' | 'contain'; focalX: number; focalY: number };
+    profiles: Record<'compact' | 'standard' | 'tall', {
+      layouts: Record<'5' | '10' | '15' | '20', AdminRoomThemeSeat[]>;
+    }>;
+  };
 };
 
 export type AdminRoomThemeDetail = {
@@ -239,7 +278,7 @@ export type AdminCosmeticAssetDetail = {
 export type AdminRocketAsset = {
   bytes: number;
   durationMs?: number;
-  format: 'png' | 'webp' | 'animated-webp' | 'mp3' | 'm4a';
+  format: 'png' | 'webp' | 'animated-webp' | 'mp4' | 'lottie-json' | 'mp3' | 'm4a';
   height?: number;
   storagePath: string;
   uri: string;
@@ -554,9 +593,12 @@ export type AdminGiftCatalogItem = {
   price: number;
   presentation: {
     animationEnabled: boolean;
+    approvalMode?: 'simple' | 'strict';
     audioAsset?: { assetId: string; assetVersionId: string };
+    audioFormat?: 'm4a-aac';
     durationMs: number;
     fallbackAsset?: { assetId: string; assetVersionId: string };
+    fallbackFormat?: 'jpeg' | 'legacy-webp' | 'png';
     hapticPolicy: 'off' | 'light' | 'success';
     minimumClientVersion: string;
     performanceTier: 'low' | 'standard' | 'high';
@@ -565,9 +607,14 @@ export type AdminGiftCatalogItem = {
     soundPolicy: 'off' | 'soft' | 'full';
     tier: 'inline' | 'targeted' | 'major' | 'global';
     visualAsset?: { assetId: string; assetVersionId: string };
+    visualFormat?: 'lottie-json' | 'mp4';
   };
   scoreValue: number;
   status: 'available' | 'disabled';
+  theater?: {
+    luckyTableId?: string;
+    tags: Array<'combo' | 'storm' | 'lucky' | 'magic'>;
+  };
   updatedAt: string;
 };
 
@@ -689,7 +736,7 @@ export type AdminUserFilters = {
 };
 export type AdminUserAction = 'avatar-approve' | 'avatar-reject' | 'ban' | 'force-sign-out' | 'mute' | 'note' | 'suspend' | 'unban' | 'unmute' | 'unsuspend' | 'warn';
 export type AdminUserSummary = { active: number; pendingAvatars: number; removed: number; suspended: number; total: number };
-export type AdminUserRelationshipContext = { createdAt: string; id: string; kind: 'friend' | 'friend-request-incoming' | 'friend-request-outgoing' | 'couple-request-incoming' | 'couple-request-outgoing'; peerDisplayName: string; peerPublicId: string; peerUid: string; status: string; updatedAt: string };
+export type AdminUserRelationshipContext = { createdAt: string; id: string; kind: 'friend' | 'friend-request-incoming' | 'friend-request-outgoing' | 'following' | 'follower' | 'couple-request-incoming' | 'couple-request-outgoing'; peerDisplayName: string; peerPublicId: string; peerUid: string; status: string; updatedAt: string };
 export type AdminUserBlockContext = { createdAt: string; direction: 'incoming' | 'outgoing'; id: string; peerDisplayName: string; peerPublicId: string; peerUid: string };
 export type AdminUserGiftContext = { amount: number; channel: 'social' | 'store'; createdAt: string; currency: string; direction: 'sent' | 'received'; id: string; itemId: string; label: string; peerDisplayName: string; peerPublicId: string; peerUid: string };
 export type AdminUserOwnershipContext = { acquiredAt: string; acquisitionSource: 'gift' | 'purchase'; category: string; equipped: boolean; expiresAt: string; itemId: string; nameAr: string; state: 'active' | 'expired'; thumbnailUrl: string };
@@ -697,13 +744,89 @@ export type AdminUserRoomContext = AdminRoomRow & { joinedAt: string; memberStat
 export type AdminUserRoomModerationContext = { action: string; actorUid: string; createdAt: string; id: string; reason: string; roomId: string };
 export type AdminUserTransferContext = { amount: number; createdAt: string; currency: 'coins' | 'diamonds'; direction: 'sent' | 'received'; id: string; peerDisplayName: string; peerPublicId: string; peerUid: string; status: string; transferId: string };
 export type AdminUserOperationalContext = {
-  errors: Partial<Record<'activity' | 'economy' | 'notes' | 'notifications' | 'reports' | 'rooms' | 'social' | 'store' | 'transfers', string>>;
+  directChat: {
+    recentAudits: AdminUserDirectChatRestrictAudit[];
+    restriction: AdminUserDirectChatRestriction | null;
+  };
+  errors: Partial<Record<'activity' | 'directChat' | 'economy' | 'notes' | 'notifications' | 'reports' | 'rooms' | 'social' | 'store' | 'transfers', string>>;
   limits: { blocksScanned: number; perSection: number };
   reports: { items: AdminReportRow[]; sampled: boolean; summary: { open: number; recentResolved: number; total: number; urgent: number } };
   rooms: { items: AdminUserRoomContext[]; moderation: AdminUserRoomModerationContext[]; sampled: boolean };
   social: { blocks: AdminUserBlockContext[]; gifts: AdminUserGiftContext[]; relationships: AdminUserRelationshipContext[]; sampled: boolean };
   store: { gifts: AdminUserGiftContext[]; ownerships: AdminUserOwnershipContext[]; sampled: boolean };
   transfers: { items: AdminUserTransferContext[]; sampled: boolean };
+};
+
+export type AdminUserDirectChatRestriction = {
+  active: boolean;
+  actorUid: string;
+  endsAt: string;
+  reason: string;
+  reportId: string;
+  startsAt: string;
+  state: string;
+};
+
+export type AdminUserDirectChatRestrictAudit = {
+  action: string;
+  actorUid: string;
+  createdAt: string;
+  id: string;
+  note: string;
+  reportId: string;
+  status: string;
+};
+
+export type AdminDirectChatRetentionBounds = {
+  fallbackDays: number;
+  maxDays: number;
+  minDays: number;
+};
+
+export type AdminDirectChatRetentionPolicy = {
+  evidenceRetentionDays: number;
+  legalHoldRetentionDays: number;
+  messageRetentionDays: number;
+  policyVersion: number;
+  source: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+export type AdminDirectChatRetention = {
+  bounds: {
+    evidenceRetentionDays: AdminDirectChatRetentionBounds;
+    legalHoldRetentionDays: AdminDirectChatRetentionBounds;
+    messageRetentionDays: AdminDirectChatRetentionBounds;
+  };
+  policy: AdminDirectChatRetentionPolicy;
+};
+
+export type AdminDirectChatOpsStatus = {
+  flags: {
+    directMessageMedia: boolean;
+    directMessageRequests: boolean;
+    directMessages: boolean;
+  };
+  lastReconcile: null | { createdAt: string; id: string };
+  retention: {
+    evidenceRetentionDays: number;
+    legalHoldRetentionDays: number;
+    messageRetentionDays: number;
+    policyVersion: number;
+    source: string;
+    sweepCursor: string;
+    sweepUpdatedAt: string;
+    sweepWrapped: boolean;
+  };
+  restrictedAccountSampleCount: number | null;
+  rollout: null | {
+    note: string;
+    stageId: number | null;
+    updatedAt: string;
+    updatedBy: string;
+  };
+  stage: null | { name: string; stageId: number };
 };
 export type AdminUserHistorySection = 'activity' | 'notes' | 'ownerships' | 'reports' | 'room-moderation' | 'rooms' | 'social-gifts' | 'store-gifts' | 'transfers';
 export type AdminUserHistoryItemMap = {
@@ -720,9 +843,20 @@ export type AdminUserHistoryItemMap = {
 export type AdminUserDetail = {
   account: { createdAt: string; disabled: boolean; emailVerified: boolean; lastSignInAt: string; tokensValidAfterAt: string };
   activity: AdminAuditEventRow[];
+  avatarSubmission: null | { contentType: string; createdAt: string; moderationReason: string; previewUrl: string; scanner: string; sizeBytes: number; status: string; uploadId: string };
   couple: { coupleId: string; partner: null | { displayName: string; publicId: string; uid: string } };
   context: AdminUserOperationalContext;
-  notifications: { configured: boolean; preferences: { coupleRequests: boolean; friendRequests: boolean; gifts: boolean; walletTransfers: boolean }; registeredDeviceCount: number };
+  notifications: { configured: boolean; preferences: {
+    coupleRequests: boolean;
+    directMessageRequests: boolean;
+    directMessages: boolean;
+    friendRequests: boolean;
+    gifts: boolean;
+    readReceipts: boolean;
+    showMessagePreview: boolean;
+    showOnlineStatus: boolean;
+    walletTransfers: boolean;
+  }; registeredDeviceCount: number };
   notes: Array<{ actorEmail: string; actorUid: string; createdAt: string; id: string; note: string }>;
   profile: AdminUserRow;
   representative: {
@@ -740,6 +874,17 @@ export type AdminUserDetail = {
     transactions: Array<{ amount: number; balanceAfter: number; createdAt: string; currency: string; id: string; note: string; referenceId: string; source: string; type: string; uid: string }>;
     updatedAt: string;
   };
+};
+
+export type AccountDeletionJob = {
+  hold: boolean;
+  lastError: string;
+  purgeAfter: string;
+  requestedAt: string;
+  retryCount: number;
+  state: string;
+  uid: string;
+  updatedAt: string;
 };
 
 export type AdminRoomRow = {
@@ -846,7 +991,33 @@ export type AdminPreferences = {
   updatedAt: string;
 };
 export type AdminSettings = {
-  featureFlags: Record<'usersDiscovery' | 'friends' | 'wallet' | 'gifts' | 'couples' | 'pushNotifications' | 'representativeTransfers', boolean>;
+  cosmeticsRendererFlags: Record<
+    | 'cosmetics_couple_effects'
+    | 'cosmetics_couple_entrances'
+    | 'cosmetics_custom_submissions'
+    | 'cosmetics_custom_rendering',
+    boolean
+  >;
+  cosmeticsRollout: {
+    stageId: number;
+    stageName: string;
+    updatedAt: string;
+    updatedBy: string;
+    writesCosmeticsFeatures: false;
+  };
+  featureFlags: Record<
+    | 'usersDiscovery'
+    | 'friends'
+    | 'wallet'
+    | 'gifts'
+    | 'couples'
+    | 'pushNotifications'
+    | 'representativeTransfers'
+    | 'directMessages'
+    | 'directMessageRequests'
+    | 'directMessageMedia',
+    boolean
+  >;
   featureFlagsUpdatedAt: string;
   history: AdminAuditEventRow[];
   preferences: AdminPreferences;
@@ -923,6 +1094,58 @@ export type AdminReportDetail = {
   report: AdminReportRow;
 };
 
+export const DIRECT_CHAT_REPORT_SOURCE = 'direct-chat-safety-v1';
+export type AdminDirectChatAction =
+  | 'clear-direct-chat-restriction'
+  | 'dismiss'
+  | 'remove-direct-message'
+  | 'restrict-direct-chat'
+  | 'set-direct-chat-legal-hold';
+export type AdminDirectChatEvidenceCase = {
+  attachmentCount: number;
+  capturedAt: string;
+  category: string;
+  contextRange: { endSequence: number; startSequence: number };
+  conversationId: string;
+  legalHold: boolean;
+  policyVersion: number;
+  removedMessageIds: string[];
+  reportId: string;
+  reporterUid: string;
+  retentionUntilMs: number;
+  selectedMessageIds: string[];
+  snapshotCount: number;
+  source: string;
+  status: string;
+  targetUid: string;
+};
+export type AdminDirectChatEvidenceSnapshot = {
+  attachmentId: string;
+  createdAt: string;
+  kind: string;
+  mediaContentType: string;
+  mediaDurationMs: number;
+  mediaHeld: boolean;
+  mediaIsolated: boolean;
+  mediaState: string;
+  mediaUrl: string;
+  messageId: string;
+  replyToMessageId: string;
+  selected: boolean;
+  senderUid: string;
+  sequence: number;
+  systemType: string;
+  text: string;
+  visibilityState: string;
+};
+export type AdminDirectChatEvidence = {
+  case: AdminDirectChatEvidenceCase;
+  eventId: string;
+  mediaGranted: number;
+  mediaUrlExpiresAt: string;
+  snapshots: AdminDirectChatEvidenceSnapshot[];
+};
+
 type AdminDashboardResponse = AdminDashboardSession & {
   error?: string;
   ok: boolean;
@@ -984,6 +1207,16 @@ type AdminReportActionResponse = {
   error?: string;
   eventId?: string;
   ok: boolean;
+};
+
+type AdminDirectChatEvidenceResponse = {
+  case?: unknown;
+  error?: string;
+  eventId?: string;
+  mediaGranted?: unknown;
+  mediaUrlExpiresAt?: unknown;
+  ok: boolean;
+  snapshots?: unknown;
 };
 
 type AdminAdministratorsResponse = { administrators?: unknown; error?: string; ok: boolean };
@@ -1091,6 +1324,125 @@ export async function updateAdminFeatureFlag(user: User, input: { enabled: boole
   return payload.eventId;
 }
 
+export type AdminPushRole = 'staff' | 'room-owners' | 'admins' | 'representatives';
+export type AdminPushRoute = '' | 'Friends' | 'Couples' | 'Gifts' | 'Store' | 'RepresentativeTransfer' | 'WalletStore';
+
+export type AdminPushAudience = {
+  roles: AdminPushRole[];
+  uids: string[];
+};
+
+export type AdminPushAudienceEstimate = {
+  breakdown: {
+    admins: number;
+    representatives: number;
+    'room-owners': number;
+    staff: number;
+    uids: number;
+  };
+  recipientCount: number;
+  truncated: boolean;
+};
+
+export type AdminPushCampaign = {
+  actorEmail: string;
+  actorUid: string;
+  audience: { roles: string[]; uidCount: number };
+  body: string;
+  breakdown: AdminPushAudienceEstimate['breakdown'];
+  campaignId: string;
+  counts: {
+    failed: number;
+    noDevices: number;
+    skipped: number;
+    submitted: number;
+    targeted: number;
+  };
+  createdAt: string;
+  cursor: number;
+  reason: string;
+  requestId: string;
+  route: string;
+  status: string;
+  title: string;
+  truncated: boolean;
+  updatedAt: string;
+};
+
+export async function estimateAdminPushAudience(user: User, audience: AdminPushAudience): Promise<AdminPushAudienceEstimate> {
+  const payload = await requestAdminDashboard<{
+    breakdown?: unknown;
+    error?: string;
+    ok: boolean;
+    recipientCount?: unknown;
+    truncated?: unknown;
+  }>(user, {
+    action: 'push-audience-estimate',
+    audience,
+  });
+  if (payload.ok !== true || !isAdminPushAudienceEstimate(payload)) {
+    throw new Error(payload.error || 'تعذر تقدير جمهور الإشعار.');
+  }
+  return {
+    breakdown: payload.breakdown as AdminPushAudienceEstimate['breakdown'],
+    recipientCount: Number(payload.recipientCount),
+    truncated: payload.truncated === true,
+  };
+}
+
+export async function sendAdminPushNotification(user: User, input: {
+  audience: AdminPushAudience;
+  body: string;
+  reason: string;
+  requestId?: string;
+  route?: AdminPushRoute;
+  title: string;
+}): Promise<AdminPushCampaign> {
+  const payload = await requestAdminDashboard<{
+    campaign?: unknown;
+    error?: string;
+    eventId?: string;
+    ok: boolean;
+    replayed?: boolean;
+  }>(user, {
+    action: 'push-notification-send',
+    audience: input.audience,
+    body: input.body,
+    reason: input.reason,
+    requestId: input.requestId || crypto.randomUUID(),
+    route: input.route || '',
+    title: input.title,
+  });
+  if (payload.ok !== true || !isAdminPushCampaign(payload.campaign)) {
+    throw new Error(payload.error || 'تعذر إرسال الإشعار الفوري.');
+  }
+  return payload.campaign;
+}
+
+export async function listAdminPushCampaigns(user: User): Promise<AdminPushCampaign[]> {
+  const payload = await requestAdminDashboard<{
+    campaigns?: unknown;
+    error?: string;
+    ok: boolean;
+  }>(user, { action: 'push-campaigns-list' });
+  if (payload.ok !== true || !Array.isArray(payload.campaigns) || !payload.campaigns.every(isAdminPushCampaign)) {
+    throw new Error(payload.error || 'تعذر تحميل حملات الإشعارات.');
+  }
+  return payload.campaigns;
+}
+
+export async function emergencyDisableAdminCosmeticsRenderer(user: User, input: { flag: keyof AdminSettings['cosmeticsRendererFlags']; reason: string }): Promise<string> {
+  const payload = await requestAdminDashboard<AdminMutationResponse>(user, {
+    action: 'cosmetics-renderer-disable',
+    enabled: false,
+    flag: input.flag,
+    reason: input.reason,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) throw new Error(payload.error || 'Cosmetics renderer could not be disabled.');
+  return payload.eventId;
+}
+
 export async function updateRoomGiftPolicy(user: User, input: {
   commissionBps: number;
   expectedVersion: number;
@@ -1105,6 +1457,43 @@ export async function updateRoomGiftPolicy(user: User, input: {
     throw new Error(payload.error || 'Room gift commission could not be updated.');
   }
   return payload.eventId;
+}
+
+export async function requestDirectChatRetention(user: User): Promise<AdminDirectChatRetention> {
+  const payload = await requestAdminDashboard<{ error?: string; ok: boolean; retention?: unknown }>(user, {
+    action: 'direct-chat-retention-get',
+  });
+  if (payload.ok !== true || !isAdminDirectChatRetention(payload.retention)) {
+    throw new Error(payload.error || 'Direct chat retention policy is unavailable.');
+  }
+  return payload.retention;
+}
+
+export async function updateDirectChatRetention(user: User, input: {
+  evidenceRetentionDays?: number;
+  legalHoldRetentionDays?: number;
+  messageRetentionDays?: number;
+  reason: string;
+}): Promise<{ eventId: string; unchanged: boolean }> {
+  const payload = await requestAdminDashboard<{ error?: string; eventId?: string; ok: boolean; unchanged?: boolean }>(user, {
+    action: 'direct-chat-retention-set',
+    ...input,
+    requestId: crypto.randomUUID(),
+  });
+  if (payload.ok !== true || !payload.eventId) {
+    throw new Error(payload.error || 'Direct chat retention policy could not be updated.');
+  }
+  return { eventId: payload.eventId, unchanged: payload.unchanged === true };
+}
+
+export async function requestDirectChatOpsStatus(user: User): Promise<AdminDirectChatOpsStatus> {
+  const payload = await requestAdminDashboard<{ error?: string; ok: boolean; status?: unknown }>(user, {
+    action: 'direct-chat-ops-status',
+  });
+  if (payload.ok !== true || !isAdminDirectChatOpsStatus(payload.status)) {
+    throw new Error(payload.error || 'Direct chat ops status is unavailable.');
+  }
+  return payload.status;
 }
 
 export async function requestAdminOverview(user: User): Promise<AdminOverviewMetrics> {
@@ -1200,6 +1589,17 @@ export async function requestAdminUserSummary(user: User): Promise<AdminUserSumm
   const payload = await requestAdminDashboard<AdminUserSummaryResponse>(user, { action: 'user-summary' });
   if (payload.ok !== true || !isAdminUserSummary(payload.summary)) throw new Error(payload.error || 'User summary is unavailable.');
   return payload.summary;
+}
+
+export async function requestAccountDeletionJobs(user: User): Promise<AccountDeletionJob[]> {
+  const payload = await requestAdminDashboard<{ error?: string; jobs?: AccountDeletionJob[]; ok?: boolean }>(user, { action: 'account-deletion-jobs' });
+  if (!payload.ok || !Array.isArray(payload.jobs)) throw new Error(payload.error || 'Failed to load account deletion jobs.');
+  return payload.jobs;
+}
+
+export async function retryAccountDeletionJob(user: User, targetUid: string) {
+  const payload = await requestAdminDashboard<{ error?: string; ok?: boolean }>(user, { action: 'account-deletion-retry', requestId: crypto.randomUUID(), targetUid });
+  if (!payload.ok) throw new Error(payload.error || 'Failed to retry account deletion job.');
 }
 
 export async function requestAdminUserDetail(user: User, targetUid: string): Promise<AdminUserDetail> {
@@ -1371,10 +1771,13 @@ export async function mutateAdminCosmeticAsset(
     };
     assetId?: string;
     assetVersionId?: string;
+    categories?: string[];
     confirmation?: string;
     authoritySeparationPassed?: boolean;
     readableIdentityPassed?: boolean;
-    expectedRevision: number;
+    dailyUploadLimit?: number;
+    expectedRevision?: number;
+    maxPending?: number;
     operation:
       | 'validate-version'
       | 'approve-version'
@@ -1382,37 +1785,169 @@ export async function mutateAdminCosmeticAsset(
       | 'publish-version'
       | 'emergency-disable'
       | 'suspend'
-      | 'rollback-version';
+      | 'rollback-version'
+      | 'approve-custom-submission'
+      | 'reject-custom-submission'
+      | 'suspend-custom-submission'
+      | 'grant-custom-eligibility'
+      | 'revoke-custom-eligibility';
     reason: string;
+    submissionId?: string;
+    uid?: string;
   },
-): Promise<{ approvalId?: string; eventId: string; revision: number; validationReceiptId?: string }> {
+): Promise<{
+  approvalId?: string;
+  assetId?: string;
+  assetVersionId?: string;
+  cleared?: number;
+  eventId: string;
+  revision?: number;
+  submissionId?: string;
+  uid?: string;
+  validationReceiptId?: string;
+}> {
   const payload = await requestAdminDashboard<{
     approvalId?: string;
+    assetId?: string;
+    assetVersionId?: string;
+    cleared?: number;
     error?: string;
     eventId?: string;
     ok?: boolean;
     revision?: number;
+    submissionId?: string;
+    uid?: string;
     validationReceiptId?: string;
   }>(user, {
     action: 'cosmetic-assets-mutate',
     ...input,
     requestId: crypto.randomUUID(),
   });
-  if (
-    payload.ok !== true
-    || !payload.eventId
-    || !Number.isSafeInteger(payload.revision)
-  ) {
+  if (payload.ok !== true || !payload.eventId) {
     throw new Error(payload.error || 'Cosmetics asset operation failed.');
   }
   return {
-    ...(payload.approvalId ? { approvalId: payload.approvalId } : {}),
     eventId: payload.eventId,
-    revision: Number(payload.revision),
+    ...(payload.approvalId ? { approvalId: payload.approvalId } : {}),
+    ...(payload.assetId ? { assetId: payload.assetId } : {}),
+    ...(payload.assetVersionId ? { assetVersionId: payload.assetVersionId } : {}),
+    ...(typeof payload.cleared === 'number' ? { cleared: payload.cleared } : {}),
+    ...(Number.isSafeInteger(payload.revision) ? { revision: Number(payload.revision) } : {}),
+    ...(payload.submissionId ? { submissionId: payload.submissionId } : {}),
+    ...(payload.uid ? { uid: payload.uid } : {}),
     ...(payload.validationReceiptId
       ? { validationReceiptId: payload.validationReceiptId }
       : {}),
   };
+}
+
+export type AdminCustomSubmission = {
+  approvedAssetId: string;
+  approvedVersionId: string;
+  assetVersionId: string;
+  attestation: string;
+  attestedAtMs: number;
+  byteSize: number;
+  category: string;
+  contentType: string;
+  decisionReason: string;
+  durationMs: number;
+  fallbackAssetId: string;
+  fallbackAssetVersionId: string;
+  format: string;
+  height: number;
+  ownerUid: string;
+  revision: number;
+  sha256: string;
+  status: string;
+  submissionId: string;
+  transparent: boolean;
+  updatedAtMs: number;
+  validationReceiptId: string;
+  width: number;
+};
+
+export type AdminCustomEligibility = {
+  active: boolean;
+  categories: string[];
+  dailyUploadLimit: number;
+  maxPending: number;
+  revokeReason?: string;
+  uid: string;
+};
+
+export async function requestAdminCustomSubmissions(
+  user: User,
+  filters: { limit?: number; ownerUid?: string; status?: string } = {},
+): Promise<AdminCustomSubmission[]> {
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    ok?: boolean;
+    submissions?: AdminCustomSubmission[];
+  }>(user, {
+    action: 'cosmetic-custom-submissions',
+    limit: filters.limit || 25,
+    ownerUid: filters.ownerUid || '',
+    status: filters.status || 'pending',
+  });
+  if (payload.ok !== true || !Array.isArray(payload.submissions)) {
+    throw new Error(payload.error || 'Custom submission queue is unavailable.');
+  }
+  return payload.submissions.filter((row) => (
+    typeof row.submissionId === 'string'
+    && typeof row.ownerUid === 'string'
+    && typeof row.status === 'string'
+    && !('sourcePath' in (row as object))
+  ));
+}
+
+export async function requestAdminCustomSubmissionPreview(
+  user: User,
+  input: { reason: string; submissionId: string },
+): Promise<{ expiresAtMs: number; previewUrl: string; submission?: AdminCustomSubmission }> {
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    expiresAtMs?: number;
+    ok?: boolean;
+    previewUrl?: string;
+    submission?: AdminCustomSubmission;
+  }>(user, {
+    action: 'cosmetic-custom-submission-preview',
+    reason: input.reason,
+    requestId: crypto.randomUUID(),
+    submissionId: input.submissionId,
+  });
+  if (
+    payload.ok !== true
+    || typeof payload.previewUrl !== 'string'
+    || !payload.previewUrl
+    || typeof payload.expiresAtMs !== 'number'
+  ) {
+    throw new Error(payload.error || 'Custom submission preview is unavailable.');
+  }
+  return {
+    expiresAtMs: payload.expiresAtMs,
+    previewUrl: payload.previewUrl,
+    ...(payload.submission ? { submission: payload.submission } : {}),
+  };
+}
+
+export async function requestAdminCustomEligibility(
+  user: User,
+  uid: string,
+): Promise<AdminCustomEligibility> {
+  const payload = await requestAdminDashboard<{
+    eligibility?: AdminCustomEligibility;
+    error?: string;
+    ok?: boolean;
+  }>(user, {
+    action: 'cosmetic-custom-eligibility',
+    uid,
+  });
+  if (payload.ok !== true || !payload.eligibility) {
+    throw new Error(payload.error || 'Custom eligibility is unavailable.');
+  }
+  return payload.eligibility;
 }
 
 export async function mutateAdminRoomTheme(user: User, input: {
@@ -1454,6 +1989,67 @@ export async function requestAdminDailyLoginCampaign(user: User): Promise<AdminD
     throw new Error(payload.error || 'Daily Login campaign is unavailable.');
   }
   return payload.dailyLoginCampaign;
+}
+
+export type AdminOpsEvent = {
+  audience: string;
+  endsAtMs: number;
+  eventId: string;
+  startsAtMs: number;
+  status: string;
+  themeAr: string;
+  titleAr: string;
+};
+
+export async function requestAdminOpsEvents(user: User): Promise<{
+  activeEventId: string;
+  events: AdminOpsEvent[];
+}> {
+  const payload = await requestAdminDashboard<{
+    activeEventId?: string;
+    error?: string;
+    events?: AdminOpsEvent[];
+    ok?: boolean;
+  }>(user, { action: 'ops-events' });
+  if (payload.ok !== true) {
+    throw new Error(payload.error || 'Ops events unavailable.');
+  }
+  return {
+    activeEventId: typeof payload.activeEventId === 'string' ? payload.activeEventId : '',
+    events: Array.isArray(payload.events) ? payload.events : [],
+  };
+}
+
+export async function mutateAdminOpsEvent(user: User, input: {
+  action: 'publish' | 'retire';
+  endsAtMs?: number;
+  eventId?: string;
+  reason: string;
+  requestId: string;
+  startsAtMs?: number;
+  themeAr?: string;
+  titleAr?: string;
+}): Promise<{ event?: AdminOpsEvent; eventId?: string; status: string }> {
+  const { action: operation, ...fields } = input;
+  const payload = await requestAdminDashboard<{
+    error?: string;
+    event?: AdminOpsEvent;
+    eventId?: string;
+    ok?: boolean;
+    status?: string;
+  }>(user, {
+    action: 'ops-events-mutate',
+    operation,
+    ...fields,
+  });
+  if (payload.ok !== true || !payload.status) {
+    throw new Error(payload.error || 'Ops event mutation failed.');
+  }
+  return {
+    event: payload.event,
+    eventId: payload.eventId,
+    status: payload.status,
+  };
 }
 
 export async function mutateAdminDailyLoginCampaign(user: User, input: {
@@ -1776,6 +2372,7 @@ export async function upsertAdminGiftCatalog(user: User, input: {
   physicalApproval?: {
     androidDevice: string;
     androidPassed: boolean;
+    controlsSafeZonePassed: boolean;
     iosDevice: string;
     iosPassed: boolean;
     notes: string;
@@ -1783,8 +2380,10 @@ export async function upsertAdminGiftCatalog(user: User, input: {
   };
   presentation: AdminGiftCatalogItem['presentation'];
   reason: string;
+  reusePhysicalApprovalReceipt?: boolean;
   scoreValue: number;
   status: 'available' | 'disabled';
+  theater?: AdminGiftCatalogItem['theater'];
 }): Promise<string> {
   const payload = await requestAdminDashboard<AdminUserNoteResponse>(user, {
     action: 'gift-catalog-upsert',
@@ -1950,6 +2549,61 @@ export async function executeAdminReportAction(
   return payload.eventId;
 }
 
+// Every call here is logged server-side against the reason, so the caller must never invoke it
+// speculatively: it is wired to an explicit staff reveal, not to opening a report.
+export async function requestAdminDirectChatEvidence(
+  user: User,
+  input: { reason: string; reportId: string },
+): Promise<AdminDirectChatEvidence> {
+  const payload = await requestAdminDashboard<AdminDirectChatEvidenceResponse>(user, {
+    action: 'direct-chat-evidence',
+    reason: input.reason,
+    reportId: input.reportId,
+    requestId: crypto.randomUUID(),
+  });
+
+  if (payload.ok !== true || !isAdminDirectChatEvidenceCase(payload.case) || !Array.isArray(payload.snapshots)) {
+    throw new Error(payload.error || 'Direct message evidence is unavailable.');
+  }
+
+  return {
+    case: payload.case,
+    eventId: typeof payload.eventId === 'string' ? payload.eventId : '',
+    mediaGranted: typeof payload.mediaGranted === 'number' ? payload.mediaGranted : 0,
+    mediaUrlExpiresAt: typeof payload.mediaUrlExpiresAt === 'string' ? payload.mediaUrlExpiresAt : '',
+    snapshots: payload.snapshots.filter(isAdminDirectChatEvidenceSnapshot),
+  };
+}
+
+export async function executeAdminDirectChatAction(
+  user: User,
+  input: {
+    directChatAction: AdminDirectChatAction;
+    durationHours?: number;
+    legalHold?: boolean;
+    messageIds?: string[];
+    note: string;
+    reportId: string;
+  },
+): Promise<string> {
+  const payload = await requestAdminDashboard<AdminReportActionResponse>(user, {
+    action: 'direct-chat-action',
+    directChatAction: input.directChatAction,
+    ...(typeof input.durationHours === 'number' ? { durationHours: input.durationHours } : {}),
+    legalHold: input.legalHold === true,
+    messageIds: input.messageIds || [],
+    note: input.note,
+    reportId: input.reportId,
+    requestId: crypto.randomUUID(),
+  });
+
+  if (payload.ok !== true || !payload.eventId) {
+    throw new Error(payload.error || 'Direct message moderation action failed.');
+  }
+
+  return payload.eventId;
+}
+
 export async function requestAdminAdministrators(user: User): Promise<AdminAdministrator[]> {
   const payload = await requestAdminDashboard<AdminAdministratorsResponse>(user, { action: 'administrators' });
   if (payload.ok !== true || !Array.isArray(payload.administrators)) {
@@ -1981,6 +2635,11 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
     | ({ action: 'audit-export' } & Omit<Required<AdminAuditFilters>, 'cursor'>)
     | { action: 'audit-detail'; eventId: string }
     | { action: 'client-error'; message: string; requestId: string; route: string; source: string; stack: string }
+    | { action: 'push-audience-estimate'; audience: AdminPushAudience }
+    | { action: 'push-campaigns-list' }
+    | { action: 'push-notification-send'; audience: AdminPushAudience; body: string; reason: string; requestId: string; route: AdminPushRoute; title: string }
+    | { action: 'ops-events' }
+    | { action: 'ops-events-mutate'; endsAtMs?: number; eventId?: string; operation: 'publish' | 'retire'; reason: string; requestId: string; startsAtMs?: number; themeAr?: string; titleAr?: string }
     | { action: 'admin-settings' | 'administrators' | 'audit-summary' | 'daily-login-campaign' | 'overview' | 'payroll-overview' | 'report-summary' | 'rocket-campaign' | 'room-target-campaign' | 'room-summary' | 'session' | 'store-summary' | 'user-summary' | 'weekly-incentive-integrity' }
     | { action: 'attendance-shadow'; targetUid: string }
     | { action: 'attendance-outage-mutate'; endAtMillis: number; operation: 'create' | 'revoke'; outageId: string; reason: string; requestId: string; startAtMillis: number }
@@ -1993,9 +2652,15 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
     | ({ action: 'admin-settings-update'; requestId: string } & Omit<AdminPreferences, 'updatedAt'>)
     | { action: 'administrator-action'; administratorAction: AdministratorAction; email: string; reason: string; regionCodes?: string[]; requestId: string; role: AdminRole; targetUid: string }
     | { action: 'feature-flag-update'; enabled: boolean; expectedUpdatedAt: string; flag: keyof AdminSettings['featureFlags']; reason: string; requestId: string }
+    | { action: 'cosmetics-renderer-disable'; enabled: false; flag: keyof AdminSettings['cosmeticsRendererFlags']; reason: string; requestId: string }
     | { action: 'report-detail'; reportId: string }
     | ({ action: 'reports' } & Required<AdminReportFilters>)
     | { action: 'report-action'; assigneeUid: string; expectedUpdatedAt: string; note: string; reportAction: AdminReportAction; reportId: string; requestId: string }
+    | { action: 'direct-chat-evidence'; reason: string; reportId: string; requestId: string }
+    | { action: 'direct-chat-action'; directChatAction: AdminDirectChatAction; durationHours?: number; legalHold: boolean; messageIds: string[]; note: string; reportId: string; requestId: string }
+    | { action: 'direct-chat-ops-status' }
+    | { action: 'direct-chat-retention-get' }
+    | { action: 'direct-chat-retention-set'; evidenceRetentionDays?: number; legalHoldRetentionDays?: number; messageRetentionDays?: number; reason: string; requestId: string }
     | ({ action: 'rooms' } & Required<AdminRoomFilters>)
     | { action: 'room-detail'; roomId: string }
     | { action: 'room-action'; expectedUpdatedAt: string; reason: string; requestId: string; roomAction: AdminRoomAction; roomId: string; targetUid: string }
@@ -2032,12 +2697,32 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
       };
       assetId?: string;
       assetVersionId?: string;
+      categories?: string[];
       confirmation?: string;
-      expectedRevision: number;
-      operation: 'validate-version' | 'approve-version' | 'reject-version' | 'publish-version' | 'emergency-disable' | 'suspend' | 'rollback-version';
+      dailyUploadLimit?: number;
+      expectedRevision?: number;
+      maxPending?: number;
+      operation:
+        | 'validate-version'
+        | 'approve-version'
+        | 'reject-version'
+        | 'publish-version'
+        | 'emergency-disable'
+        | 'suspend'
+        | 'rollback-version'
+        | 'approve-custom-submission'
+        | 'reject-custom-submission'
+        | 'suspend-custom-submission'
+        | 'grant-custom-eligibility'
+        | 'revoke-custom-eligibility';
       reason: string;
       requestId: string;
+      submissionId?: string;
+      uid?: string;
     }
+    | { action: 'cosmetic-custom-submissions'; limit: number; ownerUid: string; status: string }
+    | { action: 'cosmetic-custom-submission-preview'; reason: string; requestId: string; submissionId: string }
+    | { action: 'cosmetic-custom-eligibility'; uid: string }
     | { action: 'room-theme'; themeId: string }
     | {
       action: 'room-theme-mutate';
@@ -2128,6 +2813,7 @@ async function requestAdminDashboard<T extends { error?: string; ok?: boolean }>
       price: number;
       reason: string;
       requestId: string;
+      reusePhysicalApprovalReceipt?: boolean;
       scoreValue: number;
       status: 'available' | 'disabled';
     },
@@ -2431,6 +3117,42 @@ function isAdminAdministrator(value: unknown): value is AdminAdministrator {
     && typeof row.scopeStatus === 'string';
 }
 
+function isAdminPushAudienceEstimate(value: unknown): value is AdminPushAudienceEstimate {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  const breakdown = row.breakdown as Record<string, unknown> | undefined;
+  return Boolean(breakdown)
+    && ['admins', 'representatives', 'room-owners', 'staff', 'uids'].every((key) => Number.isSafeInteger(breakdown?.[key]))
+    && Number.isSafeInteger(row.recipientCount)
+    && typeof row.truncated === 'boolean';
+}
+
+function isAdminPushCampaign(value: unknown): value is AdminPushCampaign {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  const audience = row.audience as Record<string, unknown> | undefined;
+  const counts = row.counts as Record<string, unknown> | undefined;
+  return typeof row.actorEmail === 'string'
+    && typeof row.actorUid === 'string'
+    && Boolean(audience)
+    && Array.isArray(audience?.roles)
+    && Number.isSafeInteger(audience?.uidCount)
+    && typeof row.body === 'string'
+    && typeof row.campaignId === 'string'
+    && Boolean(counts)
+    && ['failed', 'noDevices', 'skipped', 'submitted', 'targeted'].every((key) => Number.isSafeInteger(counts?.[key]))
+    && typeof row.createdAt === 'string'
+    && Number.isSafeInteger(row.cursor)
+    && typeof row.reason === 'string'
+    && typeof row.requestId === 'string'
+    && typeof row.route === 'string'
+    && typeof row.status === 'string'
+    && typeof row.title === 'string'
+    && typeof row.truncated === 'boolean'
+    && typeof row.updatedAt === 'string'
+    && isAdminPushAudienceEstimate({ breakdown: row.breakdown, recipientCount: counts?.targeted ?? 0, truncated: row.truncated });
+}
+
 function isAdminRole(value: unknown): value is AdminRole {
   return ['owner', 'super-moderator', 'moderator', 'support', 'catalog-manager', 'auditor'].includes(String(value));
 }
@@ -2448,7 +3170,31 @@ function isAdminSettings(value: unknown): value is AdminSettings {
     && Boolean(notifications) && ['flaggedRooms', 'operationalFailures', 'urgentReports'].every((key) => typeof notifications?.[key] === 'boolean')
     && ['createdAt', 'lastSignInAt', 'tokensValidAfterAt'].every((key) => typeof session[key] === 'string')
     && typeof session.disabled === 'boolean' && typeof session.emailVerified === 'boolean'
-    && ['usersDiscovery', 'friends', 'wallet', 'gifts', 'couples', 'pushNotifications', 'representativeTransfers'].every((key) => typeof flags[key] === 'boolean')
+    && [
+      'usersDiscovery',
+      'friends',
+      'wallet',
+      'gifts',
+      'couples',
+      'pushNotifications',
+      'representativeTransfers',
+      'directMessages',
+      'directMessageRequests',
+      'directMessageMedia',
+    ].every((key) => typeof flags[key] === 'boolean')
+    && Boolean(row.cosmeticsRendererFlags)
+    && [
+      'cosmetics_couple_effects',
+      'cosmetics_couple_entrances',
+      'cosmetics_custom_submissions',
+      'cosmetics_custom_rendering',
+    ].every((key) => typeof (row.cosmeticsRendererFlags as Record<string, unknown>)[key] === 'boolean')
+    && Boolean(row.cosmeticsRollout)
+    && typeof (row.cosmeticsRollout as Record<string, unknown>).stageName === 'string'
+    && Number.isInteger((row.cosmeticsRollout as Record<string, unknown>).stageId)
+    && typeof (row.cosmeticsRollout as Record<string, unknown>).updatedAt === 'string'
+    && typeof (row.cosmeticsRollout as Record<string, unknown>).updatedBy === 'string'
+    && (row.cosmeticsRollout as Record<string, unknown>).writesCosmeticsFeatures === false
     && typeof row.featureFlagsUpdatedAt === 'string'
     && isRoomGiftPolicy(row.roomGiftPolicy)
     && Array.isArray(row.history) && row.history.every(isAdminAuditEventRow)
@@ -2540,6 +3286,49 @@ function isAdminReportDetail(value: unknown): value is AdminReportDetail {
     && isAdminReportIdentity(identities.target);
 }
 
+function isAdminDirectChatEvidenceCase(value: unknown): value is AdminDirectChatEvidenceCase {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  const contextRange = row.contextRange as Record<string, unknown> | undefined;
+  return typeof row.attachmentCount === 'number'
+    && typeof row.capturedAt === 'string'
+    && typeof row.category === 'string'
+    && typeof contextRange?.endSequence === 'number'
+    && typeof contextRange?.startSequence === 'number'
+    && typeof row.conversationId === 'string'
+    && typeof row.legalHold === 'boolean'
+    && typeof row.policyVersion === 'number'
+    && Array.isArray(row.removedMessageIds)
+    && typeof row.reportId === 'string'
+    && typeof row.reporterUid === 'string'
+    && typeof row.retentionUntilMs === 'number'
+    && Array.isArray(row.selectedMessageIds)
+    && typeof row.snapshotCount === 'number'
+    && typeof row.source === 'string'
+    && typeof row.status === 'string'
+    && typeof row.targetUid === 'string';
+}
+
+function isAdminDirectChatEvidenceSnapshot(value: unknown): value is AdminDirectChatEvidenceSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.attachmentId === 'string'
+    && typeof row.createdAt === 'string'
+    && typeof row.kind === 'string'
+    && typeof row.mediaContentType === 'string'
+    && typeof row.mediaDurationMs === 'number'
+    && typeof row.mediaHeld === 'boolean'
+    && typeof row.mediaIsolated === 'boolean'
+    && typeof row.mediaState === 'string'
+    && typeof row.mediaUrl === 'string'
+    && typeof row.messageId === 'string'
+    && typeof row.selected === 'boolean'
+    && typeof row.senderUid === 'string'
+    && typeof row.sequence === 'number'
+    && typeof row.text === 'string'
+    && typeof row.visibilityState === 'string';
+}
+
 function isAdminReportEvidence(value: unknown): value is { kind: string; label: string; url: string } {
   if (!value || typeof value !== 'object') return false;
   const row = value as Record<string, unknown>;
@@ -2593,7 +3382,17 @@ function isAdminUserDetail(value: unknown): value is AdminUserDetail {
     && typeof representative.updatedAt === 'string'
     && typeof notifications.configured === 'boolean'
     && typeof notifications.registeredDeviceCount === 'number'
-    && ['coupleRequests', 'friendRequests', 'gifts', 'walletTransfers'].every((key) => typeof notificationPreferences?.[key] === 'boolean')
+    && [
+      'coupleRequests',
+      'directMessageRequests',
+      'directMessages',
+      'friendRequests',
+      'gifts',
+      'readReceipts',
+      'showMessagePreview',
+      'showOnlineStatus',
+      'walletTransfers',
+    ].every((key) => typeof notificationPreferences?.[key] === 'boolean')
     && typeof walletBalances.coins === 'number' && typeof walletBalances.diamonds === 'number'
     && Array.isArray(wallet.transactions)
     && typeof wallet.updatedAt === 'string';
@@ -2602,13 +3401,14 @@ function isAdminUserDetail(value: unknown): value is AdminUserDetail {
 function isAdminUserOperationalContext(value: unknown): value is AdminUserOperationalContext {
   if (!value || typeof value !== 'object') return false;
   const context = value as Record<string, unknown>;
-  if (!context.errors || typeof context.errors !== 'object' || !context.limits || typeof context.limits !== 'object' || !context.reports || typeof context.reports !== 'object' || !context.rooms || typeof context.rooms !== 'object' || !context.social || typeof context.social !== 'object' || !context.store || typeof context.store !== 'object' || !context.transfers || typeof context.transfers !== 'object') return false;
+  if (!context.errors || typeof context.errors !== 'object' || !context.limits || typeof context.limits !== 'object' || !context.reports || typeof context.reports !== 'object' || !context.rooms || typeof context.rooms !== 'object' || !context.social || typeof context.social !== 'object' || !context.store || typeof context.store !== 'object' || !context.transfers || typeof context.transfers !== 'object' || !context.directChat || typeof context.directChat !== 'object') return false;
   const limits = context.limits as Record<string, unknown>;
   const reports = context.reports as Record<string, unknown>;
   const rooms = context.rooms as Record<string, unknown>;
   const social = context.social as Record<string, unknown>;
   const store = context.store as Record<string, unknown>;
   const transfers = context.transfers as Record<string, unknown>;
+  const directChat = context.directChat as Record<string, unknown>;
   const summary = reports.summary as Record<string, unknown> | undefined;
   return Object.values(context.errors as Record<string, unknown>).every((message) => typeof message === 'string')
     && typeof limits.blocksScanned === 'number' && typeof limits.perSection === 'number'
@@ -2621,7 +3421,100 @@ function isAdminUserOperationalContext(value: unknown): value is AdminUserOperat
     && Array.isArray(social.gifts) && social.gifts.every(isAdminUserGiftContext) && typeof social.sampled === 'boolean'
     && Array.isArray(store.gifts) && store.gifts.every(isAdminUserGiftContext)
     && Array.isArray(store.ownerships) && store.ownerships.every((item) => isRecordWithStrings(item, ['acquiredAt', 'acquisitionSource', 'category', 'expiresAt', 'itemId', 'nameAr', 'state', 'thumbnailUrl']) && typeof (item as Record<string, unknown>).equipped === 'boolean') && typeof store.sampled === 'boolean'
-    && Array.isArray(transfers.items) && transfers.items.every((item) => isRecordWithStrings(item, ['createdAt', 'currency', 'direction', 'id', 'peerDisplayName', 'peerPublicId', 'peerUid', 'status', 'transferId']) && typeof (item as Record<string, unknown>).amount === 'number') && typeof transfers.sampled === 'boolean';
+    && Array.isArray(transfers.items) && transfers.items.every((item) => isRecordWithStrings(item, ['createdAt', 'currency', 'direction', 'id', 'peerDisplayName', 'peerPublicId', 'peerUid', 'status', 'transferId']) && typeof (item as Record<string, unknown>).amount === 'number') && typeof transfers.sampled === 'boolean'
+    && isAdminUserDirectChatContext(directChat);
+}
+
+function isAdminUserDirectChatContext(value: Record<string, unknown>) {
+  const restriction = value.restriction;
+  if (restriction !== null && !isAdminUserDirectChatRestriction(restriction)) return false;
+  return Array.isArray(value.recentAudits) && value.recentAudits.every(isAdminUserDirectChatRestrictAudit);
+}
+
+function isAdminUserDirectChatRestriction(value: unknown): value is AdminUserDirectChatRestriction {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.active === 'boolean'
+    && typeof row.actorUid === 'string'
+    && typeof row.endsAt === 'string'
+    && typeof row.reason === 'string'
+    && typeof row.reportId === 'string'
+    && typeof row.startsAt === 'string'
+    && typeof row.state === 'string';
+}
+
+function isAdminUserDirectChatRestrictAudit(value: unknown): value is AdminUserDirectChatRestrictAudit {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.action === 'string'
+    && typeof row.actorUid === 'string'
+    && typeof row.createdAt === 'string'
+    && typeof row.id === 'string'
+    && typeof row.note === 'string'
+    && typeof row.reportId === 'string'
+    && typeof row.status === 'string';
+}
+
+function isAdminDirectChatRetentionBounds(value: unknown): value is AdminDirectChatRetentionBounds {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return Number.isInteger(row.fallbackDays) && Number.isInteger(row.maxDays) && Number.isInteger(row.minDays);
+}
+
+function isAdminDirectChatRetention(value: unknown): value is AdminDirectChatRetention {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  const bounds = row.bounds as Record<string, unknown> | undefined;
+  const policy = row.policy as Record<string, unknown> | undefined;
+  return Boolean(bounds)
+    && isAdminDirectChatRetentionBounds(bounds?.evidenceRetentionDays)
+    && isAdminDirectChatRetentionBounds(bounds?.legalHoldRetentionDays)
+    && isAdminDirectChatRetentionBounds(bounds?.messageRetentionDays)
+    && Boolean(policy)
+    && Number.isInteger(policy?.evidenceRetentionDays)
+    && Number.isInteger(policy?.legalHoldRetentionDays)
+    && Number.isInteger(policy?.messageRetentionDays)
+    && Number.isInteger(policy?.policyVersion)
+    && typeof policy?.source === 'string'
+    && typeof policy?.updatedAt === 'string'
+    && typeof policy?.updatedBy === 'string';
+}
+
+function isAdminDirectChatOpsStatus(value: unknown): value is AdminDirectChatOpsStatus {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  const flags = row.flags as Record<string, unknown> | undefined;
+  const retention = row.retention as Record<string, unknown> | undefined;
+  const lastReconcile = row.lastReconcile;
+  const stage = row.stage;
+  const rollout = row.rollout;
+  if (!flags || !retention) return false;
+  if (!['directMessages', 'directMessageRequests', 'directMessageMedia'].every((key) => typeof flags[key] === 'boolean')) return false;
+  if (![
+    'evidenceRetentionDays',
+    'legalHoldRetentionDays',
+    'messageRetentionDays',
+    'policyVersion',
+  ].every((key) => Number.isInteger(retention[key]))) return false;
+  if (typeof retention.source !== 'string' || typeof retention.sweepCursor !== 'string' || typeof retention.sweepUpdatedAt !== 'string' || typeof retention.sweepWrapped !== 'boolean') return false;
+  if (row.restrictedAccountSampleCount !== null && typeof row.restrictedAccountSampleCount !== 'number') return false;
+  if (lastReconcile !== null) {
+    if (!lastReconcile || typeof lastReconcile !== 'object') return false;
+    const reconcile = lastReconcile as Record<string, unknown>;
+    if (typeof reconcile.createdAt !== 'string' || typeof reconcile.id !== 'string') return false;
+  }
+  if (stage !== null) {
+    if (!stage || typeof stage !== 'object') return false;
+    const resolved = stage as Record<string, unknown>;
+    if (typeof resolved.name !== 'string' || !Number.isInteger(resolved.stageId)) return false;
+  }
+  if (rollout !== null) {
+    if (!rollout || typeof rollout !== 'object') return false;
+    const doc = rollout as Record<string, unknown>;
+    if (typeof doc.note !== 'string' || typeof doc.updatedAt !== 'string' || typeof doc.updatedBy !== 'string') return false;
+    if (doc.stageId !== null && !Number.isInteger(doc.stageId)) return false;
+  }
+  return true;
 }
 
 function isAdminUserGiftContext(value: unknown) {
@@ -2651,11 +3544,27 @@ function isOverviewMetrics(value: unknown): value is AdminOverviewMetrics {
   }
 
   const metrics = value as Record<string, unknown>;
+  const growth = metrics.growthHealth as Record<string, unknown> | undefined;
   return (
     typeof metrics.activeRooms === 'number' &&
     typeof metrics.adminAuditEvents === 'number' &&
     typeof metrics.gameRooms === 'number' &&
     typeof metrics.generatedAt === 'string' &&
+    Boolean(growth) &&
+    typeof growth?.emptyRoomJoinRate === 'number' &&
+    typeof growth?.emptyRoomJoins === 'number' &&
+    typeof growth?.giftGmvCoins === 'number' &&
+    typeof growth?.giftGmvDiamonds === 'number' &&
+    typeof growth?.matchAttempts === 'number' &&
+    typeof growth?.matchRoomLandings === 'number' &&
+    typeof growth?.matchToRoomRate === 'number' &&
+    typeof growth?.nonemptyRoomJoins === 'number' &&
+    typeof growth?.softMatchAttempts === 'number' &&
+    typeof growth?.softMatchPaired === 'number' &&
+    typeof growth?.softMatchPairRate === 'number' &&
+    Number.isInteger(growth?.stageId) &&
+    typeof growth?.stageName === 'string' &&
+    typeof growth?.vipConversions === 'number' &&
     typeof metrics.moderationEvents === 'number' &&
     typeof metrics.privateRooms === 'number' &&
     typeof metrics.reports === 'number' &&

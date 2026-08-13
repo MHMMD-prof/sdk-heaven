@@ -1,6 +1,7 @@
 import { DRAWING_GUESS_RULES } from './constants';
 import { createClientHostAuthority } from './authority';
 import { isCorrectGuessForPrompt, normalizeGuess } from './guessNormalization';
+import { hasOnlineMatchProgress } from './onlineMatchProgress';
 import { calculateCorrectGuessScore, getDrawerCorrectRoundBonus } from './scoring';
 import { canCommitStroke, simplifyStrokePoints } from './strokeUtils';
 import {
@@ -57,6 +58,16 @@ export const drawingGuessReducer = (
       return selectPrompt(state, event.actorId, event.prompt, event.now);
     case 'submit-guess':
       return submitGuess(state, event.actorId, event.guessId, event.text, event.now);
+    case 'apply-scored-guess':
+      return applyScoredGuess(
+        state,
+        event.playerId,
+        event.guessId,
+        event.text,
+        event.now,
+        event.isCorrect,
+        event.pointsAwarded,
+      );
     case 'commit-stroke':
       return commitStroke(state, event.actorId, event.stroke);
     case 'clear-canvas':
@@ -64,9 +75,19 @@ export const drawingGuessReducer = (
     case 'undo-latest-stroke':
       return undoLatestStroke(state, event.actorId);
     case 'end-round':
-      return endRound(state, event.actorId, event.now, event.reason);
+      return endRound(state, event.actorId, event.now, event.reason, event.revealedPrompt);
     case 'finish-match':
       return finishMatch(state, event.actorId);
+    case 'host-yielded': {
+      if (hasOnlineMatchProgress(state) && event.hostId !== state.hostId) {
+        return state;
+      }
+      return {
+        ...state,
+        hostId: event.hostId,
+        ...(event.matchId ? { matchId: event.matchId } : {}),
+      };
+    }
     case 'apply-snapshot':
       return event.state;
     default:
@@ -279,6 +300,60 @@ const submitGuess = (
     : nextState;
 };
 
+const applyScoredGuess = (
+  state: DrawingGuessState,
+  playerId: string,
+  guessId: string,
+  text: string,
+  now: number,
+  isCorrect: boolean,
+  pointsAwarded: number,
+): DrawingGuessState => {
+  if (
+    state.phase !== 'drawing' ||
+    playerId === state.drawerId ||
+    !state.eligibleGuesserIds.includes(playerId) ||
+    state.correctGuessPlayerIds.includes(playerId) ||
+    state.guesses.some((guess) => guess.id === guessId)
+  ) {
+    return state;
+  }
+
+  if (!text.trim()) {
+    return state;
+  }
+
+  const nextGuess = {
+    id: guessId,
+    playerId,
+    originalText: text,
+    normalizedText: normalizeGuess(text),
+    createdAt: now,
+    isCorrect,
+  };
+
+  if (!isCorrect || pointsAwarded <= 0) {
+    return {
+      ...state,
+      guesses: [...state.guesses, nextGuess],
+    };
+  }
+
+  return {
+    ...state,
+    guesses: [...state.guesses, nextGuess],
+    scores: {
+      ...state.scores,
+      [playerId]: (state.scores[playerId] ?? 0) + pointsAwarded,
+    },
+    roundScoreDeltas: {
+      ...state.roundScoreDeltas,
+      [playerId]: (state.roundScoreDeltas[playerId] ?? 0) + pointsAwarded,
+    },
+    correctGuessPlayerIds: [...state.correctGuessPlayerIds, playerId],
+  };
+};
+
 const commitStroke = (
   state: DrawingGuessState,
   actorId: string,
@@ -353,8 +428,16 @@ const endRound = (
   actorId: string,
   now = Date.now(),
   reason: DrawingGuessRoundEndReason = 'manual',
+  revealedPromptOverride?: DrawingGuessPrompt,
 ): DrawingGuessState => {
   const authority = createClientHostAuthority(state);
+
+  if (state.phase === 'round-results' && revealedPromptOverride) {
+    return {
+      ...state,
+      revealedPrompt: state.revealedPrompt ?? revealedPromptOverride,
+    };
+  }
 
   if (!authority.canStartRound(actorId) || state.phase !== 'drawing') {
     return state;
@@ -373,7 +456,7 @@ const endRound = (
   return {
     ...state,
     phase: 'round-results',
-    revealedPrompt: state.privatePrompt,
+    revealedPrompt: revealedPromptOverride ?? state.privatePrompt,
     scores,
     roundScoreDeltas:
       drawerId && drawerBonus

@@ -17,11 +17,45 @@ export default function UserOperationalContext({ detail, onOpenUser, section }: 
 }
 
 function SafetyAndRoomContext({ detail }: { detail: AdminUserDetail }) {
-  const { reports, rooms } = detail.context;
+  const { directChat, reports, rooms } = detail.context;
   const reportHistory = useAdminUserHistory({ initialItems: reports.items, mayHaveMore: reports.sampled, section: 'reports', targetUid: detail.profile.uid });
   const roomHistory = useAdminUserHistory({ initialItems: rooms.items, mayHaveMore: rooms.sampled, section: 'rooms', targetUid: detail.profile.uid });
   const moderationHistory = useAdminUserHistory({ initialItems: rooms.moderation, mayHaveMore: rooms.moderation.length >= detail.context.limits.perSection, section: 'room-moderation', targetUid: detail.profile.uid });
+  const restriction = directChat.restriction;
   return <div className="user-context-stack">
+    <section className="user-context-surface safety-context">
+      <ContextHeading eyebrow="الرسائل المباشرة" title="قيد المحادثات الخاصة" />
+      <ContextError message={detail.context.errors.directChat} />
+      {restriction ? (
+        <div className="context-list">
+          <div className="context-row">
+            <span className={`context-row-icon ${restriction.active ? 'danger' : 'neutral'}`}>!</span>
+            <div>
+              <strong>{restriction.active ? 'مقيّد حالياً' : restriction.state === 'cleared' ? 'رُفع القيد' : restriction.state}</strong>
+              <small>{restriction.reason || 'دون سبب'} · المنفّذ {restriction.actorUid || '—'} · يبدأ {formatDateTime(restriction.startsAt)}{restriction.endsAt ? ` · ينتهي ${formatDateTime(restriction.endsAt)}` : ' · دائم'}</small>
+            </div>
+            {restriction.reportId ? <div className="context-row-tail"><a href={`/reports?report=${encodeURIComponent(restriction.reportId)}`}>البلاغ ←</a></div> : null}
+          </div>
+        </div>
+      ) : <EmptyContext visible>لا يوجد مستند قيد رسائل مباشرة لهذا المستخدم.</EmptyContext>}
+      {directChat.recentAudits.length > 0 ? (
+        <div className="context-subsection">
+          <div className="context-subheading"><strong>آخر إجراءات القيد</strong><span>{directChat.recentAudits.length.toLocaleString('ar-IQ')}</span></div>
+          <div className="context-list">
+            {directChat.recentAudits.map((event) => (
+              <div className="context-row" key={event.id}>
+                <span className="context-row-icon danger">!</span>
+                <div>
+                  <strong>{directChatRestrictActionLabel(event.action)}</strong>
+                  <small>{event.note || 'دون ملاحظة'} · {event.actorUid || '—'} · {formatDateTime(event.createdAt)}</small>
+                </div>
+                {event.reportId ? <div className="context-row-tail"><a href={`/reports?report=${encodeURIComponent(event.reportId)}`}>البلاغ ←</a></div> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
     <section className="user-context-surface safety-context">
       <ContextHeading eyebrow="السياق الآمن" sampled={reports.sampled} title="البلاغات المرتبطة بالمستخدم" />
       <ContextError message={detail.context.errors.reports} />
@@ -70,9 +104,9 @@ function SocialNetworkContext({ detail, onOpenUser }: { detail: AdminUserDetail;
   const giftHistory = useAdminUserHistory({ initialItems: social.gifts, mayHaveMore: social.gifts.length >= detail.context.limits.perSection, section: 'social-gifts', targetUid: detail.profile.uid });
   return <div className="user-context-stack">
     <section className="user-context-surface">
-      <ContextHeading eyebrow="خريطة العلاقات" sampled={social.sampled} title="الأصدقاء والطلبات المعلّقة" />
+      <ContextHeading eyebrow="خريطة العلاقات" sampled={social.sampled} title="الأصدقاء والمتابعة والطلبات" />
       <ContextError message={detail.context.errors.social} />
-      <div className="relationship-grid">{social.relationships.map((relation) => <RelationshipCard key={`${relation.kind}-${relation.id}`} onOpenUser={onOpenUser} relation={relation} />)}<EmptyContext visible={social.relationships.length === 0}>لا توجد صداقات أو طلبات معلّقة ضمن السجل المتاح.</EmptyContext></div>
+      <div className="relationship-grid">{social.relationships.map((relation) => <RelationshipCard key={`${relation.kind}-${relation.id}`} onOpenUser={onOpenUser} relation={relation} />)}<EmptyContext visible={social.relationships.length === 0}>لا توجد صداقات أو متابعة أو طلبات معلّقة ضمن السجل المتاح.</EmptyContext></div>
     </section>
     <section className="user-context-surface split-context-surface">
       <div><ContextHeading eyebrow="السلامة الاجتماعية" sampled={social.sampled} title="الحظر المتبادل" /><div className="context-list">{social.blocks.map((block) => <button className="context-row peer-row" key={`${block.direction}-${block.id}`} onClick={() => onOpenUser?.(block.peerUid)} type="button"><span className="context-row-icon danger">×</span><div><strong>{block.peerDisplayName || block.peerPublicId || 'مستخدم'}</strong><small>{block.direction === 'outgoing' ? 'حظره هذا المستخدم' : 'حظر هذا المستخدم'} · {formatDateTime(block.createdAt)}</small></div><b>الملف ←</b></button>)}<EmptyContext visible={social.blocks.length === 0}>لا توجد علاقات حظر ظاهرة ضمن العينة الآمنة.</EmptyContext></div></div>
@@ -95,8 +129,15 @@ function PeerValueRow({ amount, createdAt, currency, direction, label, peerDispl
   return <div className="context-row"><span className={`context-row-icon ${direction === 'received' ? 'success' : 'gold'}`}>{direction === 'received' ? '+' : '↗'}</span><div><strong>{label}</strong><small>{peerDisplayName || peerPublicId || 'طرف موثّق'} · {formatDateTime(createdAt)}</small></div><div className="context-value"><b>{amount.toLocaleString('ar-IQ')}</b><small>{currencyLabel(currency)} · {status === 'completed' ? 'مكتمل' : status}</small></div></div>;
 }
 
-function ContextHeading({ eyebrow, sampled, title }: { eyebrow: string; sampled: boolean; title: string }) {
+function ContextHeading({ eyebrow, sampled, title }: { eyebrow: string; sampled?: boolean; title: string }) {
   return <header className="context-heading"><div><p>{eyebrow}</p><h4>{title}</h4></div>{sampled ? <span className="sampled-badge" title="تُعرض عينة محدودة لحماية الأداء">عينة محدودة</span> : null}</header>;
+}
+
+function directChatRestrictActionLabel(action: string) {
+  return ({
+    'direct-chat-restrict-direct-chat': 'تقييد الرسائل المباشرة',
+    'direct-chat-clear-direct-chat-restriction': 'رفع قيد الرسائل المباشرة',
+  } as Record<string, string>)[action] || action;
 }
 
 function ContextKpi({ label, tone, value }: { label: string; tone: 'danger' | 'gold' | 'neutral' | 'success' | 'warning'; value: number }) {
@@ -111,8 +152,8 @@ function HistoryPagination({ error, hasNextPage, loadMore, status }: { error: st
 }
 
 function EmptyContext({ children, visible }: { children: string; visible: boolean }) { return visible ? <div className="context-empty"><span>✓</span><p>{children}</p></div> : null; }
-function relationshipLabel(kind: AdminUserRelationshipContext['kind']) { return ({ friend: 'صداقة نشطة', 'friend-request-incoming': 'طلب صداقة وارد', 'friend-request-outgoing': 'طلب صداقة صادر', 'couple-request-incoming': 'طلب ارتباط وارد', 'couple-request-outgoing': 'طلب ارتباط صادر' } as const)[kind]; }
-function relationshipSymbol(kind: AdminUserRelationshipContext['kind']) { return kind === 'friend' ? 'ص' : kind.startsWith('friend') ? '+' : '♡'; }
+function relationshipLabel(kind: AdminUserRelationshipContext['kind']) { return ({ friend: 'صداقة نشطة', 'friend-request-incoming': 'طلب صداقة وارد', 'friend-request-outgoing': 'طلب صداقة صادر', following: 'يتابع', follower: 'متابع', 'couple-request-incoming': 'طلب ارتباط وارد', 'couple-request-outgoing': 'طلب ارتباط صادر' } as const)[kind]; }
+function relationshipSymbol(kind: AdminUserRelationshipContext['kind']) { return kind === 'friend' ? 'ص' : kind === 'following' || kind === 'follower' ? 'م' : kind.startsWith('friend') ? '+' : '♡'; }
 function reportStatusLabel(status: string) { return status === 'resolved' ? 'محلول' : status === 'triage' ? 'قيد الفرز' : 'مفتوح'; }
 function roomActionLabel(action: string) { return ({ 'mute-member': 'كتم عضو', 'remove-member': 'إزالة عضو', 'unmute-member': 'رفع كتم عضو', 'transfer-host': 'نقل الاستضافة' } as Record<string, string>)[action] || action || 'إجراء إشرافي'; }
 function categoryLabel(category: string) { return ({ cars: 'سيارات', frames: 'إطارات', gifts: 'هدايا', 'name-colors': 'ألوان الأسماء', themes: 'سمات' } as Record<string, string>)[category] || category || 'عنصر'; }

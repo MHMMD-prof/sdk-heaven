@@ -4,7 +4,7 @@ import { FormEvent, lazy, ReactNode, Suspense, useEffect, useMemo, useState } fr
 import { getAdminRouteByKey, getAdminRouteFromPath, primaryAdminRoutes } from './adminRoutes';
 import { useAdminFeedback } from './AdminFeedback';
 import { AdminErrorBoundary } from './AdminErrorBoundary';
-import { AdminCollectionState, AdminSectionHeader } from './AdminUi';
+import { AdminCollectionState, AdminSectionHeader, AdminStatusBadge } from './AdminUi';
 import {
   requestAdminAuditEvents,
   requestAdminDashboardSession,
@@ -31,7 +31,8 @@ const ReportsPanel = lazy(() => import('./ReportsPanel').then((module) => ({ def
 const RoomsPanel = lazy(() => import('./RoomsPanel').then((module) => ({ default: module.RoomsPanel })));
 const UsersPanel = lazy(() => import('./UsersPanel').then((module) => ({ default: module.UsersPanel })));
 const RepresentativeOperationsPanel = lazy(() => import('./RepresentativeOperationsPanel').then((module) => ({ default: module.RepresentativeOperationsPanel })));
-const RocketCampaignPanel = lazy(() => import('./RocketCampaignPanel').then((module) => ({ default: module.RocketCampaignPanel })));
+const IncentivesWorkspacePanel = lazy(() => import('./IncentivesWorkspacePanel').then((module) => ({ default: module.IncentivesWorkspacePanel })));
+const AdminPushPanel = lazy(() => import('./AdminPushPanel').then((module) => ({ default: module.AdminPushPanel })));
 
 type AuthState =
   | { status: 'checking' }
@@ -326,9 +327,11 @@ export function App() {
           ) : activeRoute.key === 'cosmetics' ? (
             <CosmeticsAssetRegistryPanel permissions={authState.session.permissions} user={authState.user} />
           ) : activeRoute.key === 'incentives' ? (
-            <RocketCampaignPanel permissions={authState.session.permissions} user={authState.user} />
+            <IncentivesWorkspacePanel permissions={authState.session.permissions} user={authState.user} />
           ) : activeRoute.key === 'representatives' ? (
             <RepresentativeOperationsPanel permissions={authState.session.permissions} user={authState.user} />
+          ) : activeRoute.key === 'notifications' ? (
+            <AdminPushPanel permissions={authState.session.permissions} user={authState.user} />
           ) : activeRoute.key === 'audit' ? (
             <AuditWorkspace user={authState.user} />
           ) : activeRoute.key === 'settings' ? (
@@ -365,6 +368,7 @@ function NavIcon({ routeKey }: { routeKey: string }) {
     cosmetics: <><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>,
     incentives: <><path d="M12 2c3 3 5 6 5 10a5 5 0 0 1-10 0c0-2 1-4 3-6 0 3 1 4 2 5 1-2 1-5 0-9Z" /><path d="M8 20h8M10 16h4" /></>,
     representatives: <><path d="M4 7h16M7 4l-3 3 3 3M17 14h3v6H4v-6h3" /><circle cx="12" cy="10" r="3" /><path d="M8 17a4 4 0 0 1 8 0" /></>,
+    notifications: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10 19a2 2 0 0 0 4 0" /></>,
     audit: <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.1A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.14.39.36.73.66 1 .3.26.68.4 1.07.4H21v4h-.1A1.7 1.7 0 0 0 19.4 15Z" /></>,
     refresh: <><path d="M20 6v5h-5" /><path d="M4 18v-5h5" /><path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 11M4 13l2.4 4.6A7 7 0 0 0 17.9 15" /></>,
@@ -377,7 +381,7 @@ function NavIcon({ routeKey }: { routeKey: string }) {
 function canAccessAdminRoute(session: AdminDashboardSession, routeKey: string) {
   const permissionByRoute: Record<string, string> = {
     overview: 'overview', users: 'users:view', rooms: 'rooms:view', reports: 'reports:view',
-    store: 'store:view', cosmetics: 'store:view', incentives: 'incentives:view', representatives: 'store:view', audit: 'audit:view', settings: 'settings:manage',
+    store: 'store:view', cosmetics: 'store:view', incentives: 'incentives:view', representatives: 'store:view', notifications: 'flags:manage', audit: 'audit:view', settings: 'settings:manage',
   };
   return session.permissions.includes(permissionByRoute[routeKey] || 'overview');
 }
@@ -1017,6 +1021,7 @@ function OverviewPanel({
   }
 
   const { metrics } = overviewState;
+  const growth = metrics.growthHealth;
 
   return (
     <div className="overview-dashboard">
@@ -1026,6 +1031,26 @@ function OverviewPanel({
         <MetricCard detail="تحتاج متابعة" icon="reports" label="البلاغات المفتوحة" value={formatCount(metrics.reports)} tone="red" />
         <MetricCard detail="موثّقة في النظام" icon="audit" label="أحداث الإشراف" value={formatCount(metrics.moderationEvents)} tone="blue" />
       </div>
+
+      <section className="overview-growth-health" aria-label="صحة النمو">
+        <div className="overview-heading">
+          <div>
+            <p className="eyebrow">النمو التنافسي — الموجة 0</p>
+            <h3>مؤشرات صحة النمو</h3>
+            <p>مرحلة الإطلاق الحالية والعدادات الاحتياطية (قد تكون صفراً قبل تفعيل الأحداث).</p>
+          </div>
+          <AdminStatusBadge tone={growth.stageName === 'dark' ? 'neutral' : 'success'}>
+            {growthStageLabel(growth.stageName)}
+          </AdminStatusBadge>
+        </div>
+        <div className="metric-grid">
+          <MetricCard detail={`مرحلة ${growth.stageId}`} icon="overview" label="مرحلة النمو" value={growthStageLabel(growth.stageName)} tone="gold" />
+          <MetricCard detail="انضمام لغرفة فارغة" icon="rooms" label="معدل الغرف الفارغة" value={formatPercent(growth.emptyRoomJoinRate)} tone="red" />
+          <MetricCard detail="محاولات → غرفة" icon="users" label="تحويل المطابقة" value={formatPercent(growth.matchToRoomRate)} tone="green" />
+          <MetricCard detail="محاولات → اقتران" icon="users" label="اقتران الصوت السريع" value={formatPercent(growth.softMatchPairRate)} tone="green" />
+          <MetricCard detail={`عملات ${formatCount(growth.giftGmvCoins)} · ماس ${formatCount(growth.giftGmvDiamonds)}`} icon="store" label="حجم هدايا تقريبي" value={formatCount(growth.giftGmvCoins + growth.giftGmvDiamonds)} tone="blue" />
+        </div>
+      </section>
 
       <div className="overview-middle">
         <OperationsChart metrics={metrics} />
@@ -1170,6 +1195,17 @@ function formatTime(value: string) {
 
 function formatCount(value: number) {
   return new Intl.NumberFormat('ar-IQ').format(value);
+}
+
+function formatPercent(value: number) {
+  return new Intl.NumberFormat('ar-IQ', { style: 'percent', maximumFractionDigits: 1 }).format(value || 0);
+}
+
+function growthStageLabel(stageName: string) {
+  if (stageName === 'closed-beta') return 'تجربة مغلقة';
+  if (stageName === 'public-partial') return 'عام جزئي';
+  if (stageName === 'public') return 'عام';
+  return 'مظلم';
 }
 
 function formatDateTime(value: string) {

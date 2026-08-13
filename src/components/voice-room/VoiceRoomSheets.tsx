@@ -17,42 +17,52 @@ type SymbolName = ComponentProps<typeof SymbolView>['name'];
 type RoomCommandCenterSheetProps = {
   authorityRole?: RoomAuthorityRole;
   hasPendingSeatOffer?: boolean;
+  isSpeakerEnabled?: boolean;
   musicEnabled?: boolean;
+  watchEnabled?: boolean;
   onClose: () => void;
   onGame: () => void;
   onGift: () => void;
   onMicrophones: () => void;
   onMusic?: () => void;
+  onWatch?: () => void;
   onOwnership: () => void;
   onParticipants: () => void;
   onPeople: () => void;
+  onPk?: () => void;
   onReaction: () => void;
   onReport: () => void;
   onRoomSettings: () => void;
   onSafety: () => void;
   onSeatOffers: () => void;
   onShare: () => void;
+  onSpeaker?: () => void;
   visible: boolean;
 };
 
 export function RoomCommandCenterSheet({
   authorityRole,
   hasPendingSeatOffer,
+  isSpeakerEnabled = true,
   musicEnabled = false,
+  watchEnabled = false,
   onClose,
   onGame,
   onGift,
   onMicrophones,
   onMusic,
+  onWatch,
   onOwnership,
   onParticipants,
   onPeople,
+  onPk,
   onReaction,
   onReport,
   onRoomSettings,
   onSafety,
   onSeatOffers,
   onShare,
+  onSpeaker,
   visible,
 }: RoomCommandCenterSheetProps) {
   const canManageMicrophones = hasRoomCommandCenterCapability(authorityRole, 'microphones');
@@ -75,6 +85,13 @@ export function RoomCommandCenterSheet({
           label="الألعاب"
           onPress={onGame}
         />
+        {onPk ? (
+          <Tool
+            icon={{ ios: 'flag.checkered', android: 'sports_kabaddi', web: 'sports_kabaddi' }}
+            label="تحدي PK"
+            onPress={onPk}
+          />
+        ) : null}
         <Tool
           icon={{ ios: 'gift.fill', android: 'redeem', web: 'redeem' }}
           label="الهدايا"
@@ -84,6 +101,16 @@ export function RoomCommandCenterSheet({
           icon={{ ios: 'face.smiling.fill', android: 'emoji_emotions', web: 'emoji_emotions' }}
           label="تفاعل"
           onPress={onReaction}
+        />
+        <Tool
+          icon={
+            isSpeakerEnabled
+              ? { ios: 'speaker.wave.2.fill', android: 'volume_up', web: 'volume_up' }
+              : { ios: 'speaker.slash.fill', android: 'volume_off', web: 'volume_off' }
+          }
+          label={isSpeakerEnabled ? 'السماعة' : 'صامت'}
+          note={isSpeakerEnabled ? 'تشغيل' : 'كتم'}
+          onPress={() => onSpeaker?.()}
         />
         <Tool
           icon={{ ios: 'person.3.fill', android: 'groups', web: 'groups' }}
@@ -110,6 +137,15 @@ export function RoomCommandCenterSheet({
           note={musicEnabled ? undefined : 'بانتظار تفعيل الميزة'}
           onPress={() => {
             if (musicEnabled) onMusic?.();
+          }}
+        />
+        <Tool
+          disabled={!watchEnabled}
+          icon={{ ios: 'play.rectangle.fill', android: 'ondemand_video', web: 'ondemand_video' }}
+          label="مشاهدة"
+          note={watchEnabled ? undefined : 'بانتظار تفعيل الميزة'}
+          onPress={() => {
+            if (watchEnabled) onWatch?.();
           }}
         />
         {canManageMicrophones ? (

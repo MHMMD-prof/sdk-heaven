@@ -8,6 +8,8 @@ import {
 
 import { VoiceClient } from './VoiceClient';
 import { debugError, debugLog } from '../utils/debugLog';
+import { decodeRoomReactionEnvelope, ROOM_REACTION_TOPIC } from './roomAmbientReactions';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 import {
   VoiceClientEvent,
   VoiceClientEventListener,
@@ -28,6 +30,7 @@ export class LiveKitVoiceClient implements VoiceClient {
   private audioSessionActive = false;
   private attendanceCommandEndpoint = '';
   private connectedRoomId = '';
+  private blockedParticipantIds = new Set<string>();
 
   async connect(options: VoiceConnectOptions): Promise<void> {
     if (!options.serverUrl) {
@@ -74,7 +77,7 @@ export class LiveKitVoiceClient implements VoiceClient {
         return;
       }
 
-      if (options.canPublishAudio !== false) {
+      if (options.canPublishAudio !== false && options.startMuted !== true) {
         debugLog('voice.livekit', 'microphoneEnable:start', { roomId: options.roomId, attemptId });
         await room.localParticipant.setMicrophoneEnabled(true);
         debugLog('voice.livekit', 'microphoneEnable:success', { roomId: options.roomId, attemptId });
@@ -161,6 +164,11 @@ export class LiveKitVoiceClient implements VoiceClient {
     await AudioSession.selectAudioOutput(preferredOutput);
   }
 
+  setBlockedParticipantIds(participantIds: Iterable<string>): void {
+    this.blockedParticipantIds = new Set(participantIds);
+    this.applyParticipantAudioPolicy();
+  }
+
   async executeRoomCommand(command: VoiceRoomCommand): Promise<VoiceRoomCommandResult> {
     return {
       command,
@@ -198,6 +206,13 @@ export class LiveKitVoiceClient implements VoiceClient {
       .on(RoomEvent.TrackSubscribed, () => this.syncParticipants())
       .on(RoomEvent.TrackUnsubscribed, () => this.syncParticipants())
       .on(RoomEvent.ActiveSpeakersChanged, () => this.syncSpeakingParticipants())
+      .on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
+        // RoomServiceClient packets have no participant. Reject participant-authored
+        // packets so room members cannot bypass server approval and rate limits.
+        if (participant || topic !== ROOM_REACTION_TOPIC || !this.connectedRoomId) return;
+        const envelope = decodeRoomReactionEnvelope(payload, this.connectedRoomId);
+        if (envelope) this.emitEvent({ type: 'roomReactionReceived', envelope });
+      })
       .on(RoomEvent.MediaDevicesError, (error) => {
         this.emitEvent({ type: 'error', message: getMediaDeviceErrorMessage(error) });
       })
@@ -231,6 +246,7 @@ export class LiveKitVoiceClient implements VoiceClient {
     if (!room) {
       this.participants = [];
     } else {
+      this.applyParticipantAudioPolicy();
       this.participants = [
         mapLiveKitParticipant(room.localParticipant, true),
         ...Array.from(room.remoteParticipants.values()).map((participant) =>
@@ -240,6 +256,12 @@ export class LiveKitVoiceClient implements VoiceClient {
     }
 
     this.emitEvent({ type: 'participantsChanged', participants: this.participants });
+  }
+
+  private applyParticipantAudioPolicy() {
+    this.room?.remoteParticipants.forEach((participant) => {
+      participant.setVolume(this.blockedParticipantIds.has(participant.identity) ? 0 : 1);
+    });
   }
 
   private syncSpeakingParticipants() {
@@ -292,6 +314,7 @@ export class LiveKitVoiceClient implements VoiceClient {
         headers: {
           Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
+          ...(await getVoiceAppCheckHeader()),
         },
         method: 'POST',
       });

@@ -132,10 +132,9 @@ describe('inspectCosmeticAssetBuffer', () => {
     })).resolves.toMatchObject({ ok: false });
   });
 
-  it('accepts H.264/AAC MP4 and rejects HEVC or over-budget video', async () => {
+  it('accepts silent H.264 MP4 and rejects embedded AAC or HEVC', async () => {
     const h264 = mediaFile([
       track({ codec: 'avc1', duration: 5000, frameCount: 150, handler: 'vide', height: 720, width: 1280 }),
-      track({ codec: 'mp4a', duration: 5000, frameCount: 0, handler: 'soun' }),
     ]);
     await expect(inspectCosmeticAssetBuffer({
       buffer: h264,
@@ -148,12 +147,28 @@ describe('inspectCosmeticAssetBuffer', () => {
       ok: true,
       value: {
         metadata: {
-          audioCodec: 'aac',
+          audioCodec: '',
           durationMs: 5000,
           frameRate: 30,
           videoCodec: 'h264',
         },
       },
+    });
+
+    const embeddedAudio = mediaFile([
+      track({ codec: 'avc1', duration: 5000, frameCount: 150, handler: 'vide', height: 720, width: 1280 }),
+      track({ codec: 'mp4a', duration: 5000, frameCount: 0, handler: 'soun' }),
+    ]);
+    await expect(inspectCosmeticAssetBuffer({
+      buffer: embeddedAudio,
+      category: 'entry-effect',
+      contentType: 'video/mp4',
+      format: 'mp4',
+      loop: false,
+      usage: 'one-shot',
+    })).resolves.toEqual({
+      ok: false,
+      reason: 'MP4 visual assets must be silent; publish approved M4A/AAC separately.',
     });
 
     const hevc = mediaFile([

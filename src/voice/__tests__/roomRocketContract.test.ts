@@ -8,7 +8,7 @@ import {
 
 const timestamp = (value: number) => ({ toMillis: () => value });
 
-function asset(format: 'webp' | 'animated-webp') {
+function asset(format: 'webp' | 'animated-webp' | 'mp4' | 'lottie-json') {
   return { format, height: 1000, uri: `https://cdn.example.com/${format}`, width: 800 };
 }
 
@@ -52,6 +52,14 @@ describe('roomRocketContract', () => {
     const invalid = cycle();
     invalid.appearance.animationAsset.format = 'webp';
     expect(mapRoomRocketCycleV1(invalid, 'room-1')).toBeUndefined();
+  });
+
+  it('accepts mp4 and lottie-json rocket animations', () => {
+    for (const format of ['mp4', 'lottie-json'] as const) {
+      const next = cycle();
+      next.appearance.animationAsset = asset(format);
+      expect(mapRoomRocketCycleV1(next, 'room-1')?.appearance.animationAsset?.format).toBe(format);
+    }
   });
 
   it('maps the public emergency rendering kill switch', () => {

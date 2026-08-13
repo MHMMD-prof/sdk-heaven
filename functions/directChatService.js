@@ -25,11 +25,13 @@ const {
 } = require('./directChatPolicyCore');
 const { executeDirectChatReadCommand } = require('./directChatQueryService');
 const { executeDirectChatMediaCommand } = require('./directChatMediaService');
+const { submitDirectChatReport } = require('./directChatReportService');
 const { resolveStickerEntitlement, safeAttachmentPreview } = require('./directChatMediaCore');
 const {
   buildDirectChatProjection,
   resolveDirectChatMarkRead,
 } = require('./directChatProjectionCore');
+const { mapNotificationPreferences } = require('./socialNotificationsCore');
 
 const DIRECT_CHAT_MUTATION_ACTIONS = new Set([
   'send-direct-message',
@@ -84,6 +86,15 @@ async function executeDirectChatCommand({ body, bucket, clock = defaultClock, db
       db,
       fingerprint: buildDirectChatFingerprint(validation),
       safetyAdapter,
+      uid: decodedToken.uid,
+    });
+  }
+  if (validation.value.action === 'report-direct-chat') {
+    return submitDirectChatReport({
+      clock,
+      command: validation.value,
+      db,
+      fingerprint: buildDirectChatFingerprint(validation),
       uid: decodedToken.uid,
     });
   }
@@ -203,6 +214,9 @@ async function mutateDirectChat({ clock, command, db, fingerprint, uid }) {
     const memberSummaryRef = db.doc(`directChatInboxSummaries/${uid}`);
     const targetMemberSummaryRef = db.doc(`directChatInboxSummaries/${targetUid}`);
     const memberReceiptRef = refs.conversation.collection('receipts').doc(uid);
+    const preferencesRef = ['mark-direct-chat-read', 'delete-conversation-for-me'].includes(command.action)
+      ? db.doc(`notificationPreferences/${uid}`)
+      : null;
     const stickerOwnershipRef = command.action === 'send-direct-message' && command.payload.kind === 'sticker'
       ? db.doc(`storeOwnerships/${uid}/items/${command.payload.stickerItemId}`)
       : null;
@@ -230,13 +244,15 @@ async function mutateDirectChat({ clock, command, db, fingerprint, uid }) {
       transaction.get(targetMemberSummaryRef),
       stickerOwnershipRef ? transaction.get(stickerOwnershipRef) : Promise.resolve(null),
       stickerCatalogRef ? transaction.get(stickerCatalogRef) : Promise.resolve(null),
+      preferencesRef ? transaction.get(preferencesRef) : Promise.resolve(null),
     ]);
     const [flagsSnapshot, moderationSnapshot, actorProfileSnapshot, targetProfileSnapshot,
       blockedByActorSnapshot, blockedByTargetSnapshot, actorRestrictionSnapshot,
       targetRestrictionSnapshot, friendshipSnapshot, conversationSnapshot,
       messageRequestSnapshot, rateSnapshot, messageSnapshot, replySnapshot,
       memberItemSnapshot, targetMemberItemSnapshot, memberSummarySnapshot,
-      targetMemberSummarySnapshot, stickerOwnershipSnapshot, stickerCatalogSnapshot] = snapshots;
+      targetMemberSummarySnapshot, stickerOwnershipSnapshot, stickerCatalogSnapshot,
+      preferencesSnapshot] = snapshots;
     const stickerCatalog = dataOf(stickerCatalogSnapshot);
     let stickerAssetSummary;
     let stickerAssetVersion;
@@ -273,6 +289,7 @@ async function mutateDirectChat({ clock, command, db, fingerprint, uid }) {
       memberSummaryRef,
       targetMemberSummaryRef,
       memberReceiptRef,
+      preferences: mapNotificationPreferences(dataOf(preferencesSnapshot)),
       stickerOwnership: dataOf(stickerOwnershipSnapshot),
       stickerAssetSummary,
       stickerAssetVersion,
@@ -373,7 +390,7 @@ function applyDirectMessageSend({ clock, command, context, conversationId, now, 
     sticker: sticker?.value,
   }));
   const conversationDocument = {
-    ...baseConversationDocument({ command, conversationId, memberUids, now, uid }),
+    ...baseConversationDocument({ command, conversation: context.conversation, conversationId, memberUids, now, uid }),
     lastMessageId: messageId,
     lastMessageKind: command.payload.kind,
     lastMessagePreview: command.payload.kind === 'sticker'
@@ -442,7 +459,7 @@ function applyMessageRequestSend({ clock, command, context, conversationId, now,
   });
   const requestState = isFriend || accepted ? 'accepted' : 'pending';
   const conversationDocument = {
-    ...baseConversationDocument({ command, conversationId, memberUids, now, uid }),
+    ...baseConversationDocument({ command, conversation: context.conversation, conversationId, memberUids, now, uid }),
     lastMessageId: messageId,
     lastMessageKind: 'text',
     lastMessagePreview: safeDirectChatPreview('text', command.payload.text),
@@ -594,7 +611,15 @@ function applyDeleteConversationForMe({ command, context, conversationId, member
     transaction,
     uid,
   });
-  writeReadReceipt({ conversationId, lastReadSequence: clearedThroughSequence, now, receiptRef: context.memberReceiptRef, transaction, uid });
+  writeReadReceipt({
+    conversationId,
+    lastReadSequence: clearedThroughSequence,
+    now,
+    publishReceipt: context.preferences?.readReceipts !== false,
+    receiptRef: context.memberReceiptRef,
+    transaction,
+    uid,
+  });
   return success(command, conversationId, { clearedThroughSequence });
 }
 
@@ -643,7 +668,15 @@ function applyProjectionPreference({ command, context, conversationId, now, tran
     uid,
   });
   if (command.action === 'mark-direct-chat-read') {
-    writeReadReceipt({ conversationId, lastReadSequence: patch.lastReadSequence, now, receiptRef: context.memberReceiptRef, transaction, uid });
+    writeReadReceipt({
+      conversationId,
+      lastReadSequence: patch.lastReadSequence,
+      now,
+      publishReceipt: context.preferences?.readReceipts !== false,
+      receiptRef: context.memberReceiptRef,
+      transaction,
+      uid,
+    });
   }
   return success(command, conversationId, result);
 }
@@ -695,7 +728,10 @@ function writeUnreadSummary({ existingProjection, existingSummary, nextProjectio
   transaction.set(summaryRef, { totalUnreadCount, uid, updatedAt: now }, { merge: true });
 }
 
-function writeReadReceipt({ conversationId, lastReadSequence, now, receiptRef, transaction, uid }) {
+function writeReadReceipt({ conversationId, lastReadSequence, now, publishReceipt = true, receiptRef, transaction, uid }) {
+  // Unread math already advanced on the member projection. Skipping this write only hides the
+  // peer-visible receipt when the user turned read receipts off.
+  if (publishReceipt === false) return;
   transaction.set(
     receiptRef,
     { conversationId, lastReadSequence: safeSequence(lastReadSequence), uid, updatedAt: now },
@@ -729,7 +765,9 @@ function buildUserMessage({ command, conversationId, createdAt, messageId, seque
   };
 }
 
-function baseConversationDocument({ command, conversationId, memberUids, now, uid }) {
+// This document is re-merged on every send, so the retention watermark has to be carried forward
+// explicitly. Defaulting it to 0 here would silently un-purge history on the next message.
+function baseConversationDocument({ command, conversation, conversationId, memberUids, now, uid }) {
   return {
     conversationId,
     createdAt: now,
@@ -738,6 +776,7 @@ function baseConversationDocument({ command, conversationId, memberUids, now, ui
     lifecycleState: 'active',
     friendshipId: createFriendshipId(memberUids[0], memberUids[1]),
     memberUids,
+    retentionPurgedThroughSequence: safeSequence(conversation?.retentionPurgedThroughSequence),
     schemaVersion: 1,
   };
 }

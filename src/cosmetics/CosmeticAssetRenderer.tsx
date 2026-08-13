@@ -1,8 +1,8 @@
 import Constants from 'expo-constants';
 import { useEventListener } from 'expo';
-import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import { useAudioPlayer } from 'expo-audio';
 import { Image, type ImageContentFit } from 'expo-image';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoPlayer, VideoView, type VideoContentFit } from 'expo-video';
 import LottieView, { type AnimationObject } from 'lottie-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -215,7 +215,7 @@ export function CosmeticAssetRenderer(props: CosmeticAssetRendererProps) {
     const uri = loaded.source === 'fallback'
       ? loaded.posterUri
       : loaded.source === 'compatibility' ? props.compatibilityUri : undefined;
-    return uri ? <StaticAsset contentFit={props.contentFit} onError={() => failRenderer('fallback-image-failed')} onReady={() => undefined} style={props.style} uri={uri} /> : null;
+    return uri ? <StaticAsset contentFit={props.contentFit} onError={() => failRenderer('fallback-image-failed')} onReady={firstFrame} style={props.style} uri={uri} /> : null;
   }
   if (loaded.compatibilityUri) {
     return <StaticAsset contentFit={props.contentFit} onError={() => failRenderer('compatibility-failed')} onReady={ready} style={props.style} uri={loaded.compatibilityUri} />;
@@ -248,6 +248,7 @@ export function CosmeticAssetRenderer(props: CosmeticAssetRendererProps) {
     return (
       <CosmeticVideo
         asset={asset}
+        contentFit={resolveVideoContentFit(props.contentFit)}
         onComplete={complete}
         onError={failRenderer}
         onFirstFrame={firstFrame}
@@ -297,8 +298,9 @@ function StaticAsset({
   );
 }
 
-function CosmeticVideo({ asset, onComplete, onError, onFirstFrame, posterUri, style }: {
+function CosmeticVideo({ asset, contentFit, onComplete, onError, onFirstFrame, posterUri, style }: {
   asset: PreparedCosmeticAsset;
+  contentFit: VideoContentFit;
   onComplete?: () => void;
   onError: (reason: string) => void;
   onFirstFrame: () => void;
@@ -336,11 +338,11 @@ function CosmeticVideo({ asset, onComplete, onError, onFirstFrame, posterUri, st
   return (
     <View style={style}>
       {!firstFrame && posterUri ? (
-        <Image cachePolicy="none" contentFit="contain" source={{ uri: posterUri }} style={StyleSheet.absoluteFill} />
+        <Image cachePolicy="none" contentFit={contentFit} source={{ uri: posterUri }} style={StyleSheet.absoluteFill} />
       ) : null}
       <VideoView
         allowsPictureInPicture={false}
-        contentFit="contain"
+        contentFit={contentFit}
         fullscreenOptions={{ enable: false }}
         nativeControls={false}
         onFirstFrameRender={() => {
@@ -353,6 +355,10 @@ function CosmeticVideo({ asset, onComplete, onError, onFirstFrame, posterUri, st
       />
     </View>
   );
+}
+
+function resolveVideoContentFit(contentFit: ImageContentFit | undefined): VideoContentFit {
+  return contentFit === 'cover' || contentFit === 'fill' ? contentFit : 'contain';
 }
 
 function CosmeticAudio({ asset, muted, onComplete, onError, onReady }: {
@@ -376,11 +382,7 @@ function CosmeticAudio({ asset, muted, onComplete, onError, onReady }: {
     let active = true;
     let completion: ReturnType<typeof setTimeout> | undefined;
     completedRef.current = false;
-    void setAudioModeAsync({
-      interruptionMode: 'mixWithOthers',
-      playsInSilentMode: true,
-      shouldPlayInBackground: false,
-    }).then(async () => {
+    void Promise.resolve().then(async () => {
       if (!active) return;
       player.volume = 0.7;
       await player.seekTo(0);

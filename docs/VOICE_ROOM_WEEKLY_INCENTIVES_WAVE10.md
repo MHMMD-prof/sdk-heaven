@@ -142,13 +142,17 @@ npx firebase-tools deploy --project yallgame-ebd19 --force `
 2. Attendance report-only
 3. Room Target preview
 4. Payroll report-only
-5. Rocket synthetic payout only
-6. Room Target synthetic payout only
-7. Payroll synthetic payout only
+5. Rocket synthetic payout (**keeps tracking flags**)
+6. Room Target + Rocket synthetic payout (**accumulates stage 5**)
+7. Payroll + Room Target + Rocket synthetic payout (**accumulates stage 6**)
 
 Stages must advance sequentially. Economic stages require
 `--acknowledge-economic-impact`. Stage 0 is always available as an immediate
 rollback. Missing rollout state is treated as Stage 0.
+
+Wave 4 (competitive growth) fixed stages 5–7 so advancing no longer clears
+earlier payout rails. See
+[`COMPETITIVE_SOCIAL_GROWTH_WAVE4.md`](./COMPETITIVE_SOCIAL_GROWTH_WAVE4.md).
 
 ## Gates before Stage 1
 

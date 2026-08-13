@@ -8,8 +8,9 @@ describe('social feature flags', () => {
   });
 
   it('accepts only explicit true values', () => {
-    expect(mapSocialFeatureFlags({ usersDiscovery: true, friends: 1, wallet: false })).toEqual({
+    expect(mapSocialFeatureFlags({ usersDiscovery: true, friends: 1, following: true, wallet: false })).toEqual({
       ...disabledSocialFeatureFlags,
+      following: true,
       usersDiscovery: true,
     });
   });
@@ -33,6 +34,17 @@ describe('social feature flags', () => {
       directMessageMedia: true,
       directMessageRequests: true,
       directMessages: true,
+    });
+  });
+
+  it('keeps the replacement chat presentation independently fail-closed', () => {
+    expect(mapSocialFeatureFlags({ directMessages: true })).toMatchObject({
+      directMessages: true,
+      personalChatsFrontendV2: false,
+    });
+    expect(mapSocialFeatureFlags({ personalChatsFrontendV2: true })).toMatchObject({
+      directMessages: false,
+      personalChatsFrontendV2: true,
     });
   });
 });

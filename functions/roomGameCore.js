@@ -16,6 +16,9 @@ const CLIENT_VERSION_PATTERN = /^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:[-+][A-Za-
 const LOBBY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 60 * 60 * 1000;
 const MAX_REWARD_CREDIT = 5_000;
+const ROOM_GAME_ALLOWED_ENTRY_FEES = Object.freeze([0, 10, 25, 50]);
+const ROOM_GAME_MAX_ENTRY_FEE = 50;
+const ROOM_GAME_ECONOMY_SETTLEMENT_MODE = 'entertainment-raffle-v1';
 const GAME_COMMAND_RETENTION_MS = 24 * 60 * 60 * 1000;
 const GAME_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -29,7 +32,7 @@ const CLOSED_LOOP_REWARD_POLICY = Object.freeze({
 
 const ROOM_GAME_REGISTRY = Object.freeze({
   'drawing-guess': Object.freeze({
-    capabilities: Object.freeze(['lobby', 'realtime', 'voice-compatible', 'draw']),
+    capabilities: Object.freeze(['lobby', 'realtime', 'voice-compatible', 'draw', 'coin-entry']),
     clientRoute: 'DrawingGuess',
     displayName: Object.freeze({ ar: 'خمن الرسم', en: 'Drawing Guess' }),
     gameId: 'drawing-guess',
@@ -40,6 +43,7 @@ const ROOM_GAME_REGISTRY = Object.freeze({
     rewardsEnabled: false,
     rewardPolicyId: CLOSED_LOOP_REWARD_POLICY.policyId,
     sessionMode: 'multiplayer',
+    supportsCoinEntry: true,
   }),
   'carrom-royal': Object.freeze({
     capabilities: Object.freeze(['host-local', 'local-table', 'voice-compatible']),
@@ -66,6 +70,19 @@ const ROOM_GAME_REGISTRY = Object.freeze({
     rewardsEnabled: false,
     rewardPolicyId: CLOSED_LOOP_REWARD_POLICY.policyId,
     sessionMode: 'host-local',
+  }),
+  'naval-duel': Object.freeze({
+    capabilities: Object.freeze(['lobby', 'realtime', 'voice-compatible', 'naval', 'fog-of-war']),
+    clientRoute: 'MiniGame',
+    displayName: Object.freeze({ ar: 'مبارزة البحر', en: 'Naval Duel' }),
+    gameId: 'naval-duel',
+    maxPlayers: 2,
+    minPlayers: 2,
+    minimumClientVersion: '1.0.0',
+    regions: Object.freeze(['*']),
+    rewardsEnabled: false,
+    rewardPolicyId: CLOSED_LOOP_REWARD_POLICY.policyId,
+    sessionMode: 'multiplayer',
   }),
 });
 
@@ -117,6 +134,7 @@ function listRoomGames({ featureFlags, regionCode = '' }) {
     .filter((game) => isGameAvailableInRegion(game, regionCode))
     .map((game) => ({
       ...game,
+      entryFeeOptions: game.supportsCoinEntry === true ? [...ROOM_GAME_ALLOWED_ENTRY_FEES] : [0],
       rewardPolicy: snapshotRewardPolicy(game.rewardPolicyId),
     }));
   return {
@@ -132,6 +150,7 @@ function resolveCreateRoomGameInvite({
   actorMembership,
   command,
   featureFlags,
+  growthFeatures,
   nowMs,
   publicProfile,
   room,
@@ -167,12 +186,23 @@ function resolveCreateRoomGameInvite({
   if (!rewardPolicy || rewardPolicy.currency !== 'gameRewards' || rewardPolicy.cashRedemption) {
     return roomGameError('REWARD_POLICY_INVALID', 503, 'Closed-loop game reward policy is misconfigured.');
   }
+  const entryFee = resolveRoomGameEntryFee({
+    amount: command.amount,
+    game,
+    growthFeatures,
+  });
+  if (!entryFee.ok) return entryFee;
+  const fee = entryFee.value;
   return {
     ok: true,
     value: {
+      entryDebit: fee > 0
+        ? { amount: fee, currency: 'coins', uid: senderUid }
+        : null,
       session: {
         clientRoute: game.clientRoute,
         createdAtMs: nowMs,
+        economy: buildSessionEconomy({ entryFeeCoins: fee, hostUid: senderUid }),
         expiresAtMs: nowMs + (game.minPlayers <= 1 ? SESSION_TTL_MS : LOBBY_TTL_MS),
         gameId: game.gameId,
         hostUid: senderUid,
@@ -242,11 +272,36 @@ function resolveJoinRoomGame({
     return roomGameError('SESSION_FULL', 409, 'This game session is full.');
   }
   const nextPlayers = [...playerUids, senderUid];
+  const entryFeeCoins = Number(session.economy?.entryFeeCoins) || 0;
+  const entryDebit = entryFeeCoins > 0
+    ? { amount: entryFeeCoins, currency: 'coins', uid: senderUid }
+    : null;
+  const paidEntries = {
+    ...(session.economy?.paidEntries && typeof session.economy.paidEntries === 'object'
+      ? session.economy.paidEntries
+      : {}),
+  };
+  if (entryDebit) paidEntries[senderUid] = entryFeeCoins;
+  const poolCoins = (Number(session.economy?.poolCoins) || 0) + (entryDebit ? entryFeeCoins : 0);
   return {
     ok: true,
     value: {
       alreadyJoined: false,
+      entryDebit,
       sessionPatch: {
+        ...(entryDebit
+          ? {
+              economy: {
+                ...(session.economy || {}),
+                currency: 'coins',
+                entryFeeCoins,
+                paidEntries,
+                poolCoins,
+                settled: session.economy?.settled === true,
+                settlementMode: session.economy?.settlementMode || ROOM_GAME_ECONOMY_SETTLEMENT_MODE,
+              },
+            }
+          : {}),
         playerCount: nextPlayers.length,
         playerUids: nextPlayers,
         status: nextPlayers.length >= Number(session.minPlayers || 2) ? 'active' : session.status,
@@ -279,13 +334,22 @@ function resolveLeaveRoomGame({
     };
   }
   const nextPlayers = playerUids.filter((uid) => uid !== senderUid);
+  const leaveSettlement = resolveLeaveEconomySettlement({ senderUid, session });
   if (nextPlayers.length === 0) {
+    const abandonSettlement = resolveAbandonEconomySettlement({
+      leaveSettlement,
+      nowMs,
+      senderUid,
+      session,
+    });
     return {
       ok: true,
       value: {
         alreadyLeft: false,
         clearActiveSession: true,
+        economyCredits: abandonSettlement.credits,
         sessionPatch: {
+          ...(abandonSettlement.economy ? { economy: abandonSettlement.economy } : {}),
           endedAtMs: nowMs,
           endedBy: senderUid,
           endReason: 'abandoned',
@@ -304,7 +368,9 @@ function resolveLeaveRoomGame({
     value: {
       alreadyLeft: false,
       clearActiveSession: false,
+      economyCredits: leaveSettlement.credits,
       sessionPatch: {
+        ...(leaveSettlement.economy ? { economy: leaveSettlement.economy } : {}),
         hostUid: nextHostUid,
         playerCount: nextPlayers.length,
         playerUids: nextPlayers,
@@ -346,12 +412,16 @@ function resolveEndRoomGame({
   if (!authority.ok) {
     return roomGameError('FORBIDDEN', 403, 'Only the host, room staff, or platform staff can end this session.');
   }
+  const prize = resolveEndEconomySettlement({ nowMs, session });
+  if (prize && prize.ok === false) return prize;
   return {
     ok: true,
     value: {
       authority: authority.authority,
       clearActiveSession: true,
+      economyCredits: prize.credits,
       sessionPatch: {
+        ...(prize.economy ? { economy: prize.economy } : {}),
         endedAtMs: nowMs,
         endedBy: senderUid,
         endReason: 'ended',
@@ -440,10 +510,179 @@ function isOpenGameSession(session, nowMs) {
   return true;
 }
 
+function resolveRoomGameEntryFee({ amount, game, growthFeatures }) {
+  const fee = Number.isInteger(amount) && amount >= 0 ? amount : 0;
+  if (fee === 0) return { ok: true, value: 0 };
+  if (growthFeatures?.roomGameEconomy !== true) {
+    return roomGameError('ECONOMY_DISABLED', 503, 'Room game coin entry is not enabled.');
+  }
+  if (!ROOM_GAME_ALLOWED_ENTRY_FEES.includes(fee) || fee > ROOM_GAME_MAX_ENTRY_FEE) {
+    return roomGameError('INVALID_ENTRY_FEE', 400, 'Entry fee must be 0, 10, 25, or 50 coins.');
+  }
+  if (!game || game.sessionMode !== 'multiplayer' || game.supportsCoinEntry !== true) {
+    return roomGameError('ENTRY_FEE_UNSUPPORTED', 400, 'Coin entry is only available for Drawing Guess tables.');
+  }
+  return { ok: true, value: fee };
+}
+
+function buildSessionEconomy({ entryFeeCoins, hostUid }) {
+  const fee = Number(entryFeeCoins) || 0;
+  return {
+    currency: 'coins',
+    entryFeeCoins: fee,
+    paidEntries: fee > 0 ? { [hostUid]: fee } : {},
+    poolCoins: fee,
+    settled: false,
+    settlementMode: ROOM_GAME_ECONOMY_SETTLEMENT_MODE,
+  };
+}
+
+function resolveLeaveEconomySettlement({ senderUid, session }) {
+  const economy = session?.economy && typeof session.economy === 'object' ? session.economy : null;
+  if (!economy || economy.settled === true) return { credits: [], economy: null };
+  const paid = Number(economy.paidEntries?.[senderUid]) || 0;
+  if (paid < 1) return { credits: [], economy: null };
+  const paidEntries = { ...economy.paidEntries };
+  delete paidEntries[senderUid];
+  // Lobby leavers get a refund. Active leavers forfeit their buy-in to the pool.
+  if (session.status === 'lobby') {
+    const poolCoins = Math.max(0, (Number(economy.poolCoins) || 0) - paid);
+    return {
+      credits: [{ amount: paid, currency: 'coins', kind: 'refund', uid: senderUid }],
+      economy: {
+        ...economy,
+        paidEntries,
+        poolCoins,
+      },
+    };
+  }
+  return {
+    credits: [],
+    economy: {
+      ...economy,
+      paidEntries,
+    },
+  };
+}
+
+function resolveAbandonEconomySettlement({ leaveSettlement, nowMs, senderUid, session }) {
+  const economy = leaveSettlement.economy || session?.economy;
+  if (!economy || economy.settled === true) {
+    return { credits: leaveSettlement.credits || [], economy: leaveSettlement.economy };
+  }
+  const poolCoins = Number(economy.poolCoins) || 0;
+  if (poolCoins < 1) {
+    return {
+      credits: leaveSettlement.credits || [],
+      economy: { ...economy, settled: true, settledAtMs: nowMs },
+    };
+  }
+  // Last player out: return remaining pool to them so the ledger stays balanced.
+  return {
+    credits: [
+      ...(leaveSettlement.credits || []),
+      { amount: poolCoins, currency: 'coins', kind: 'refund', uid: senderUid },
+    ],
+    economy: {
+      ...economy,
+      poolCoins: 0,
+      prizeUid: senderUid,
+      settled: true,
+      settledAtMs: nowMs,
+      settlementKind: 'abandon-refund',
+    },
+  };
+}
+
+function resolveEndEconomySettlement({ nowMs, session }) {
+  const economy = session?.economy && typeof session.economy === 'object' ? session.economy : null;
+  if (!economy || economy.settled === true) return { credits: [], economy: null };
+  const poolCoins = Number(economy.poolCoins) || 0;
+  if (poolCoins < 1) {
+    return {
+      credits: [],
+      economy: { ...economy, settled: true, settledAtMs: nowMs, settlementKind: 'empty' },
+    };
+  }
+  if (session.status === 'lobby') {
+    const credits = Object.entries(economy.paidEntries || {})
+      .filter(([, amount]) => Number(amount) >= 1)
+      .map(([uid, amount]) => ({
+        amount: Number(amount),
+        currency: 'coins',
+        kind: 'refund',
+        uid,
+      }));
+    return {
+      credits,
+      economy: {
+        ...economy,
+        poolCoins: 0,
+        settled: true,
+        settledAtMs: nowMs,
+        settlementKind: 'lobby-refund',
+      },
+    };
+  }
+  const players = Array.isArray(session.playerUids)
+    ? session.playerUids.filter((uid) => typeof uid === 'string' && uid)
+    : [];
+  if (!players.length) {
+    return {
+      credits: [],
+      economy: { ...economy, settled: true, settledAtMs: nowMs, settlementKind: 'void-empty' },
+    };
+  }
+  if (poolCoins > MAX_REWARD_CREDIT) {
+    return roomGameError('POOL_CAP_EXCEEDED', 503, 'Game prize pool exceeds the safety cap.');
+  }
+  const prizeUid = pickEntertainmentPrizeUid({ nowMs, playerUids: players, sessionId: session.sessionId });
+  return {
+    credits: [{ amount: poolCoins, currency: 'coins', kind: 'prize', uid: prizeUid }],
+    economy: {
+      ...economy,
+      poolCoins: 0,
+      prizeUid,
+      settled: true,
+      settledAtMs: nowMs,
+      settlementKind: ROOM_GAME_ECONOMY_SETTLEMENT_MODE,
+      settlementNote: 'Entertainment raffle among remaining players. Not a skill wager.',
+    },
+  };
+}
+
+function pickEntertainmentPrizeUid({ nowMs, playerUids, sessionId }) {
+  const digest = createHash('sha256')
+    .update(`${sessionId}|${nowMs}|${ROOM_GAME_ECONOMY_SETTLEMENT_MODE}`)
+    .digest('hex');
+  const index = Number.parseInt(digest.slice(0, 8), 16) % playerUids.length;
+  return playerUids[index];
+}
+
+function createRoomGameLedgerId({ kind, requestId, sessionId, uid }) {
+  return `rge_${createHash('sha256').update(`${kind}|${sessionId}|${uid}|${requestId}`).digest('hex').slice(0, 28)}`;
+}
+
 function mapSessionPublic(session) {
   if (!session) return null;
+  const economy = session.economy && typeof session.economy === 'object'
+    ? {
+        currency: session.economy.currency === 'diamonds' ? 'diamonds' : 'coins',
+        entryFeeCoins: Number(session.economy.entryFeeCoins) || 0,
+        poolCoins: Number(session.economy.poolCoins) || 0,
+        prizeUid: typeof session.economy.prizeUid === 'string' ? session.economy.prizeUid : null,
+        settled: session.economy.settled === true,
+        settlementKind: typeof session.economy.settlementKind === 'string'
+          ? session.economy.settlementKind
+          : null,
+        settlementMode: typeof session.economy.settlementMode === 'string'
+          ? session.economy.settlementMode
+          : ROOM_GAME_ECONOMY_SETTLEMENT_MODE,
+      }
+    : null;
   return {
     clientRoute: session.clientRoute,
+    ...(economy ? { economy } : {}),
     expiresAtMs: timestampToMillis(session.expiresAt) || Number(session.expiresAtMs) || 0,
     gameId: session.gameId,
     hostUid: session.hostUid,
@@ -550,22 +789,29 @@ module.exports = {
   LOBBY_TTL_MS,
   MAX_REWARD_CREDIT,
   ROOM_GAME_ACTIONS,
+  ROOM_GAME_ALLOWED_ENTRY_FEES,
+  ROOM_GAME_ECONOMY_SETTLEMENT_MODE,
+  ROOM_GAME_MAX_ENTRY_FEE,
   ROOM_GAME_REGISTRY,
   SESSION_TTL_MS,
   buildRoomGameFingerprint,
+  buildSessionEconomy,
   canManageRoomGameSession,
   compareClientVersions,
+  createRoomGameLedgerId,
   createRoomGameRewardId,
   createRoomGameSessionId,
   isGameAvailableInRegion,
   listRoomGames,
   mapSessionPublic,
   normalizeRoomGameBody,
+  pickEntertainmentPrizeUid,
   resolveCreditGameReward,
   resolveCreateRoomGameInvite,
   resolveEndRoomGame,
   resolveJoinRoomGame,
   resolveLeaveRoomGame,
+  resolveRoomGameEntryFee,
   roomGameError,
   shouldAbandonExpiredSession,
   snapshotRewardPolicy,

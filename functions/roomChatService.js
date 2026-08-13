@@ -1,5 +1,6 @@
 const { createFriendshipId } = require('./socialFriendsCore');
 const { createDirectConversationId } = require('./directChatCore');
+const { applySocialBlockRelationshipCleanup } = require('./socialBlocksService');
 const {
   buildRoomChatFingerprint,
   filterChatText,
@@ -167,7 +168,8 @@ async function executeRoomChatCommand({
       publicProfile,
       room,
     });
-    let friendSnapshot = null;
+    let followerSnapshot = null;
+    let blockRelationshipSnapshots = null;
     if (
       resolution.ok
       && command.action === 'send-message'
@@ -175,13 +177,36 @@ async function executeRoomChatCommand({
       && typeof room.ownerUid === 'string'
       && room.ownerUid !== actorUid
     ) {
-      friendSnapshot = await transaction.get(db.doc(`friendships/${createFriendshipId(actorUid, room.ownerUid)}`));
+      followerSnapshot = await transaction.get(db.doc(`followers/${room.ownerUid}/items/${actorUid}`));
+    }
+    if (resolution.ok && command.action === 'block-user' && command.targetUid) {
+      const friendshipId = createFriendshipId(actorUid, command.targetUid);
+      const [
+        friendshipSnapshot,
+        followActorToTarget,
+        followTargetToActor,
+        followerActorOfTarget,
+        followerTargetOfActor,
+      ] = await Promise.all([
+        transaction.get(db.doc(`friendships/${friendshipId}`)),
+        transaction.get(db.doc(`following/${actorUid}/items/${command.targetUid}`)),
+        transaction.get(db.doc(`following/${command.targetUid}/items/${actorUid}`)),
+        transaction.get(db.doc(`followers/${command.targetUid}/items/${actorUid}`)),
+        transaction.get(db.doc(`followers/${actorUid}/items/${command.targetUid}`)),
+      ]);
+      blockRelationshipSnapshots = {
+        followActorToTarget,
+        followTargetToActor,
+        followerActorOfTarget,
+        followerTargetOfActor,
+        friendshipSnapshot,
+      };
     }
     if (resolution.ok && command.action === 'send-message') {
       resolution = resolveSendMessage({
         authority: authority.authority,
         featureFlags,
-        isFriendOfOwner: friendSnapshot?.exists === true,
+        isFollowerOfOwner: followerSnapshot?.exists === true,
         membership,
         nowMs,
         profile,
@@ -310,9 +335,20 @@ async function executeRoomChatCommand({
         roomId: command.roomId,
         source: 'voice-room',
       });
-      const friendshipId = createFriendshipId(actorUid, command.targetUid);
-      transaction.delete(db.doc(`friendships/${friendshipId}`));
-      transaction.delete(db.doc(`friendRequests/${friendshipId}`));
+      applySocialBlockRelationshipCleanup({
+        actorProfileData: publicProfile || {},
+        actorUid,
+        db,
+        followActorToTargetExists: blockRelationshipSnapshots?.followActorToTarget?.exists === true,
+        followTargetToActorExists: blockRelationshipSnapshots?.followTargetToActor?.exists === true,
+        followerActorOfTargetExists: blockRelationshipSnapshots?.followerActorOfTarget?.exists === true,
+        followerTargetOfActorExists: blockRelationshipSnapshots?.followerTargetOfActor?.exists === true,
+        friendshipExists: blockRelationshipSnapshots?.friendshipSnapshot?.exists === true,
+        targetProfileData: targetProfileSnapshot?.exists ? targetProfileSnapshot.data() : {},
+        targetUid: command.targetUid,
+        timestamp,
+        transaction,
+      });
       if (directRequestSnapshot?.exists && directRequestSnapshot.data()?.status === 'pending') {
         transaction.set(directRequestRef, {
           blockedAt: timestamp,
@@ -416,6 +452,7 @@ async function executeRoomChatCommand({
       result: {
         action: command.action,
         messageId: resultMessageId || command.messageId || '',
+        ...(command.action === 'report-content' ? { reportId: `room_${command.requestId}` } : {}),
         requestId: command.requestId,
         roomId: command.roomId,
         status: 'applied',

@@ -91,6 +91,17 @@ export function FriendsScreen({ navigation }: FriendsScreenProps) {
             <Text style={styles.eyebrow}>دائرتك الاجتماعية</Text>
             <Text style={styles.title}>الأصدقاء والطلبات</Text>
           </View>
+          <Pressable
+            accessibilityLabel="المحظورون"
+            onPress={() => navigation.navigate('BlockedUsers')}
+            style={styles.roundButton}
+          >
+            <SymbolView
+              name={{ ios: 'hand.raised.fill', android: 'block', web: 'block' }}
+              size={21}
+              tintColor={colors.goldSoft}
+            />
+          </Pressable>
           <Pressable accessibilityLabel="تحديث" onPress={() => void load()} style={styles.roundButton}>
             <SymbolView
               name={{ ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' }}

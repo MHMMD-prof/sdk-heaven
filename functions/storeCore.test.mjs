@@ -13,7 +13,7 @@ const {
 } = require('./storeCore');
 
 describe('storeCore', () => {
-  it('defines the Wave 0 store categories without a couples category', () => {
+  it('defines store categories including the pair-scoped couple category', () => {
     expect(STORE_CATEGORIES).toEqual([
       'game-items',
       'chat-themes',
@@ -23,10 +23,29 @@ describe('storeCore', () => {
       'nameplates',
       'cosmetic-badges',
       'seat-effects',
+      'couple-effects',
       'stickers',
       'cars',
       'custom-ids',
     ]);
+  });
+
+  it('requires an exact asset and rendering modes for couple effects', () => {
+    const item = {
+      availability: 'available', category: 'couple-effects',
+      cosmeticAsset: { assetId: 'royal-pair', assetVersionId: 'v1-123456789abc' },
+      coupleEffectPresentation: { borderMode: 'looping', entranceMode: 'one-shot', profileMode: 'static' },
+      description: { ar: 'تأثير ثنائي', en: 'Couple effect' }, duration: { kind: 'permanent' },
+      itemId: 'royal-pair', name: { ar: 'ملكي', en: 'Royal' }, order: 1,
+      previewAssetUrl: 'https://cdn.example.com/pair.png', prices: { coins: 25 }, purchasingEnabled: true,
+      stock: { kind: 'unlimited' }, thumbnailUrl: 'https://cdn.example.com/pair-thumb.png',
+    };
+    expect(mapStoreCatalogItem(item, item.itemId)).toMatchObject({
+      category: 'couple-effects',
+      coupleEffectPresentation: item.coupleEffectPresentation,
+    });
+    expect(mapStoreCatalogItem({ ...item, cosmeticAsset: undefined }, item.itemId)).toBeUndefined();
+    expect(mapStoreCatalogItem({ ...item, coupleEffectPresentation: undefined }, item.itemId)).toBeUndefined();
   });
 
   it('requires immutable assets for sticker catalog items', () => {

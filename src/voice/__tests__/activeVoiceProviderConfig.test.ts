@@ -6,6 +6,7 @@ import {
   deriveRoomCommandEndpoint,
   deriveRoomEntryEffectCommandEndpoint,
   deriveRoomGameCommandEndpoint,
+  deriveRoomPkCommandEndpoint,
   deriveRoomGiftCommandEndpoint,
   deriveRoomMediaCommandEndpoint,
   deriveRoomMusicCommandEndpoint,
@@ -102,6 +103,17 @@ describe('deriveRoomGameCommandEndpoint', () => {
     expect(
       deriveRoomGameCommandEndpoint('https://roomcommand-2dr73d3xua-uc.a.run.app'),
     ).toBe('https://roomgamecommand-2dr73d3xua-uc.a.run.app');
+  });
+});
+
+describe('deriveRoomPkCommandEndpoint', () => {
+  it('derives first and second generation room PK endpoints', () => {
+    expect(
+      deriveRoomPkCommandEndpoint('https://us-central1-yallgame-ebd19.cloudfunctions.net/roomCommand'),
+    ).toBe('https://us-central1-yallgame-ebd19.cloudfunctions.net/roomPkCommand');
+    expect(
+      deriveRoomPkCommandEndpoint('https://roomcommand-2dr73d3xua-uc.a.run.app'),
+    ).toBe('https://roompkcommand-2dr73d3xua-uc.a.run.app');
   });
 });
 

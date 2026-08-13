@@ -1,37 +1,64 @@
-.cosmetics-registry {
-  display: grid;
-  gap: 18px;
+.cosmetics-page {
+  color: #f5e8d3;
 }
 
-.cosmetics-registry-hero,
+.cosmetics-workspace {
+  min-height: 520px;
+}
+
+.cosmetics-tab-panel {
+  display: grid;
+  gap: 14px;
+  padding: 0 18px 22px;
+}
+
+.cosmetics-tab-panel > .economy-list-head {
+  padding-inline: 0;
+}
+
 .cosmetics-registry-toolbar,
-.cosmetics-registry-actions {
-  align-items: center;
+.cosmetics-registry-actions,
+.cosmetics-custom-toolbar {
+  align-items: end;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  justify-content: space-between;
 }
 
-.cosmetics-registry-hero,
+.cosmetics-filter-field {
+  flex: 1 1 180px;
+  max-width: 260px;
+}
+
 .cosmetics-registry-list,
 .cosmetics-registry-detail,
-.cosmetics-register-form {
+.cosmetics-register-form,
+.cosmetics-custom-queue,
+.cosmetics-eligibility,
+.cosmetics-custom-preview,
+.cosmetics-permission-empty {
   background: rgba(14, 9, 20, 0.78);
   border: 1px solid rgba(214, 168, 79, 0.24);
-  border-radius: 18px;
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
   padding: 18px;
 }
 
-.cosmetics-registry-hero h1,
-.cosmetics-registry h2 {
-  margin: 4px 0 8px;
+.cosmetics-registry-list h3,
+.cosmetics-registry-detail h3,
+.cosmetics-register-form h3,
+.cosmetics-eligibility h3,
+.cosmetics-permission-empty h3 {
+  color: #efcf95;
+  font-family: "Noto Naskh Arabic", "Traditional Arabic", serif;
+  margin: 0;
 }
 
-.cosmetics-registry-hero p,
 .cosmetics-register-form header p,
 .cosmetics-registry-list > p,
-.cosmetics-registry-detail > p {
+.cosmetics-registry-detail > p,
+.cosmetics-permission-empty p {
   color: var(--muted, #b9afcb);
   margin: 0;
 }
@@ -42,24 +69,43 @@
   grid-template-columns: minmax(260px, 0.8fr) minmax(360px, 1.2fr);
 }
 
-.cosmetics-registry-list,
-.cosmetics-registry-detail,
-.cosmetics-register-form {
+.cosmetics-form-grid {
   display: grid;
   gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cosmetics-form-grid .cosmetics-span-2 {
+  grid-column: 1 / -1;
+}
+
+.cosmetics-check-field .cosmetics-check-row {
+  align-items: center;
+  color: #d7b77f;
+  display: flex;
+  font-size: .72rem;
+  font-weight: 700;
+  gap: 8px;
+  min-height: 38px;
 }
 
 .cosmetics-registry-row {
   align-items: center;
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(185, 129, 60, 0.18);
   border-radius: 12px;
   color: inherit;
   display: flex;
+  gap: 12px;
   justify-content: space-between;
   padding: 12px;
-  text-align: start;
+  text-align: right;
   width: 100%;
+}
+
+.cosmetics-registry-row:hover {
+  background: rgba(185, 129, 60, 0.08);
+  border-color: rgba(185, 129, 60, 0.35);
 }
 
 .cosmetics-registry-row span,
@@ -67,12 +113,33 @@
 .cosmetics-registry-summary {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .cosmetics-registry-row small,
 .cosmetics-version-list small,
 .cosmetics-registry-summary span {
   color: var(--muted, #b9afcb);
+}
+
+.cosmetics-registry-actions button,
+.cosmetics-register-form > .primary-button,
+.cosmetics-custom-toolbar .secondary-button {
+  min-height: 38px;
+}
+
+.cosmetics-registry-actions button {
+  background: rgba(185, 129, 60, 0.1);
+  border: 1px solid rgba(185, 129, 60, 0.28);
+  border-radius: 8px;
+  color: #e4c791;
+  font-size: .64rem;
+  font-weight: 800;
+  padding: 0 12px;
+}
+
+.cosmetics-registry-actions button:disabled {
+  opacity: .45;
 }
 
 .cosmetics-version-list {
@@ -82,6 +149,7 @@
 
 .cosmetics-version-list article {
   background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(185, 129, 60, 0.14);
   border-radius: 12px;
   padding: 12px;
 }
@@ -89,13 +157,70 @@
 .cosmetics-version-list code,
 .cosmetics-storage-path {
   direction: ltr;
+  display: block;
   max-width: 100%;
   overflow-wrap: anywhere;
   text-align: left;
+  unicode-bidi: isolate;
+}
+
+.cosmetics-storage-path {
+  background: rgba(12, 11, 15, 0.72);
+  border: 1px solid rgba(185, 129, 60, 0.22);
+  border-radius: 8px;
+  color: #cfc3b3;
+  font-size: .68rem;
+  padding: 10px 12px;
+}
+
+.cosmetics-safety-attestations {
+  display: grid;
+  gap: 8px;
+}
+
+.cosmetics-safety-attestations label {
+  align-items: flex-start;
+  color: #d7b77f;
+  display: flex;
+  font-size: .68rem;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.cosmetics-custom-queue {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.cosmetics-custom-preview img {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  max-height: 280px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.cosmetics-permission-empty {
+  place-items: center;
+  text-align: center;
 }
 
 @media (max-width: 900px) {
-  .cosmetics-registry-grid {
+  .cosmetics-registry-grid,
+  .cosmetics-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .cosmetics-form-grid .cosmetics-span-2 {
+    grid-column: auto;
+  }
+
+  .cosmetics-filter-field {
+    max-width: none;
+  }
+
+  .cosmetics-tab-panel {
+    padding-inline: 12px;
   }
 }

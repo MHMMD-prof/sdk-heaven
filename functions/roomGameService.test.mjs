@@ -29,6 +29,7 @@ describe('roomGameService', () => {
       'drawing-guess',
       'carrom-royal',
       'royal-majlis',
+      'naval-duel',
     ]);
     expect(db.read('roomGameRateLimits/user-1')).toMatchObject({ count: 1, uid: 'user-1' });
     expect(db.read('rooms/room-1/gameCommandRequests/roomgame_list_000001').purgeAfter).toBeDefined();
@@ -83,6 +84,142 @@ describe('roomGameService', () => {
     expect(db.read('rooms/room-1')).toMatchObject({
       activeGameSessionId: null,
       currentGameId: null,
+    });
+  });
+
+  it('creates a Drawing Guess invite, lets a second member join, and keeps the voice room on leave', async () => {
+    const db = seededDb();
+    db.documents.set('publicProfiles/user-2', {
+      displayName: 'Sara',
+      moderationStatus: 'active',
+      uid: 'user-2',
+    });
+    db.documents.set('rooms/room-1/members/user-2', {
+      status: 'active',
+      uid: 'user-2',
+    });
+
+    const created = await executeRoomGameCommand({
+      body: body('create-room-game-invite', 'roomgame_create_join01', {
+        gameId: 'drawing-guess',
+      }),
+      clock,
+      db,
+      decodedToken: { uid: 'user-1' },
+      fieldValue,
+    });
+    expect(created).toMatchObject({
+      ok: true,
+      result: {
+        action: 'create-room-game-invite',
+        session: {
+          gameId: 'drawing-guess',
+          hostUid: 'user-1',
+          sessionMode: 'multiplayer',
+          status: 'lobby',
+          playerUids: ['user-1'],
+        },
+      },
+    });
+    const sessionId = created.result.session.sessionId;
+    expect(db.read('rooms/room-1')).toMatchObject({
+      activeGameSessionId: sessionId,
+      currentGameId: 'drawing-guess',
+      status: 'active',
+    });
+
+    const joined = await executeRoomGameCommand({
+      body: body('join-room-game', 'roomgame_join_user2_01', { sessionId }),
+      clock,
+      db,
+      decodedToken: { uid: 'user-2' },
+      fieldValue,
+    });
+    expect(joined).toMatchObject({
+      ok: true,
+      result: {
+        action: 'join-room-game',
+        session: {
+          hostUid: 'user-1',
+          playerCount: 2,
+          playerUids: ['user-1', 'user-2'],
+          status: 'active',
+        },
+      },
+    });
+
+    const left = await executeRoomGameCommand({
+      body: body('leave-room-game', 'roomgame_leave_user2_01', { sessionId }),
+      clock,
+      db,
+      decodedToken: { uid: 'user-2' },
+      fieldValue,
+    });
+    expect(left.ok).toBe(true);
+    expect(db.read('rooms/room-1')).toMatchObject({
+      status: 'active',
+    });
+    expect(db.read('rooms/room-1/members/user-2')).toMatchObject({
+      status: 'active',
+      uid: 'user-2',
+    });
+  });
+
+  it('creates a Naval Duel invite that becomes active when the second player joins', async () => {
+    const db = seededDb();
+    db.documents.set('publicProfiles/user-2', {
+      displayName: 'Sara',
+      moderationStatus: 'active',
+      uid: 'user-2',
+    });
+    db.documents.set('rooms/room-1/members/user-2', {
+      status: 'active',
+      uid: 'user-2',
+    });
+
+    const created = await executeRoomGameCommand({
+      body: body('create-room-game-invite', 'roomgame_naval_create01', {
+        gameId: 'naval-duel',
+      }),
+      clock,
+      db,
+      decodedToken: { uid: 'user-1' },
+      fieldValue,
+    });
+    expect(created).toMatchObject({
+      ok: true,
+      result: {
+        session: {
+          gameId: 'naval-duel',
+          hostUid: 'user-1',
+          maxPlayers: 2,
+          minPlayers: 2,
+          sessionMode: 'multiplayer',
+          status: 'lobby',
+          playerUids: ['user-1'],
+        },
+      },
+    });
+
+    const joined = await executeRoomGameCommand({
+      body: body('join-room-game', 'roomgame_naval_join_01', {
+        sessionId: created.result.session.sessionId,
+      }),
+      clock,
+      db,
+      decodedToken: { uid: 'user-2' },
+      fieldValue,
+    });
+    expect(joined).toMatchObject({
+      ok: true,
+      result: {
+        session: {
+          gameId: 'naval-duel',
+          playerCount: 2,
+          playerUids: ['user-1', 'user-2'],
+          status: 'active',
+        },
+      },
     });
   });
 
@@ -153,6 +290,32 @@ describe('roomGameService', () => {
     expect(await cleanupExpiredRoomGameRecords({ clock, db }))
       .toEqual({ deleted: 3, scanned: 3 });
     expect(db.read('rooms/room-1/gameSessions/old-active')).toBeDefined();
+  });
+
+  it('debits wallet entry fees when roomGameEconomy is enabled', async () => {
+    const db = seededDb();
+    db.documents.set('appConfig/growthFeatures', { roomGameEconomy: true });
+    db.documents.set('walletSummaries/user-1', {
+      balances: { coins: 100, diamonds: 0 },
+      lifetimeCredit: { coins: 100, diamonds: 0 },
+      lifetimeDebit: { coins: 0, diamonds: 0 },
+      uid: 'user-1',
+    });
+    const created = await execute(db, body('create-room-game-invite', 'roomgame_pay_00000001', {
+      amount: 25,
+      gameId: 'drawing-guess',
+    }));
+    expect(created).toMatchObject({
+      ok: true,
+      result: {
+        session: {
+          economy: { entryFeeCoins: 25, poolCoins: 25 },
+          gameId: 'drawing-guess',
+        },
+      },
+    });
+    expect(db.read('walletSummaries/user-1').balances.coins).toBe(75);
+    expect(paths(db, 'walletTransactions/').length).toBe(1);
   });
 });
 

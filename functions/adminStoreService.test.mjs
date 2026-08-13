@@ -87,13 +87,51 @@ describe('adminStoreService', () => {
       },
     });
     expect(writes.find((write) => write.ref.path === `entryPresentationApprovalReceipts/${receiptId}`)?.data)
-      .toMatchObject({ controlsSafeZonePassed: true, status: 'passed', visualChecksum: 'a'.repeat(64) });
+      .toMatchObject({
+        controlsSafeZonePassed: true,
+        copyTemplateVersion: 1,
+        presentationSurface: 'bottom-stage',
+        status: 'passed',
+        visualChecksum: 'a'.repeat(64),
+      });
     expect(writes.find((write) => write.ref.path === 'storeCatalog/car-1')?.data.entryPresentation)
       .toMatchObject({ fallbackFormat: 'png', visualFormat: 'lottie-json' });
   });
+
+  it('assigns only the exact approved couple-effect version and strict presentation', async () => {
+    const writes = [];
+    const reference = { assetId: 'royal-pair', assetVersionId: 'v1-aaaaaaaaaaaa' };
+    const pair = {
+      ...item,
+      category: 'couple-effects',
+      cosmeticAsset: reference,
+      coupleEffectPresentation: { borderMode: 'static', entranceMode: 'one-shot', profileMode: 'looping' },
+      customId: undefined,
+      itemId: 'royal-pair-item',
+      stock: { kind: 'unlimited' },
+    };
+    const seed = {};
+    seedApprovedAsset(seed, reference, 'png', 'c'.repeat(64), { usage: 'static' }, 'couple-effect');
+    await executeAdminStoreCatalogUpsert({
+      db: fakeDb(seed, writes),
+      decodedToken: { email: 'admin@example.com', uid: 'admin-1' },
+      fieldValue: { serverTimestamp: () => 'SERVER_TIME' },
+      input: { expectedUpdatedAt: '', item: pair, reason: 'Approve pair effect', requestId: 'request_pair_000001' },
+    });
+    expect(writes.find((write) => write.ref.path === 'storeCatalog/royal-pair-item')?.data)
+      .toMatchObject({ cosmeticAsset: reference, coupleEffectPresentation: pair.coupleEffectPresentation });
+
+    seed[`cosmeticAssetApprovals/${reference.assetId}__${reference.assetVersionId}`].checksum = 'd'.repeat(64);
+    await expect(executeAdminStoreCatalogUpsert({
+      db: fakeDb(seed, []),
+      decodedToken: { uid: 'admin-1' },
+      fieldValue: { serverTimestamp: () => 'SERVER_TIME' },
+      input: { expectedUpdatedAt: '', item: pair, reason: 'Forged approval', requestId: 'request_pair_000002' },
+    })).rejects.toMatchObject({ status: 409 });
+  });
 });
 
-function seedApprovedAsset(seed, reference, format, checksum, extra) {
+function seedApprovedAsset(seed, reference, format, checksum, extra, category = 'entry-effect') {
   seed[`cosmeticAssets/${reference.assetId}`] = {
     approvalId: `${reference.assetId}__${reference.assetVersionId}`,
     approvedVersionId: reference.assetVersionId, assetId: reference.assetId,
@@ -102,7 +140,7 @@ function seedApprovedAsset(seed, reference, format, checksum, extra) {
   };
   seed[`cosmeticAssets/${reference.assetId}/versions/${reference.assetVersionId}`] = {
     assetId: reference.assetId, assetVersionId: reference.assetVersionId,
-    category: 'entry-effect', format, height: 720, sha256: checksum,
+    category, format, height: 720, sha256: checksum,
     transparent: format === 'lottie-json', width: 1280,
     ...(['lottie-json', 'mp4'].includes(format) ? { durationMs: 4_000 } : {}),
     ...extra,

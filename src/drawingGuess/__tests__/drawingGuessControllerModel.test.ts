@@ -6,6 +6,7 @@ import {
   createDrawingGuessViewModel,
   createLocalSimulatedDrawingGuessState,
   createOnlineDrawingGuessState,
+  resolveOnlineBootstrapMatchId,
 } from '../controller/drawingGuessControllerModel';
 import { resolveDrawingGuessLaunch } from '../controller/resolveDrawingGuessLaunch';
 import { getLocalShowcaseWrongGuess } from '../controller/useDrawingGuessController';
@@ -18,6 +19,7 @@ import {
 } from '../screens/drawingGuessShowcaseHelp';
 
 const localPlayerId = 'dg-player-local';
+const sessionHostUid = 'voice-host-uid';
 
 const createState = () =>
   createLocalSimulatedDrawingGuessState({
@@ -40,6 +42,23 @@ describe('Drawing Guess controller model', () => {
     expect(launch.title).toBe('Voice room voice-room-1');
   });
 
+  it('passes session hostUid through voice-room launch resolution', () => {
+    const launch = resolveDrawingGuessLaunch({
+      roomId: 'voice-room-1',
+      source: 'voice-room',
+      mode: 'online',
+      playerId: 'joiner-uid',
+      sessionId: 'rgs_session_1',
+      hostUid: sessionHostUid,
+      displayName: 'Sara',
+    });
+
+    expect(launch.hostUid).toBe(sessionHostUid);
+    expect(launch.playerId).toBe('joiner-uid');
+    expect(launch.sessionId).toBe('rgs_session_1');
+    expect(launch.displayName).toBe('Sara');
+  });
+
   it('keeps Games launch defaulted to local simulated mode', () => {
     const launch = resolveDrawingGuessLaunch({
       roomId: 'DG-GAME',
@@ -48,6 +67,7 @@ describe('Drawing Guess controller model', () => {
 
     expect(launch.roomCode).toBe('DG-GAME');
     expect(launch.mode).toBe('local-simulated');
+    expect(launch.hostUid).toBe('');
   });
 
   it('lets explicit route mode override source-based defaults', () => {
@@ -65,6 +85,166 @@ describe('Drawing Guess controller model', () => {
         mode: 'online',
       }).mode,
     ).toBe('online');
+  });
+
+  it('seeds online host from the room session host, not the joining client', () => {
+    const state = createOnlineDrawingGuessState({
+      roomCode: 'voice-room-1',
+      localPlayerId: 'joiner-uid',
+      displayName: 'Sara',
+      hostId: sessionHostUid,
+      matchId: 'pending-rgs_session_1',
+      now: 1000,
+    });
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'voice-room-1',
+      localPlayerId: 'joiner-uid',
+      now: 1000,
+      transportMode: 'livekit',
+      launchSource: 'voice-room',
+    });
+
+    expect(state.hostId).toBe(sessionHostUid);
+    expect(state.matchId).toBe('pending-rgs_session_1');
+    expect(state.players.map((player) => player.id)).toEqual(['joiner-uid']);
+    expect(state.players[0].displayName).toBe('Sara');
+    expect(viewModel.isHost).toBe(false);
+    expect(viewModel.canStart).toBe(false);
+  });
+
+  it('keeps the session host as the only start authority', () => {
+    let state = createOnlineDrawingGuessState({
+      roomCode: 'voice-room-1',
+      localPlayerId: sessionHostUid,
+      displayName: 'Host',
+      hostId: sessionHostUid,
+      matchId: 'match-host-1',
+      now: 1000,
+    });
+    state = drawingGuessReducer(state, {
+      type: 'player-joined',
+      player: {
+        id: 'joiner-uid',
+        displayName: 'Sara',
+        avatarLabel: 'S',
+        role: 'player',
+        joinedAt: 1001,
+      },
+    });
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'voice-room-1',
+      localPlayerId: sessionHostUid,
+      now: 1000,
+      transportMode: 'livekit',
+      launchSource: 'voice-room',
+    });
+    const joinerViewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'voice-room-1',
+      localPlayerId: 'joiner-uid',
+      now: 1000,
+      transportMode: 'livekit',
+      launchSource: 'voice-room',
+    });
+
+    expect(state.hostId).toBe(sessionHostUid);
+    expect(viewModel.isHost).toBe(true);
+    expect(viewModel.canStart).toBe(true);
+    expect(joinerViewModel.isHost).toBe(false);
+    expect(joinerViewModel.canStart).toBe(false);
+  });
+
+  it('gives hosts a real match id and joiners a pending bootstrap id', () => {
+    expect(
+      resolveOnlineBootstrapMatchId({
+        createMatchId: () => 'match-generated',
+        hostUid: sessionHostUid,
+        localPlayerId: sessionHostUid,
+        roomCode: 'voice-room-1',
+        sessionId: 'rgs_session_1',
+      }),
+    ).toBe('match-generated');
+
+    expect(
+      resolveOnlineBootstrapMatchId({
+        createMatchId: () => 'match-generated',
+        hostUid: sessionHostUid,
+        localPlayerId: 'joiner-uid',
+        roomCode: 'voice-room-1',
+        sessionId: 'rgs_session_1',
+      }),
+    ).toBe('pending-rgs_session_1');
+  });
+
+  it('hides online create/join controls for voice-room launches', () => {
+    const state = createOnlineDrawingGuessState({
+      roomCode: 'voice-room-1',
+      localPlayerId: sessionHostUid,
+      displayName: 'Host',
+      hostId: sessionHostUid,
+      matchId: 'match-host-1',
+      now: 1000,
+    });
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'voice-room-1',
+      localPlayerId: sessionHostUid,
+      now: 1000,
+      transportMode: 'livekit',
+      launchSource: 'voice-room',
+    });
+
+    expect(viewModel.isVoiceRoomSession).toBe(true);
+    expect(viewModel.showOnlineControls).toBe(false);
+    expect(viewModel.showRoomResetControls).toBe(false);
+    expect(viewModel.onlineStatusLabel).toBe('Voice room match');
+    expect(viewModel.lobbyStatusLabel).toContain('Waiting for another player');
+  });
+
+  it('tells voice-room joiners to wait for the host', () => {
+    const state = createOnlineDrawingGuessState({
+      roomCode: 'voice-room-1',
+      localPlayerId: 'joiner-uid',
+      displayName: 'Sara',
+      hostId: sessionHostUid,
+      matchId: 'pending-rgs_session_1',
+      now: 1000,
+    });
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'voice-room-1',
+      localPlayerId: 'joiner-uid',
+      now: 1000,
+      transportMode: 'livekit',
+      launchSource: 'voice-room',
+    });
+
+    expect(viewModel.isHost).toBe(false);
+    expect(viewModel.showOnlineControls).toBe(false);
+    expect(viewModel.lobbyStatusLabel).toContain('Wait for the host');
+  });
+
+  it('keeps debug online controls available outside voice-room launches', () => {
+    const state = createOnlineDrawingGuessState({
+      roomCode: 'DG-ONLINE',
+      localPlayerId,
+      matchId: 'match-1',
+      now: 1000,
+    });
+    const viewModel = createDrawingGuessViewModel({
+      state,
+      roomCode: 'DG-ONLINE',
+      localPlayerId,
+      now: 1000,
+      transportMode: 'livekit',
+      launchSource: 'games',
+    });
+
+    expect(viewModel.isVoiceRoomSession).toBe(false);
+    expect(viewModel.showOnlineControls).toBe(true);
+    expect(viewModel.showRoomResetControls).toBe(true);
   });
 
   it('creates a local simulated room with local and simulated players', () => {
@@ -152,13 +332,15 @@ describe('Drawing Guess controller model', () => {
       transportMode: 'livekit',
       launchSource: 'voice-room',
       launchTitle: 'Voice room voice-room-1',
-      launchSubtitle: 'Using this voice room id for a separate Drawing Guess LiveKit game connection.',
+      launchSubtitle: 'Joined from the voice room. Stay here while friends join from the invite card.',
     });
 
     expect(viewModel.players.map((player) => player.id)).toEqual([localPlayerId]);
     expect(viewModel.transportMode).toBe('livekit');
     expect(viewModel.launchSource).toBe('voice-room');
     expect(viewModel.launchTitle).toBe('Voice room voice-room-1');
+    expect(viewModel.showOnlineControls).toBe(false);
+    expect(viewModel.showRoomResetControls).toBe(false);
   });
 
   it('uses release-ready connection labels for online connection states', () => {

@@ -10,6 +10,9 @@ import {
   AdminAdministrator,
   AdminAuditEventRow,
   AdminDashboardRequestError,
+  AdminDirectChatAction,
+  AdminDirectChatEvidence,
+  AdminDirectChatEvidenceSnapshot,
   AdminPageInfo,
   AdminReportAction,
   AdminReportFilters,
@@ -18,8 +21,11 @@ import {
   AdminReportSeverity,
   AdminReportStatusFilter,
   AdminReportSummary,
+  DIRECT_CHAT_REPORT_SOURCE,
+  executeAdminDirectChatAction,
   executeAdminReportAction,
   requestAdminAdministrators,
+  requestAdminDirectChatEvidence,
   requestAdminReportDetail,
   requestAdminReportsPage,
   requestAdminReportSummary,
@@ -305,6 +311,7 @@ function ReportDrawer({ administrators, onChanged, onClose, reportId, user }: { 
             <section className="report-drawer-summary"><div className="report-drawer-badges"><SeverityBadge severity={state.report.severity} /><AdminStatusBadge tone={state.report.status === 'resolved' ? 'success' : state.report.status === 'triage' ? 'warning' : 'danger'}>{reportStatusLabel(state.report.status as AdminReportStatusFilter)}</AdminStatusBadge><SlaBadge report={state.report} /></div><h4>{state.report.reason || 'بلاغ بلا وصف'}</h4><p>{state.report.subjectType ? `نوع المحتوى: ${state.report.subjectType}` : 'لم يُرفق نوع محتوى.'}</p>{state.report.resolutionNote ? <div className="report-resolution-note"><small>قرار الإغلاق</small><strong>{state.report.resolutionNote}</strong></div> : null}</section>
             <section className="report-context-grid"><ContextItem label="المبلّغ" value={identityLabel(state.identities.reporter)} /><ContextItem label="المستخدم المستهدف" value={identityLabel(state.identities.target)} /><ContextItem label="Public ID للمبلّغ" value={state.identities.reporter.publicId || state.report.reporterPublicId || 'غير متاح'} /><ContextItem label="Public ID للمستهدف" value={state.identities.target.publicId || state.report.targetPublicId || 'غير متاح'} /><ContextItem label="الغرفة" value={state.report.roomId || 'لا توجد غرفة'} /><ContextItem label="المصدر" value={sourceLabel(state.report.source)} /><ContextItem label="تاريخ الإنشاء" value={formatDateTime(state.report.createdAt)} /><ContextItem label="آخر تحديث" value={formatDateTime(state.report.updatedAt)} /></section>
             <section className="report-evidence-panel"><div className="report-panel-heading"><div><p className="eyebrow">سياق البلاغ</p><h4>المحتوى والأدلة</h4></div><span>{state.report.evidence.length.toLocaleString('ar-IQ')} مرفقات</span></div>{state.report.contentExcerpt ? <blockquote>{state.report.contentExcerpt}</blockquote> : <p className="report-history-empty">لم تُحفظ معاينة نصية للمحتوى.</p>}{state.report.evidence.length ? <div className="report-evidence-list">{state.report.evidence.map((item, index) => <a href={item.url} key={`${item.url}-${index}`} rel="noreferrer" target="_blank"><span aria-hidden="true">↗</span><div><strong>{item.label}</strong><small>{item.kind}</small></div></a>)}</div> : <p className="report-history-empty">لا توجد روابط أدلة مرفقة بهذا البلاغ.</p>}</section>
+            {state.report.source === DIRECT_CHAT_REPORT_SOURCE ? <DirectChatEvidenceSection onChanged={async () => { await Promise.all([loadDetail(), onChanged()]); }} report={state.report} user={user} /> : null}
             <section className="report-decision-panel"><div className="report-panel-heading"><div><p className="eyebrow">قرار المراجعة</p><h4>المعالجة والتوثيق</h4></div><span>{state.report.noteCount.toLocaleString('ar-IQ')} ملاحظات</span></div><label>المشرف المسؤول<select onChange={(event) => setAssigneeUid(event.target.value)} value={assigneeUid}><option value="">تعيين لنفسي عند الإجراء</option>{administrators.map((adminUser) => <option key={adminUser.uid} value={adminUser.uid}>{adminLabel(adminUser)}</option>)}</select></label><label>ملاحظة القرار<textarea onChange={(event) => setNote(event.target.value)} placeholder="دوّن سبب القرار والسياق المهم للمشرف التالي…" rows={4} value={note} /></label><div className="report-drawer-actions">{state.report.status !== 'resolved' ? <><button disabled={busy} onClick={() => void runAction('assign')} type="button">تعيين</button><button disabled={busy} onClick={() => void runAction('triage')} type="button">بدء الفرز</button><button className="warning" disabled={busy} onClick={() => void runAction('escalate')} type="button">تصعيد</button><button disabled={busy} onClick={() => void runAction('note')} type="button">حفظ ملاحظة</button><button className="danger" disabled={busy} onClick={() => void runAction('resolve')} type="button">إغلاق البلاغ</button></> : <button className="warning wide" disabled={busy} onClick={() => void runAction('reopen')} type="button">إعادة فتح البلاغ</button>}</div></section>
             <section className="report-history"><div className="report-panel-heading"><div><p className="eyebrow">سجل غير قابل للضياع</p><h4>مسار البلاغ</h4></div><span>{state.history.length.toLocaleString('ar-IQ')} أحداث</span></div>{state.history.length ? <ol>{state.history.map((event) => <li key={event.id}><span className="report-history-dot" /><div><strong>{auditActionLabel(event.action)}</strong><p>{event.note || 'إجراء إداري بلا ملاحظة إضافية.'}</p><small>{event.actorEmail || event.actorUid || 'مشرف'} · {formatDateTime(event.createdAt)}</small></div></li>)}</ol> : <p className="report-history-empty">لم تُسجّل إجراءات على هذا البلاغ بعد.</p>}</section>
           </div>
@@ -314,13 +321,211 @@ function ReportDrawer({ administrators, onChanged, onClose, reportId, user }: { 
   );
 }
 
+type EvidenceState =
+  | { status: 'hidden' }
+  | { status: 'loading' }
+  | { status: 'forbidden' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; evidence: AdminDirectChatEvidence };
+
+function DirectChatEvidenceSection({ onChanged, report, user }: { onChanged: () => Promise<void>; report: AdminReportRow; user: User }) {
+  const { confirm, notify } = useAdminFeedback();
+  const [state, setState] = useState<EvidenceState>({ status: 'hidden' });
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [durationHours, setDurationHours] = useState('72');
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [removedMessageIds, setRemovedMessageIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  // Deliberately not an effect: content is fetched only when a human asks for it with a reason,
+  // because every fetch writes a permanent access record against that reason.
+  async function reveal() {
+    if (reason.trim().length < 2) {
+      notify('اكتب سبب الاطلاع قبل كشف الرسائل', { tone: 'error' });
+      return;
+    }
+    setState({ status: 'loading' });
+    try {
+      const evidence = await requestAdminDirectChatEvidence(user, { reason: reason.trim(), reportId: report.id });
+      setState({ status: 'ready', evidence });
+      setRemovedMessageIds(new Set(evidence.case.removedMessageIds));
+    } catch (error) {
+      if (error instanceof AdminDashboardRequestError && error.status === 403) {
+        setState({ status: 'forbidden' });
+        return;
+      }
+      setState({ status: 'error', message: error instanceof Error ? error.message : 'تعذّر كشف أدلة الرسائل.' });
+    }
+  }
+
+  async function runAction(action: AdminDirectChatAction, legalHold = false) {
+    if (state.status !== 'ready') return;
+    if (note.trim().length < 2) {
+      notify('أضف ملاحظة توثّق سبب الإجراء', { tone: 'error' });
+      return;
+    }
+    const messageIds = [...selectedMessageIds];
+    if (action === 'remove-direct-message' && messageIds.length === 0) {
+      notify('حدّد الرسائل المبلّغ عنها المطلوب إزالتها', { tone: 'error' });
+      return;
+    }
+    const hours = Number(durationHours);
+    const bounded = Number.isSafeInteger(hours) && hours >= 1 && hours <= 8760 ? hours : undefined;
+    const approved = await confirm({
+      confirmLabel: directChatActionLabel(action, legalHold),
+      description: directChatActionWarning(action, legalHold, bounded, messageIds.length),
+      destructive: action === 'remove-direct-message' || action === 'restrict-direct-chat',
+      title: `${directChatActionLabel(action, legalHold)}؟`,
+    });
+    if (!approved) return;
+    setBusy(true);
+    try {
+      await executeAdminDirectChatAction(user, {
+        directChatAction: action,
+        ...(action === 'restrict-direct-chat' && bounded !== undefined ? { durationHours: bounded } : {}),
+        legalHold,
+        messageIds,
+        note: note.trim(),
+        reportId: report.id,
+      });
+      if (action === 'remove-direct-message') {
+        setRemovedMessageIds((current) => new Set([...current, ...messageIds]));
+        setSelectedMessageIds(new Set());
+      }
+      setNote('');
+      notify('تم تنفيذ إجراء الرسائل المباشرة', { description: directChatActionLabel(action, legalHold), tone: 'success' });
+      await onChanged();
+    } catch (error) {
+      notify('تعذّر تنفيذ إجراء الرسائل المباشرة', { description: error instanceof Error ? error.message : undefined, tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleMessage(messageId: string) {
+    setSelectedMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) next.delete(messageId); else next.add(messageId);
+      return next;
+    });
+  }
+
+  return (
+    <section className="report-dm-panel">
+      <div className="report-panel-heading"><div><p className="eyebrow">رسائل مباشرة · {DIRECT_CHAT_REPORT_SOURCE}</p><h4>أدلة المحادثة الخاصة</h4></div><span>مالك المنصة والمشرف الأعلى فقط</span></div>
+      <p className="report-dm-notice">لقطة الأدلة محفوظة على الخادم ولا تتغيّر بإزالة الرسائل. كل عملية كشف تُسجّل باسمك مع السبب في سجل التدقيق.</p>
+
+      {state.status === 'hidden' || state.status === 'error' ? (
+        <div className="report-dm-reveal">
+          <label>سبب الاطلاع<input onChange={(event) => setReason(event.target.value)} placeholder="مثال: مراجعة بلاغ تهديد مصعّد" value={reason} /></label>
+          <button className="secondary-button compact" onClick={() => void reveal()} type="button">كشف الأدلة وتسجيل الاطلاع</button>
+          {state.status === 'error' ? <p className="report-dm-error">{state.message}</p> : null}
+        </div>
+      ) : null}
+
+      {state.status === 'loading' ? <div className="report-drawer-state"><span className="state-spinner" /> جارٍ تجهيز الأدلة…</div> : null}
+
+      {state.status === 'forbidden' ? (
+        <div className="report-dm-forbidden">
+          <strong>دورك الإداري لا يسمح بفتح أدلة الرسائل الخاصة</strong>
+          <p>الاطلاع على محتوى الرسائل المباشرة محصور بمالك المنصة والمشرف الأعلى. يمكنك متابعة فرز البلاغ وتعيينه وتصعيده وإغلاقه من دون قراءة المحتوى.</p>
+        </div>
+      ) : null}
+
+      {state.status === 'ready' ? (
+        <>
+          <div className="report-dm-meta">
+            <ContextItem label="التصنيف" value={state.evidence.case.category || 'غير محدد'} />
+            <ContextItem label="عدد اللقطات" value={state.evidence.snapshots.length.toLocaleString('ar-IQ')} />
+            <ContextItem label="مرفقات متاحة" value={`${state.evidence.mediaGranted.toLocaleString('ar-IQ')} من ${state.evidence.case.attachmentCount.toLocaleString('ar-IQ')}`} />
+            <ContextItem label="حفظ قانوني" value={state.evidence.case.legalHold ? 'مفعّل' : 'غير مفعّل'} />
+            <ContextItem label="حالة الملف" value={state.evidence.case.status || 'غير محدد'} />
+            <ContextItem label="صلاحية روابط المرفقات" value={formatDateTime(state.evidence.mediaUrlExpiresAt)} />
+          </div>
+
+          <ol className="report-dm-snapshots">
+            {state.evidence.snapshots.map((snapshot) => (
+              <li className={`${snapshot.selected ? 'reported' : ''} ${removedMessageIds.has(snapshot.messageId) ? 'removed' : ''}`.trim()} key={snapshot.messageId}>
+                <header>
+                  {snapshot.selected ? <label><input checked={selectedMessageIds.has(snapshot.messageId)} disabled={removedMessageIds.has(snapshot.messageId)} onChange={() => toggleMessage(snapshot.messageId)} type="checkbox" /><span>مبلّغ عنها</span></label> : <span className="report-dm-context-tag">سياق</span>}
+                  <strong>{snapshot.senderUid === state.evidence.case.reporterUid ? 'المبلّغ' : snapshot.senderUid === state.evidence.case.targetUid ? 'المستخدم المبلّغ عنه' : 'النظام'}</strong>
+                  <small>#{snapshot.sequence.toLocaleString('ar-IQ')} · {formatDateTime(snapshot.createdAt)}</small>
+                  {removedMessageIds.has(snapshot.messageId) ? <span className="report-dm-removed-tag">أُزيلت</span> : null}
+                  {snapshot.attachmentId ? <span className="report-dm-media-tag">{directChatMediaStateLabel(snapshot)}</span> : null}
+                </header>
+                {snapshot.text ? <p>{snapshot.text}</p> : null}
+                <DirectChatEvidenceMedia snapshot={snapshot} />
+                {!snapshot.text && !snapshot.mediaUrl ? <p className="report-history-empty">{snapshot.kind === 'system' ? 'حدث نظامي بلا نص.' : snapshot.attachmentId ? directChatMediaUnavailableLabel(snapshot) : 'رسالة بلا محتوى نصي.'}</p> : null}
+              </li>
+            ))}
+            {state.evidence.snapshots.length === 0 ? <li><p className="report-history-empty">لم تُحفظ لقطات لهذا البلاغ.</p></li> : null}
+          </ol>
+
+          <div className="report-dm-actions">
+            <label>ملاحظة الإجراء<textarea onChange={(event) => setNote(event.target.value)} placeholder="دوّن الأساس الذي بُني عليه القرار…" rows={3} value={note} /></label>
+            <label>مدة التقييد بالساعات<input max={8760} min={1} onChange={(event) => setDurationHours(event.target.value)} type="number" value={durationHours} /></label>
+            <div className="report-drawer-actions">
+              <button disabled={busy} onClick={() => void runAction('dismiss')} type="button">رفض البلاغ وإغلاقه</button>
+              <button className="danger" disabled={busy} onClick={() => void runAction('remove-direct-message')} type="button">إزالة الرسائل المحددة ({selectedMessageIds.size.toLocaleString('ar-IQ')})</button>
+              <button className="danger" disabled={busy} onClick={() => void runAction('restrict-direct-chat')} type="button">تقييد الرسائل المباشرة</button>
+              <button disabled={busy} onClick={() => void runAction('clear-direct-chat-restriction')} type="button">رفع التقييد</button>
+              <button className="warning" disabled={busy} onClick={() => void runAction('set-direct-chat-legal-hold', !state.evidence.case.legalHold)} type="button">{state.evidence.case.legalHold ? 'إلغاء الحفظ القانوني' : 'تفعيل الحفظ القانوني'}</button>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+// Staff need to know whether they are looking at the preserved evidence copy or at the live
+// conversation object, because only the copy is guaranteed to outlive retention cleanup.
+function directChatMediaStateLabel(snapshot: AdminDirectChatEvidenceSnapshot) {
+  if (snapshot.mediaIsolated) return 'نسخة أدلة محفوظة';
+  if (snapshot.mediaState === 'missing') return 'المرفق مفقود';
+  if (snapshot.mediaState === 'pending') return 'بانتظار الحفظ';
+  return snapshot.mediaHeld ? 'محتجز مؤقتاً' : 'غير محتجز';
+}
+
+function directChatMediaUnavailableLabel(snapshot: AdminDirectChatEvidenceSnapshot) {
+  if (snapshot.mediaState === 'missing') return 'لم يعد المرفق موجوداً ولم تُحفظ نسخة منه.';
+  if (snapshot.mediaState === 'pending') return 'لم تُحفظ نسخة الأدلة بعد؛ حاول لاحقاً.';
+  return 'المرفق غير متاح للعرض.';
+}
+
+function DirectChatEvidenceMedia({ snapshot }: { snapshot: AdminDirectChatEvidenceSnapshot }) {
+  if (!snapshot.mediaUrl) return null;
+  if (snapshot.kind === 'voice-note') return <audio className="report-dm-audio" controls preload="none" src={snapshot.mediaUrl} />;
+  return <img alt={`مرفق الرسالة ${snapshot.messageId}`} className="report-dm-image" loading="lazy" src={snapshot.mediaUrl} />;
+}
+
+function directChatActionLabel(action: AdminDirectChatAction, legalHold: boolean) {
+  const labels: Record<AdminDirectChatAction, string> = {
+    'clear-direct-chat-restriction': 'رفع تقييد الرسائل المباشرة',
+    dismiss: 'رفض البلاغ وإغلاقه',
+    'remove-direct-message': 'إزالة الرسائل المبلّغ عنها',
+    'restrict-direct-chat': 'تقييد الرسائل المباشرة',
+    'set-direct-chat-legal-hold': legalHold ? 'تفعيل الحفظ القانوني' : 'إلغاء الحفظ القانوني',
+  };
+  return labels[action];
+}
+
+function directChatActionWarning(action: AdminDirectChatAction, legalHold: boolean, durationHours: number | undefined, messageCount: number) {
+  if (action === 'dismiss') return 'سيُغلق ملف الأدلة والبلاغ الأصلي معاً بالملاحظة كقرار إغلاق.';
+  if (action === 'remove-direct-message') return `سيتم إخفاء ${messageCount.toLocaleString('ar-IQ')} رسالة لدى الطرفين مع الإبقاء على لقطة الأدلة كما هي. لا يمكن إزالة رسائل خارج ما بُلّغ عنه.`;
+  if (action === 'restrict-direct-chat') return `التقييد يمنع المستخدم من إرسال أي رسالة مباشرة ومن استقبالها من أي شخص، ${durationHours === undefined ? 'دون تاريخ انتهاء' : `لمدة ${durationHours.toLocaleString('ar-IQ')} ساعة`}. الإبلاغ يبقى متاحاً له.`;
+  if (action === 'clear-direct-chat-restriction') return 'سيعود المستخدم إلى إرسال واستقبال الرسائل المباشرة مباشرةً.';
+  return legalHold ? 'سيُمنع حذف الأدلة تلقائياً وتُمدّد مدة الحفظ إلى 180 يوماً على الأقل.' : 'ستعود مدة الحفظ إلى سياسة الاحتفاظ الافتراضية.';
+}
+
 function ContextItem({ label, value }: { label: string; value: string }) { return <div><small>{label}</small><strong title={value}>{value}</strong></div>; }
 function identityLabel(identity: AdminReportIdentity) { return identity.displayName ? `${identity.displayName} · ${identity.uid}` : identity.uid || 'غير معروف'; }
 function SeverityBadge({ severity }: { severity: AdminReportSeverity }) { return <span className={`report-severity severity-${severity}`}><i />{severity === 'critical' ? 'حرج' : severity === 'high' ? 'عالٍ' : severity === 'medium' ? 'متوسط' : 'منخفض'}</span>; }
 function SlaBadge({ report }: { report: AdminReportRow }) { const sla = reportSla(report); return <span className={`report-sla tone-${sla.tone}`}>{sla.label}</span>; }
 function reportSla(report: AdminReportRow) { if (report.status === 'resolved') return { label: 'مغلق', tone: 'resolved' }; const hours = report.createdAt ? (Date.now() - new Date(report.createdAt).getTime()) / 36e5 : 0; if (hours >= 24) return { label: `متأخر ${Math.floor(hours).toLocaleString('ar-IQ')}س`, tone: 'overdue' }; if (hours >= 12) return { label: `متبقي ${Math.ceil(24 - hours).toLocaleString('ar-IQ')}س`, tone: 'warning' }; return { label: 'ضمن الوقت', tone: 'healthy' }; }
 function reportStatusLabel(status: AdminReportStatusFilter) { return status === 'triage' ? 'قيد الفرز' : status === 'resolved' ? 'تم الحل' : 'مفتوح'; }
-function sourceLabel(source: string) { const labels: Record<string, string> = { chat: 'المحادثات', room: 'الغرف', user: 'ملف مستخدم', voice: 'الصوت' }; return labels[source.toLowerCase()] || source || 'غير محدد'; }
+function sourceLabel(source: string) { const labels: Record<string, string> = { chat: 'المحادثات', [DIRECT_CHAT_REPORT_SOURCE]: 'رسائل مباشرة', room: 'الغرف', user: 'ملف مستخدم', voice: 'الصوت' }; return labels[source.toLowerCase()] || source || 'غير محدد'; }
 function adminLabel(adminUser: AdminAdministrator) { return adminUser.displayName || adminUser.email || adminUser.uid; }
 function administratorName(administrators: AdminAdministrator[], uid: string) { if (!uid) return 'غير معيّن'; const found = administrators.find((item) => item.uid === uid); return found ? adminLabel(found) : uid.slice(0, 12); }
 function actionLabel(action: AdminReportAction) { const labels: Record<AdminReportAction, string> = { assign: 'تعيين البلاغ', escalate: 'تصعيد البلاغ', note: 'حفظ ملاحظة', reopen: 'إعادة فتح البلاغ', resolve: 'إغلاق البلاغ', triage: 'بدء الفرز' }; return labels[action]; }

@@ -7,6 +7,7 @@ export const STORE_CATEGORIES = [
   'nameplates',
   'cosmetic-badges',
   'seat-effects',
+  'couple-effects',
   'stickers',
   'cars',
   'custom-ids',
@@ -60,11 +61,18 @@ export type StoreEntryPresentation = {
   visualFormat?: 'lottie-json' | 'mp4';
 };
 
+export type StoreCoupleEffectPresentation = {
+  borderMode: 'off' | 'static' | 'looping';
+  entranceMode: 'off' | 'static' | 'one-shot';
+  profileMode: 'off' | 'static' | 'looping';
+};
+
 export type StoreCatalogItem = {
   availability: StoreAvailability;
   category: StoreCategory;
   customId?: string;
   cosmeticAsset?: { assetId: string; assetVersionId: string };
+  coupleEffectPresentation?: StoreCoupleEffectPresentation;
   description: LocalizedStoreText;
   duration: StoreDuration;
   entryPresentation?: StoreEntryPresentation;

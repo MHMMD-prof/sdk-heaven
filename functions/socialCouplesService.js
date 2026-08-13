@@ -5,6 +5,8 @@ const {
   normalizeCoupleTargetInput,
   resolveCoupleRelationship,
 } = require('./socialCouplesCore');
+const { createRelationshipId } = require('./coupleEffectsCore');
+const { applyDissolutionClear, prepareDissolutionClear } = require('./coupleEffectsService');
 const { inspectPublicProfile } = require('./socialProfileCore');
 
 const COUPLE_REQUEST_LIMIT = 20;
@@ -226,9 +228,10 @@ async function mutateCouple({ action, db, fieldValue, input, requestId, uid }) {
       else if (actorMembership.exists || targetMembership.exists) return { errorCode: 'CONFLICT' };
       else {
         const memberUids = [uid, targetUid].sort();
-        transaction.create(refs.couple, { createdAt: timestamp, level: 1, memberUids, updatedAt: timestamp });
-        transaction.create(refs.actorMembership, { coupleId: pairId, createdAt: timestamp, partnerUid: targetUid, uid, updatedAt: timestamp });
-        transaction.create(refs.targetMembership, { coupleId: pairId, createdAt: timestamp, partnerUid: uid, uid: targetUid, updatedAt: timestamp });
+        const relationshipId = createRelationshipId(pairId, requestId);
+        transaction.create(refs.couple, { createdAt: timestamp, level: 1, memberUids, relationshipId, updatedAt: timestamp });
+        transaction.create(refs.actorMembership, { coupleId: pairId, createdAt: timestamp, partnerUid: targetUid, relationshipId, uid, updatedAt: timestamp });
+        transaction.create(refs.targetMembership, { coupleId: pairId, createdAt: timestamp, partnerUid: uid, relationshipId, uid: targetUid, updatedAt: timestamp });
         transaction.delete(refs.request);
         transaction.update(refs.actorProfile, { coupleLevel: 1, updatedAt: timestamp });
         transaction.update(refs.targetProfile, { coupleLevel: 1, updatedAt: timestamp });
@@ -244,6 +247,22 @@ async function mutateCouple({ action, db, fieldValue, input, requestId, uid }) {
     } else {
       const membershipsMatch = actorMembership.data()?.coupleId === pairId && targetMembership.data()?.coupleId === pairId;
       if (currentStatus === 'coupled' && membershipsMatch) {
+        const clearState = await prepareDissolutionClear({
+          couple: couple.data(),
+          coupleId: pairId,
+          db,
+          transaction,
+        });
+        applyDissolutionClear({
+          auditActorUid: uid,
+          auditReason: 'user-dissolution',
+          clearState,
+          coupleId: pairId,
+          db,
+          fieldValue,
+          memberUids: [uid, targetUid].sort(),
+          transaction,
+        });
         transaction.delete(refs.couple);
         transaction.delete(refs.actorMembership);
         transaction.delete(refs.targetMembership);

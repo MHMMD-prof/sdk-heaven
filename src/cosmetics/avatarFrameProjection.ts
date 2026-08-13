@@ -4,9 +4,10 @@ export type CosmeticAssetReference = {
 };
 
 export type AvatarFrameProjection = {
-  assetUrl: string;
+  assetUrl?: string;
   canonicalAsset?: CosmeticAssetReference;
   itemId: string;
+  source?: 'custom';
 };
 
 const ITEM_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{2,79}$/;
@@ -17,6 +18,8 @@ export function readAvatarFrameProjection(profile: unknown): AvatarFrameProjecti
   if (!isRecord(profile)) return undefined;
   const legacy = readLegacyFrame(profile.equippedAvatarFrame);
   const cosmetics = isRecord(profile.equippedCosmetics) ? profile.equippedCosmetics : {};
+  const custom = readCustomFrame(cosmetics.avatarFrame);
+  if (custom) return custom;
   const canonical = readCanonicalFrame(cosmetics.avatarFrame);
   if (!legacy) return undefined;
   return {
@@ -29,6 +32,8 @@ export function readAvatarFrameProjection(profile: unknown): AvatarFrameProjecti
 
 export function readProjectedAvatarFrame(value: unknown): AvatarFrameProjection | undefined {
   if (!isRecord(value)) return undefined;
+  const custom = readCustomFrame(value);
+  if (custom) return custom;
   const legacy = readLegacyFrame(value);
   const canonicalAsset = readCosmeticAssetReference(value.canonicalAsset);
   return legacy
@@ -51,6 +56,15 @@ function readCanonicalFrame(value: unknown) {
   const canonicalAsset = readCosmeticAssetReference(value);
   return ITEM_ID_PATTERN.test(itemId) && canonicalAsset
     ? { canonicalAsset, itemId }
+    : undefined;
+}
+
+function readCustomFrame(value: unknown): AvatarFrameProjection | undefined {
+  if (!isRecord(value) || value.source !== 'custom') return undefined;
+  const itemId = readString(value.itemId);
+  const canonicalAsset = readCosmeticAssetReference(value);
+  return ITEM_ID_PATTERN.test(itemId) && canonicalAsset
+    ? { canonicalAsset, itemId, source: 'custom' }
     : undefined;
 }
 

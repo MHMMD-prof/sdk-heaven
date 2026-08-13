@@ -138,6 +138,8 @@ describe('socialProfileCore', () => {
       bio: 'hello',
       giftScore: 9,
       friendCount: 0,
+      followerCount: 0,
+      followingCount: 0,
       coupleLevel: 0,
       moderationStatus: 'suspended',
       avatarModerationStatus: 'clear',

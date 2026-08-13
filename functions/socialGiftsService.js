@@ -66,7 +66,7 @@ async function sendGift({ db, fieldValue, input, requestId, uid }) {
   const validation = normalizeSendGiftInput(input, uid);
   if (!validation.ok) return { errorCode: validation.code };
   const { giftId, message, targetUid } = validation.value;
-  return db.runTransaction(async (transaction) => {
+  const committed = await db.runTransaction(async (transaction) => {
     const refs = {
       blockedByRecipient: db.doc(`blocks/${targetUid}/blocked/${uid}`),
       blockedBySender: db.doc(`blocks/${uid}/blocked/${targetUid}`),
@@ -171,8 +171,68 @@ async function sendGift({ db, fieldValue, input, requestId, uid }) {
       uid,
       windowStartedAt: insideWindow ? rateData.windowStartedAt : timestamp,
     });
-    return { result };
+    return { result, projection: {
+      eventId: result.eventId,
+      priceCoins: item.price,
+      recipientCountryCode: typeof recipient.countryCode === 'string' ? recipient.countryCode : '',
+      recipientDisplayName: recipient.displayName,
+      recipientPublicId: recipient.publicId,
+      recipientUid: targetUid,
+      scoreValue: item.scoreValue,
+      senderCountryCode: typeof sender.countryCode === 'string' ? sender.countryCode : '',
+      senderDisplayName: sender.displayName,
+      senderPublicId: sender.publicId,
+      senderUid: uid,
+    } };
   });
+
+  if (committed?.projection) {
+    void applyGiftLeaderboardContributionSafely({
+      contribution: committed.projection,
+      db,
+      fieldValue,
+    });
+    void recordSocialGiftMissionProgressSafely({
+      db,
+      fieldValue,
+      uid,
+    });
+  }
+  return committed?.result ? { result: committed.result } : committed;
+}
+
+async function applyGiftLeaderboardContributionSafely({ contribution, db, fieldValue }) {
+  try {
+    const { applyGiftLeaderboardContribution } = require('./growthLeaderboardService');
+    await applyGiftLeaderboardContribution({
+      contribution: { ...contribution, nowMs: Date.now() },
+      db,
+      fieldValue,
+    });
+  } catch (error) {
+    console.error('[socialGifts] leaderboard projection failed', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      eventId: contribution?.eventId,
+    });
+  }
+}
+
+async function recordSocialGiftMissionProgressSafely({ db, fieldValue, uid }) {
+  try {
+    const { recordOpsMissionProgressSafely } = require('./opsEventsService');
+    await recordOpsMissionProgressSafely({
+      amount: 1,
+      db,
+      fieldValue,
+      kind: 'send_gifts',
+      uid,
+    });
+  } catch (error) {
+    console.error('[socialGifts] mission progress failed', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      uid,
+    });
+  }
 }
 
 function mapGiftCatalogItemFromDocument(document) {

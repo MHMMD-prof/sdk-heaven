@@ -4,20 +4,30 @@
   },
   "build": {
     "preview": {
+      "environment": "preview",
       "android": {
         "buildType": "apk"
+      },
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
       }
     },
     "production": {
+      "autoIncrement": true,
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_PERSONAL_CHAT_VISUAL_FIXTURE": "0",
         "EXPO_PUBLIC_VOICE_ALLOW_MOCK_PROVIDER": "false",
         "EXPO_PUBLIC_VOICE_ALLOW_MOCK_ROOMS": "false",
         "EXPO_PUBLIC_VOICE_DEBUG": "false"
       },
       "android": {
         "buildType": "app-bundle"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
       }
     }
   }

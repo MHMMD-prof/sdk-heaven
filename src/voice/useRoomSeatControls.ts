@@ -31,6 +31,14 @@ export function useRoomSeatControls(room: VoiceRoom) {
         sessionId: request.sessionId ?? sessionId,
       }, providerConfig.liveKit);
     } catch (error) {
+      if (
+        request.action === 'resume-seat'
+        && error instanceof RoomCommandRequestError
+        && error.code === 'SEAT_RESERVATION_MISSING'
+      ) {
+        setErrorMessage(undefined);
+        return undefined;
+      }
       setErrorMessage(error instanceof RoomCommandRequestError ? error.message : 'تعذر تنفيذ أمر مقعد الميكروفون.');
       throw error;
     } finally {

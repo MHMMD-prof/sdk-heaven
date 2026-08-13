@@ -1,21 +1,30 @@
 import { User } from 'firebase/auth';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
   AdminAdministrator,
   AdminDashboardSession,
+  AdminDirectChatOpsStatus,
+  AdminDirectChatRetention,
+  AdminDirectChatRetentionBounds,
   AdminPreferences,
   AdminRole,
   AdminSettings,
+  emergencyDisableAdminCosmeticsRenderer,
   executeAdministratorAction,
   requestAdminAdministrators,
   requestAdminSettings,
+  requestDirectChatOpsStatus,
+  requestDirectChatRetention,
   updateAdminFeatureFlag,
+  updateDirectChatRetention,
   updateRoomGiftPolicy,
   updateAdminSettings,
 } from './adminDashboardApi';
+import { readAdminQueryParameter, setAdminQueryParameter } from './adminDeepLinks';
 import { useAdminFeedback } from './AdminFeedback';
-import { AdminCollectionState, AdminSectionHeader, AdminStatusBadge, AdminSurface } from './AdminUi';
+import { AdminCollectionState, AdminStatusBadge, AdminSurface } from './AdminUi';
+import { SETTINGS_TAB_KEYS, settingsTabDescriptions, settingsTabLabels, SettingsTab, parseSettingsTab } from './settingsTabs';
 import { useAdminDialogFocus } from './useAdminDialogFocus';
 
 const roleLabels: Record<AdminRole, string> = {
@@ -32,6 +41,9 @@ const flagLabels: Record<keyof AdminSettings['featureFlags'], { description: str
   couples: { label: 'الارتباط', description: 'ميزات الارتباط ومستوياته.' },
   pushNotifications: { label: 'الإشعارات الفورية', description: 'تسليم الإشعارات خارج التطبيق.' },
   representativeTransfers: { label: 'بوابة الوكلاء', description: 'إظهار بوابة الوكلاء والسماح بإنشاء جلسات تحويل جديدة.' },
+  directMessages: { label: 'الرسائل المباشرة', description: 'إخفاء المحادثات الخاصة بالكامل عند الإيقاف. طوارئ لإيقاف كل الرسائل.' },
+  directMessageRequests: { label: 'طلبات الرسائل', description: 'طلبات الرسائل من غير الأصدقاء. إيقافها يبقي المحادثات المقبولة تعمل.' },
+  directMessageMedia: { label: 'وسائط الرسائل', description: 'الصور والرسائل الصوتية والملصقات. إيقافها يبقي النص يعمل.' },
 };
 
 type State = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; administrators: AdminAdministrator[]; settings: AdminSettings };
@@ -40,6 +52,11 @@ type PendingGovernanceAction =
   | { enabled: boolean; flag: keyof AdminSettings['featureFlags']; kind: 'feature' };
 
 export function SettingsPanel({ session, user }: { session: AdminDashboardSession; user: User }) {
+  const initialTab = useMemo(
+    () => parseSettingsTab(readAdminQueryParameter(window.location.search, 'tab', 40)),
+    [],
+  );
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [state, setState] = useState<State>({ status: 'loading' });
   const [email, setEmail] = useState('');
   const [newRole, setNewRole] = useState<AdminRole>('support');
@@ -49,9 +66,20 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
   const [commissionReason, setCommissionReason] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingGovernanceAction | null>(null);
   const [actionReason, setActionReason] = useState('');
+  const [opsStatus, setOpsStatus] = useState<AdminDirectChatOpsStatus | null>(null);
+  const [retention, setRetention] = useState<AdminDirectChatRetention | null>(null);
+  const [messageRetentionDays, setMessageRetentionDays] = useState('');
+  const [evidenceRetentionDays, setEvidenceRetentionDays] = useState('');
+  const [legalHoldRetentionDays, setLegalHoldRetentionDays] = useState('');
+  const [retentionReason, setRetentionReason] = useState('');
   const { notify } = useAdminFeedback();
   const canManageAdmins = session.permissions.includes('admins:manage');
   const canManageFlags = session.permissions.includes('flags:manage');
+
+  function switchTab(next: SettingsTab) {
+    setTab(next);
+    setAdminQueryParameter('tab', next === 'account' ? '' : next);
+  }
 
   async function load() {
     setState({ status: 'loading' });
@@ -60,6 +88,25 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
       setState({ status: 'ready', administrators, settings });
       setCommissionBps(String(settings.roomGiftPolicy.commissionBps));
       applyDisplayPreferences(settings.preferences);
+      if (canManageFlags) {
+        try {
+          const [nextRetention, nextOps] = await Promise.all([
+            requestDirectChatRetention(user),
+            requestDirectChatOpsStatus(user),
+          ]);
+          setRetention(nextRetention);
+          setOpsStatus(nextOps);
+          setMessageRetentionDays(String(nextRetention.policy.messageRetentionDays));
+          setEvidenceRetentionDays(String(nextRetention.policy.evidenceRetentionDays));
+          setLegalHoldRetentionDays(String(nextRetention.policy.legalHoldRetentionDays));
+        } catch {
+          setRetention(null);
+          setOpsStatus(null);
+        }
+      } else {
+        setRetention(null);
+        setOpsStatus(null);
+      }
     } catch (error) {
       setState({ status: 'error', message: error instanceof Error ? error.message : 'تعذّر تحميل إعدادات الإدارة.' });
     }
@@ -160,6 +207,25 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
     setPendingAction({ enabled, flag, kind: 'feature' });
   }
 
+  async function disableCosmeticsRenderer(flag: keyof AdminSettings['cosmeticsRendererFlags']) {
+    if (!canManageFlags || state.status !== 'ready' || !state.settings.cosmeticsRendererFlags[flag]) return;
+    const disableReason = window.prompt('سبب التعطيل الطارئ (لا يمكن لهذه اللوحة تفعيل المفتاح)', '') || '';
+    if (disableReason.trim().length < 3) {
+      notify('سبب التعطيل مطلوب', { tone: 'error' });
+      return;
+    }
+    setBusyKey(`cosmetics:${flag}`);
+    try {
+      await emergencyDisableAdminCosmeticsRenderer(user, { flag, reason: disableReason.trim() });
+      notify('عُطّل عارض تأثير الارتباط', { description: 'تم فرض false وتسجيل الإجراء. إعادة التفعيل غير متاحة من تحكم الطوارئ.', tone: 'success' });
+      await load();
+    } catch (error) {
+      notify('تعذّر تعطيل العارض', { description: error instanceof Error ? error.message : '', tone: 'error' });
+    } finally {
+      setBusyKey('');
+    }
+  }
+
   async function saveRoomGiftPolicy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (state.status !== 'ready' || !canManageFlags) return;
@@ -189,19 +255,60 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
     }
   }
 
+  async function saveRetentionPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canManageFlags || !retention) return;
+    if (retentionReason.trim().length < 3) {
+      notify('سبب التغيير مطلوب', { description: 'اكتب سبباً واضحاً لتسجيله في سجل التدقيق.', tone: 'error' });
+      return;
+    }
+    const messageDays = Number(messageRetentionDays);
+    const evidenceDays = Number(evidenceRetentionDays);
+    const legalHoldDays = Number(legalHoldRetentionDays);
+    if (![messageDays, evidenceDays, legalHoldDays].every((value) => Number.isInteger(value) && value >= 1)) {
+      notify('أيام الاحتفاظ غير صالحة', { description: 'استخدم أعداداً صحيحة موجبة لكل حقل.', tone: 'error' });
+      return;
+    }
+    setBusyKey('direct-chat-retention');
+    try {
+      const result = await updateDirectChatRetention(user, {
+        evidenceRetentionDays: evidenceDays,
+        legalHoldRetentionDays: legalHoldDays,
+        messageRetentionDays: messageDays,
+        reason: retentionReason.trim(),
+      });
+      setRetentionReason('');
+      notify(result.unchanged ? 'سياسة الاحتفاظ دون تغيير' : 'حُدّثت سياسة الاحتفاظ', {
+        description: result.unchanged
+          ? 'القيم بعد التقييد مطابقة للحالية؛ سُجّل الطلب دون كتابة جديدة.'
+          : 'طُبّقت القيم ضمن الحدود الصلبة وسُجّل before/after في التدقيق.',
+        tone: 'success',
+      });
+      await load();
+    } catch (error) {
+      notify('تعذّر تحديث سياسة الاحتفاظ', { description: error instanceof Error ? error.message : '', tone: 'error' });
+    } finally {
+      setBusyKey('');
+    }
+  }
+
   if (state.status !== 'ready') {
     return <AdminCollectionState children={null} empty={false} emptyMessage="" error={state.status === 'error' ? state.message : undefined} loading={state.status === 'loading'} loadingMessage="جارٍ تحميل مركز الإعدادات…" onRetry={() => void load()} />;
   }
 
   const { administrators, settings } = state;
   return (
-    <div className="settings-page settings-command-center">
-      <AdminSectionHeader
-        actions={<button className="secondary-button compact" onClick={() => void load()} type="button">تحديث البيانات</button>}
-        description="إدارة الصلاحيات، الجلسات، التنبيهات ومفاتيح المنصة من مركز واحد موثّق."
-        eyebrow="الحوكمة والأمان"
-        title="مركز إعدادات الإدارة"
-      />
+    <div className="economy-page settings-page settings-command-center" dir="rtl">
+      <header className="economy-hero">
+        <div>
+          <p className="eyebrow">الحوكمة والأمان</p>
+          <h2>مركز إعدادات الإدارة</h2>
+          <p>إدارة الصلاحيات، الجلسات، التنبيهات ومفاتيح المنصة من مركز واحد موثّق.</p>
+        </div>
+        <div className="economy-hero-actions">
+          <button className="secondary-button compact" onClick={() => void load()} type="button">تحديث البيانات</button>
+        </div>
+      </header>
 
       <div className="settings-kpis">
         <SettingsKpi label="المسؤولون" value={String(administrators.length)} hint="حسابات بصلاحية فعّالة" />
@@ -210,127 +317,282 @@ export function SettingsPanel({ session, user }: { session: AdminDashboardSessio
         <SettingsKpi label="حالة الجلسة" value={settings.session.emailVerified ? 'موثّقة' : 'غير موثّقة'} hint={formatDate(settings.session.lastSignInAt)} />
       </div>
 
-      <div className="settings-grid settings-primary-grid">
-        <AdminSurface className="settings-card settings-account-card">
-          <SettingsHeading icon="♙" title="ملف المسؤول" description="هوية الجلسة والدور الفعلي من Firebase." />
-          <dl className="settings-details">
-            <div><dt>البريد</dt><dd dir="ltr">{session.email || user.email || '—'}</dd></div>
-            <div><dt>الدور</dt><dd><AdminStatusBadge tone="success">{roleLabels[session.role]}</AdminStatusBadge></dd></div>
-            <div><dt>آخر دخول</dt><dd>{formatDate(settings.session.lastSignInAt)}</dd></div>
-            <div><dt>إنشاء الحساب</dt><dd>{formatDate(settings.session.createdAt)}</dd></div>
-          </dl>
-          <button className="security-action" disabled={Boolean(busyKey)} onClick={() => void runAdministratorAction(administrators.find((item) => item.uid === session.uid) || selfAdministrator(session), 'revoke-sessions')} type="button">سحب جلساتي المفتوحة</button>
-        </AdminSurface>
-
-        <AdminSurface className="settings-card">
-          <SettingsHeading icon="◈" title="تجربة العرض" description="تُحفظ على حسابك وتطبّق فورًا." />
-          <div className="settings-list">
-            <SettingToggle checked={settings.preferences.density === 'compact'} disabled={busyKey === 'preferences'} description="زيادة كثافة الجداول والقوائم التشغيلية." label="كثافة مدمجة" onChange={(checked) => void savePreferences({ ...settings.preferences, density: checked ? 'compact' : 'comfortable' })} />
-            <SettingToggle checked={settings.preferences.reduceMotion} disabled={busyKey === 'preferences'} description="تقليل الانتقالات والحركات الزخرفية." label="تقليل الحركة" onChange={(checked) => void savePreferences({ ...settings.preferences, reduceMotion: checked })} />
-          </div>
-        </AdminSurface>
-
-        <AdminSurface className="settings-card">
-          <SettingsHeading icon="◇" title="تنبيهات العمليات" description="اختَر الأحداث التي تظهر كتنبيهات إدارية." />
-          <div className="settings-list">
-            <SettingToggle checked={settings.preferences.notifications.urgentReports} disabled={busyKey === 'preferences'} description="بلاغات الخطورة العالية والحرجة." label="البلاغات العاجلة" onChange={(checked) => void savePreferences({ ...settings.preferences, notifications: { ...settings.preferences.notifications, urgentReports: checked } })} />
-            <SettingToggle checked={settings.preferences.notifications.flaggedRooms} disabled={busyKey === 'preferences'} description="الغرف التي تحتاج تدخّلًا أو مراجعة." label="الغرف المعلّمة" onChange={(checked) => void savePreferences({ ...settings.preferences, notifications: { ...settings.preferences.notifications, flaggedRooms: checked } })} />
-            <SettingToggle checked={settings.preferences.notifications.operationalFailures} disabled={busyKey === 'preferences'} description="أخطاء الخدمات والعمليات الإدارية." label="الإخفاقات التشغيلية" onChange={(checked) => void savePreferences({ ...settings.preferences, notifications: { ...settings.preferences.notifications, operationalFailures: checked } })} />
-          </div>
-        </AdminSurface>
-
-        <AdminSurface className="settings-card settings-security-card">
-          <SettingsHeading icon="⌾" title="حدود الحماية" description="الضوابط المفعّلة على كل طلب إداري." />
-          <ul className="security-checks">
-            <SecurityCheck title="صلاحيات على الخادم" detail="يُرفض الإجراء قبل قراءة البيانات إن لم يسمح به الدور." />
-            <SecurityCheck title="سجل تغييرات غير قابل للكتابة من العميل" detail="تُحفظ تغييرات الدور والجلسات والميزات مع المنفّذ والسبب." />
-            <SecurityCheck title="حماية مالك النظام" detail="لا يمكن للمالك إزالة نفسه أو إزالة آخر مالك." />
-          </ul>
-        </AdminSurface>
+      <div className="economy-tabs" role="tablist" aria-label="أقسام الإعدادات">
+        {SETTINGS_TAB_KEYS.map((key) => (
+          <button
+            aria-selected={tab === key}
+            className={tab === key ? 'is-active' : undefined}
+            key={key}
+            onClick={() => switchTab(key)}
+            role="tab"
+            type="button"
+          >
+            {settingsTabLabels[key]}
+          </button>
+        ))}
       </div>
 
-      <AdminSurface className="settings-card settings-admin-roster">
-        <SettingsHeading icon="♜" title="المسؤولون والأدوار" description="صلاحيات بأقل امتياز؛ أي تغيير يسحب الجلسات القديمة ويُسجّل فورًا." />
-        {canManageAdmins ? (
-          <form className="admin-invite-form" onSubmit={grantAdministrator}>
-            <input aria-label="بريد الحساب" dir="ltr" onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" required type="email" value={email} />
-            <select aria-label="الدور" onChange={(event) => setNewRole(event.target.value as AdminRole)} value={newRole}>{roles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}</select>
-            <input aria-label="سبب منح الصلاحية" onChange={(event) => setReason(event.target.value)} placeholder="سبب منح الصلاحية" required value={reason} />
-            <button className="secondary-button compact" disabled={busyKey === 'grant'} type="submit">منح الدور لحساب موجود</button>
-          </form>
-        ) : <p className="settings-permission-note">يمكنك مراجعة الفريق، بينما تغيير الأدوار محصور بمالك النظام.</p>}
-        <div className="administrator-table" role="table">
-          <div className="administrator-row administrator-head" role="row"><span>المسؤول</span><span>الدور</span><span>آخر دخول</span><span>الأمان</span></div>
-          {administrators.map((administrator) => (
-            <AdministratorRow
-              administrator={administrator}
-              busyKey={busyKey}
-              canManage={canManageAdmins}
-              currentUid={session.uid}
-              key={administrator.uid}
-              onAction={runAdministratorAction}
-              onSaveScope={saveRegionScope}
-            />
-          ))}
+      <p className="field-hint">{settingsTabDescriptions[tab]}</p>
+
+      {tab === 'account' ? (
+        <div className="settings-grid settings-primary-grid">
+          <AdminSurface className="settings-card settings-account-card">
+            <SettingsHeading icon="♙" title="ملف المسؤول" description="هوية الجلسة والدور الفعلي من Firebase." />
+            <dl className="settings-details">
+              <div><dt>البريد</dt><dd dir="ltr">{session.email || user.email || '—'}</dd></div>
+              <div><dt>الدور</dt><dd><AdminStatusBadge tone="success">{roleLabels[session.role]}</AdminStatusBadge></dd></div>
+              <div><dt>آخر دخول</dt><dd>{formatDate(settings.session.lastSignInAt)}</dd></div>
+              <div><dt>إنشاء الحساب</dt><dd>{formatDate(settings.session.createdAt)}</dd></div>
+            </dl>
+            <button className="security-action" disabled={Boolean(busyKey)} onClick={() => void runAdministratorAction(administrators.find((item) => item.uid === session.uid) || selfAdministrator(session), 'revoke-sessions')} type="button">سحب جلساتي المفتوحة</button>
+          </AdminSurface>
+
+          <AdminSurface className="settings-card">
+            <SettingsHeading icon="◈" title="تجربة العرض" description="تُحفظ على حسابك وتطبّق فورًا." />
+            <div className="settings-list">
+              <SettingToggle checked={settings.preferences.density === 'compact'} disabled={busyKey === 'preferences'} description="زيادة كثافة الجداول والقوائم التشغيلية." label="كثافة مدمجة" onChange={(checked) => void savePreferences({ ...settings.preferences, density: checked ? 'compact' : 'comfortable' })} />
+              <SettingToggle checked={settings.preferences.reduceMotion} disabled={busyKey === 'preferences'} description="تقليل الانتقالات والحركات الزخرفية." label="تقليل الحركة" onChange={(checked) => void savePreferences({ ...settings.preferences, reduceMotion: checked })} />
+            </div>
+          </AdminSurface>
+
+          <AdminSurface className="settings-card">
+            <SettingsHeading icon="◇" title="تنبيهات العمليات" description="اختَر الأحداث التي تظهر كتنبيهات إدارية." />
+            <div className="settings-list">
+              <SettingToggle checked={settings.preferences.notifications.urgentReports} disabled={busyKey === 'preferences'} description="بلاغات الخطورة العالية والحرجة." label="البلاغات العاجلة" onChange={(checked) => void savePreferences({ ...settings.preferences, notifications: { ...settings.preferences.notifications, urgentReports: checked } })} />
+              <SettingToggle checked={settings.preferences.notifications.flaggedRooms} disabled={busyKey === 'preferences'} description="الغرف التي تحتاج تدخّلًا أو مراجعة." label="الغرف المعلّمة" onChange={(checked) => void savePreferences({ ...settings.preferences, notifications: { ...settings.preferences.notifications, flaggedRooms: checked } })} />
+              <SettingToggle checked={settings.preferences.notifications.operationalFailures} disabled={busyKey === 'preferences'} description="أخطاء الخدمات والعمليات الإدارية." label="الإخفاقات التشغيلية" onChange={(checked) => void savePreferences({ ...settings.preferences, notifications: { ...settings.preferences.notifications, operationalFailures: checked } })} />
+            </div>
+          </AdminSurface>
+
+          <AdminSurface className="settings-card settings-security-card">
+            <SettingsHeading icon="⌾" title="حدود الحماية" description="الضوابط المفعّلة على كل طلب إداري." />
+            <ul className="security-checks">
+              <SecurityCheck title="صلاحيات على الخادم" detail="يُرفض الإجراء قبل قراءة البيانات إن لم يسمح به الدور." />
+              <SecurityCheck title="سجل تغييرات غير قابل للكتابة من العميل" detail="تُحفظ تغييرات الدور والجلسات والميزات مع المنفّذ والسبب." />
+              <SecurityCheck title="حماية مالك النظام" detail="لا يمكن للمالك إزالة نفسه أو إزالة آخر مالك." />
+            </ul>
+          </AdminSurface>
         </div>
-      </AdminSurface>
+      ) : null}
 
-      <div className="settings-grid settings-lower-grid">
-        <AdminSurface className="settings-card">
-          <SettingsHeading
-            icon="٪"
-            title="عمولة هدايا الغرف"
-            description="سياسة مالية بإصدارات متزايدة. عروض السعر المفتوحة تحتفظ بالإصدار الذي عُرض للمستخدم حتى انتهاء صلاحيتها."
-          />
-          <form className="admin-invite-form" onSubmit={saveRoomGiftPolicy}>
-            <label>
-              <span>النسبة المئوية</span>
-              <input
-                aria-label="عمولة هدايا الغرف بالنسبة المئوية"
-                disabled={!canManageFlags || busyKey === 'room-gift-policy'}
-                max="100"
-                min="0"
-                onChange={(event) => setCommissionBps(String(Math.round(Number(event.target.value) * 100)))}
-                step="0.01"
-                type="number"
-                value={commissionBps === '' ? '' : String(Number(commissionBps) / 100)}
-              />
-            </label>
-            <input
-              aria-label="سبب تغيير عمولة هدايا الغرف"
-              disabled={!canManageFlags || busyKey === 'room-gift-policy'}
-              onChange={(event) => setCommissionReason(event.target.value)}
-              placeholder="سبب التغيير"
-              value={commissionReason}
+      {tab === 'admins' ? (
+        <div className="settings-grid settings-lower-grid">
+          <AdminSurface className="settings-card settings-admin-roster">
+            <SettingsHeading icon="♜" title="المسؤولون والأدوار" description="صلاحيات بأقل امتياز؛ أي تغيير يسحب الجلسات القديمة ويُسجّل فورًا." />
+            {canManageAdmins ? (
+              <form className="admin-invite-form" onSubmit={grantAdministrator}>
+                <label className="field">
+                  <span>بريد الحساب</span>
+                  <input aria-label="بريد الحساب" dir="ltr" onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" required type="email" value={email} />
+                </label>
+                <label className="field">
+                  <span>الدور</span>
+                  <select aria-label="الدور" onChange={(event) => setNewRole(event.target.value as AdminRole)} value={newRole}>{roles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}</select>
+                </label>
+                <label className="field">
+                  <span>سبب منح الصلاحية</span>
+                  <input aria-label="سبب منح الصلاحية" onChange={(event) => setReason(event.target.value)} placeholder="سبب منح الصلاحية" required value={reason} />
+                </label>
+                <button className="secondary-button compact" disabled={busyKey === 'grant'} type="submit">منح الدور لحساب موجود</button>
+              </form>
+            ) : <p className="settings-permission-note">يمكنك مراجعة الفريق، بينما تغيير الأدوار محصور بمالك النظام.</p>}
+            <div className="administrator-table" role="table">
+              <div className="administrator-row administrator-head" role="row"><span>المسؤول</span><span>الدور</span><span>آخر دخول</span><span>الأمان</span></div>
+              {administrators.map((administrator) => (
+                <AdministratorRow
+                  administrator={administrator}
+                  busyKey={busyKey}
+                  canManage={canManageAdmins}
+                  currentUid={session.uid}
+                  key={administrator.uid}
+                  onAction={runAdministratorAction}
+                  onSaveScope={saveRegionScope}
+                />
+              ))}
+            </div>
+          </AdminSurface>
+
+          <AdminSurface className="settings-card settings-history-card">
+            <SettingsHeading icon="↺" title="آخر تغييرات الحوكمة" description="أحدث تغييرات الأدوار والجلسات والتفضيلات ومفاتيح المنصة." />
+            <ol className="settings-history">
+              {settings.history.slice(0, 8).map((event) => <li key={event.id}><i /><div><strong>{translateEvent(event.action)}</strong><span>{event.actorEmail || event.actorUid || 'مسؤول غير معروف'}</span><small>{formatDate(event.createdAt)} · {event.note || event.status}</small></div></li>)}
+              {settings.history.length === 0 ? <li className="history-empty">لا توجد تغييرات مسجّلة بعد.</li> : null}
+            </ol>
+          </AdminSurface>
+        </div>
+      ) : null}
+
+      {tab === 'platform' ? (
+        <div className="settings-grid settings-lower-grid">
+          <AdminSurface className="settings-card settings-flags-card">
+            <SettingsHeading icon="⚑" title="مفاتيح المنصة المعتمدة" description="لا تظهر هنا إلا الميزات المدرجة صراحة في قائمة الخادم الآمنة." />
+            <div className="feature-flag-list">
+              {(Object.keys(flagLabels) as Array<keyof AdminSettings['featureFlags']>).map((flag) => (
+                <SettingToggle key={flag} checked={settings.featureFlags[flag]} disabled={!canManageFlags || busyKey === `flag:${flag}`} description={flagLabels[flag].description} label={flagLabels[flag].label} onChange={(enabled) => void toggleFeature(flag, enabled)} />
+              ))}
+            </div>
+            {!canManageFlags ? <p className="settings-permission-note">تعديل مفاتيح المنصة محصور بمالك النظام.</p> : null}
+          </AdminSurface>
+          <AdminSurface className="settings-card settings-flags-card">
+            <SettingsHeading icon="◉" title="حالة عوارض التجميل" description="مفاتيح مظلمة مستقلة. إجراء الطوارئ يفرض false فقط ولا يتيح التفعيل." />
+            <p className="settings-permission-note">
+              مرحلة الإطلاق المسجّلة (للقراءة فقط): {settings.cosmeticsRollout.stageName}
+              {' '}(#{settings.cosmeticsRollout.stageId})
+              {settings.cosmeticsRollout.updatedAt ? ` · ${formatDate(settings.cosmeticsRollout.updatedAt)}` : ''}
+              {' · لا يفعّل cosmeticsFeatures من هنا'}
+            </p>
+            <div className="feature-flag-list">
+              {([
+                ['cosmetics_couple_effects', 'الملف الشخصي والإطار المزدوج'],
+                ['cosmetics_couple_entrances', 'الدخول الثنائي الموحّد'],
+                ['cosmetics_custom_submissions', 'رفع الأصول المخصّصة'],
+                ['cosmetics_custom_rendering', 'عرض الأصول المخصّصة'],
+              ] as const).map(([flag, label]) => (
+                <div className="setting-toggle-row" key={flag}>
+                  <span><strong>{label}</strong><small>{settings.cosmeticsRendererFlags[flag] ? 'مفعّل — متاح للتعطيل الطارئ' : 'مظلم / false'}</small></span>
+                  <button className="danger" disabled={!canManageFlags || !settings.cosmeticsRendererFlags[flag] || busyKey === `cosmetics:${flag}`} onClick={() => void disableCosmeticsRenderer(flag)} type="button">فرض false</button>
+                </div>
+              ))}
+            </div>
+          </AdminSurface>
+        </div>
+      ) : null}
+
+      {tab === 'economy' ? (
+        <div className="settings-grid settings-lower-grid">
+          <AdminSurface className="settings-card">
+            <SettingsHeading
+              icon="٪"
+              title="عمولة هدايا الغرف"
+              description="سياسة مالية بإصدارات متزايدة. عروض السعر المفتوحة تحتفظ بالإصدار الذي عُرض للمستخدم حتى انتهاء صلاحيتها."
             />
-            <button className="secondary-button compact" disabled={!canManageFlags || busyKey === 'room-gift-policy'} type="submit">
-              {busyKey === 'room-gift-policy' ? 'جارٍ الحفظ…' : 'حفظ إصدار جديد'}
-            </button>
-          </form>
-          <p className="settings-permission-note">
-            الإصدار {settings.roomGiftPolicy.version} · العمولة {(settings.roomGiftPolicy.commissionBps / 100).toFixed(2)}%
-            {settings.roomGiftPolicy.updatedAt ? ` · آخر تحديث ${formatDate(settings.roomGiftPolicy.updatedAt)}` : ''}
-          </p>
-          {!canManageFlags ? <p className="settings-permission-note">تغيير العمولة محصور بمالك المنصة.</p> : null}
-        </AdminSurface>
-        <AdminSurface className="settings-card settings-flags-card">
-          <SettingsHeading icon="⚑" title="مفاتيح المنصة المعتمدة" description="لا تظهر هنا إلا الميزات المدرجة صراحة في قائمة الخادم الآمنة." />
-          <div className="feature-flag-list">
-            {(Object.keys(flagLabels) as Array<keyof AdminSettings['featureFlags']>).map((flag) => (
-              <SettingToggle key={flag} checked={settings.featureFlags[flag]} disabled={!canManageFlags || busyKey === `flag:${flag}`} description={flagLabels[flag].description} label={flagLabels[flag].label} onChange={(enabled) => void toggleFeature(flag, enabled)} />
-            ))}
-          </div>
-          {!canManageFlags ? <p className="settings-permission-note">تعديل مفاتيح المنصة محصور بمالك النظام.</p> : null}
-        </AdminSurface>
+            <form className="admin-invite-form" onSubmit={saveRoomGiftPolicy}>
+              <label className="field">
+                <span>النسبة المئوية</span>
+                <input
+                  aria-label="عمولة هدايا الغرف بالنسبة المئوية"
+                  disabled={!canManageFlags || busyKey === 'room-gift-policy'}
+                  max="100"
+                  min="0"
+                  onChange={(event) => setCommissionBps(String(Math.round(Number(event.target.value) * 100)))}
+                  step="0.01"
+                  type="number"
+                  value={commissionBps === '' ? '' : String(Number(commissionBps) / 100)}
+                />
+              </label>
+              <label className="field">
+                <span>سبب التغيير</span>
+                <input
+                  aria-label="سبب تغيير عمولة هدايا الغرف"
+                  disabled={!canManageFlags || busyKey === 'room-gift-policy'}
+                  onChange={(event) => setCommissionReason(event.target.value)}
+                  placeholder="سبب التغيير"
+                  value={commissionReason}
+                />
+              </label>
+              <button className="secondary-button compact" disabled={!canManageFlags || busyKey === 'room-gift-policy'} type="submit">
+                {busyKey === 'room-gift-policy' ? 'جارٍ الحفظ…' : 'حفظ إصدار جديد'}
+              </button>
+            </form>
+            <p className="settings-permission-note">
+              الإصدار {settings.roomGiftPolicy.version} · العمولة {(settings.roomGiftPolicy.commissionBps / 100).toFixed(2)}%
+              {settings.roomGiftPolicy.updatedAt ? ` · آخر تحديث ${formatDate(settings.roomGiftPolicy.updatedAt)}` : ''}
+            </p>
+            {!canManageFlags ? <p className="settings-permission-note">تغيير العمولة محصور بمالك المنصة.</p> : null}
+          </AdminSurface>
 
-        <AdminSurface className="settings-card settings-history-card">
-          <SettingsHeading icon="↺" title="آخر تغييرات الحوكمة" description="أحدث تغييرات الأدوار والجلسات والتفضيلات ومفاتيح المنصة." />
-          <ol className="settings-history">
-            {settings.history.slice(0, 8).map((event) => <li key={event.id}><i /><div><strong>{translateEvent(event.action)}</strong><span>{event.actorEmail || event.actorUid || 'مسؤول غير معروف'}</span><small>{formatDate(event.createdAt)} · {event.note || event.status}</small></div></li>)}
-            {settings.history.length === 0 ? <li className="history-empty">لا توجد تغييرات مسجّلة بعد.</li> : null}
-          </ol>
-        </AdminSurface>
-      </div>
+          {canManageFlags ? (
+            <>
+              <AdminSurface className="settings-card">
+                <SettingsHeading
+                  icon="◎"
+                  title="حالة الرسائل المباشرة"
+                  description="ملخص خفيف من المستندات الحالية فقط — بلا رسائل خاصة أو قوائم محادثات."
+                />
+                {opsStatus ? (
+                  <dl className="settings-details">
+                    <div><dt>مرحلة الإطلاق</dt><dd>{opsStatus.stage ? `${opsStatus.stage.stageId} · ${opsStatus.stage.name}` : 'تركيبة مفاتيح غير مدعومة'}</dd></div>
+                    <div><dt>المفاتيح</dt><dd dir="ltr">{`DM ${opsStatus.flags.directMessages ? 'on' : 'off'} · req ${opsStatus.flags.directMessageRequests ? 'on' : 'off'} · media ${opsStatus.flags.directMessageMedia ? 'on' : 'off'}`}</dd></div>
+                    <div><dt>الاحتفاظ</dt><dd>{`${opsStatus.retention.messageRetentionDays} يوم رسائل · ${opsStatus.retention.evidenceRetentionDays} أدلة · ${opsStatus.retention.legalHoldRetentionDays} حجز قانوني`}</dd></div>
+                    <div><dt>مؤشر الكنس</dt><dd dir="ltr">{opsStatus.retention.sweepCursor || '—'}</dd></div>
+                    <div><dt>حسابات مقيّدة (عينة)</dt><dd>{opsStatus.restrictedAccountSampleCount === null ? 'غير متاح' : opsStatus.restrictedAccountSampleCount.toLocaleString('ar-IQ')}</dd></div>
+                    <div><dt>آخر مواءمة</dt><dd>{opsStatus.lastReconcile ? `${formatDate(opsStatus.lastReconcile.createdAt)} · ${opsStatus.lastReconcile.id}` : 'لا يوجد بعد'}</dd></div>
+                  </dl>
+                ) : <p className="settings-permission-note">تعذّر تحميل حالة العمليات.</p>}
+              </AdminSurface>
+
+              <AdminSurface className="settings-card">
+                <SettingsHeading
+                  icon="◷"
+                  title="سياسة احتفاظ الرسائل"
+                  description="نفس الحدود الصلبة المستخدمة في CLI والكنس المجدول. المعاينة تعرض القيم بعد التقييد قبل التطبيق."
+                />
+                {retention ? (
+                  <form className="admin-invite-form" onSubmit={saveRetentionPolicy}>
+                    <label className="field">
+                      <span>أيام الرسائل ({retention.bounds.messageRetentionDays.minDays}–{retention.bounds.messageRetentionDays.maxDays})</span>
+                      <input
+                        aria-label="أيام احتفاظ الرسائل"
+                        disabled={busyKey === 'direct-chat-retention'}
+                        min={1}
+                        onChange={(event) => setMessageRetentionDays(event.target.value)}
+                        type="number"
+                        value={messageRetentionDays}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>أيام الأدلة ({retention.bounds.evidenceRetentionDays.minDays}–{retention.bounds.evidenceRetentionDays.maxDays})</span>
+                      <input
+                        aria-label="أيام احتفاظ الأدلة"
+                        disabled={busyKey === 'direct-chat-retention'}
+                        min={1}
+                        onChange={(event) => setEvidenceRetentionDays(event.target.value)}
+                        type="number"
+                        value={evidenceRetentionDays}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>أيام الحجز القانوني ({retention.bounds.legalHoldRetentionDays.minDays}–{retention.bounds.legalHoldRetentionDays.maxDays})</span>
+                      <input
+                        aria-label="أيام احتفاظ الحجز القانوني"
+                        disabled={busyKey === 'direct-chat-retention'}
+                        min={1}
+                        onChange={(event) => setLegalHoldRetentionDays(event.target.value)}
+                        type="number"
+                        value={legalHoldRetentionDays}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>سبب التغيير</span>
+                      <input
+                        aria-label="سبب تغيير سياسة الاحتفاظ"
+                        disabled={busyKey === 'direct-chat-retention'}
+                        onChange={(event) => setRetentionReason(event.target.value)}
+                        placeholder="سبب التغيير"
+                        value={retentionReason}
+                      />
+                    </label>
+                    <p className="settings-permission-note">
+                      معاينة بعد التقييد: رسائل {clampRetentionDays(Number(messageRetentionDays), retention.bounds.messageRetentionDays)}
+                      {' · '}أدلة {clampRetentionDays(Number(evidenceRetentionDays), retention.bounds.evidenceRetentionDays)}
+                      {' · '}حجز {clampRetentionDays(Number(legalHoldRetentionDays), retention.bounds.legalHoldRetentionDays)}
+                      {' · '}إصدار السياسة {retention.policy.policyVersion}
+                    </p>
+                    <button className="secondary-button compact" disabled={busyKey === 'direct-chat-retention'} type="submit">
+                      {busyKey === 'direct-chat-retention' ? 'جارٍ الحفظ…' : 'تطبيق سياسة الاحتفاظ'}
+                    </button>
+                  </form>
+                ) : <p className="settings-permission-note">تعذّر تحميل سياسة الاحتفاظ.</p>}
+              </AdminSurface>
+            </>
+          ) : (
+            <AdminSurface className="settings-card">
+              <p className="settings-permission-note">حالة الرسائل وسياسة الاحتفاظ متاحة لمالك المنصة فقط.</p>
+            </AdminSurface>
+          )}
+        </div>
+      ) : null}
+
       {pendingAction ? <GovernanceDialog action={pendingAction} busy={Boolean(busyKey)} onCancel={() => setPendingAction(null)} onReasonChange={setActionReason} onSubmit={submitGovernanceAction} reason={actionReason} /> : null}
     </div>
   );
@@ -391,6 +653,10 @@ function SecurityCheck({ detail, title }: { detail: string; title: string }) { r
 function SettingToggle({ checked, description, disabled, label, onChange }: { checked: boolean; description: string; disabled?: boolean; label: string; onChange: (checked: boolean) => void }) { return <label className={`setting-toggle-row${disabled ? ' disabled' : ''}`}><span><strong>{label}</strong><small>{description}</small></span><input checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} type="checkbox" /><i aria-hidden="true" /></label>; }
 function applyDisplayPreferences(preferences: AdminPreferences) { document.documentElement.dataset.density = preferences.density; document.documentElement.dataset.motion = preferences.reduceMotion ? 'reduced' : 'full'; }
 function formatDate(value: string) { if (!value) return 'لا يوجد'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'غير متاح' : new Intl.DateTimeFormat('ar-IQ', { dateStyle: 'medium', timeStyle: 'short' }).format(date); }
+function clampRetentionDays(value: number, bounds: AdminDirectChatRetentionBounds) {
+  if (!Number.isInteger(value)) return bounds.fallbackDays;
+  return Math.min(bounds.maxDays, Math.max(bounds.minDays, value));
+}
 function translateEvent(action: string) {
   return ({
     'administrator-grant-role': 'منح دور إداري',
@@ -400,6 +666,7 @@ function translateEvent(action: string) {
     'super-moderator-scope-update': 'تحديث نطاق مشرف إقليمي',
     'admin-settings-update': 'تحديث التفضيلات',
     'feature-flag-update': 'تحديث مفتاح ميزة',
+    'direct-chat-retention-policy': 'تحديث احتفاظ الرسائل',
   } as Record<string, string>)[action] || action;
 }
 function selfAdministrator(session: AdminDashboardSession): AdminAdministrator {

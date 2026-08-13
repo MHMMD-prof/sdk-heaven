@@ -2,6 +2,8 @@ const { createHash } = require('node:crypto');
 
 const DEFAULT_ROOM_THEME_ID = 'majlis-default';
 const ROOM_THEME_MANIFEST_VERSION = 1;
+const ROOM_THEME_MANIFEST_VERSION_V2 = 2;
+const ROOM_THEME_MANIFEST_VERSION_V3 = 3;
 const ROOM_THEME_ACTIONS = Object.freeze([
   'purchase-room-theme',
   'equip-room-theme',
@@ -117,6 +119,73 @@ function validateRoomThemeManifestV1(data, documentId) {
   };
 }
 
+function validateRoomThemeManifestV2(data, documentId) {
+  if (!isRecord(data) || data.manifestVersion !== ROOM_THEME_MANIFEST_VERSION_V2) return undefined;
+  const base = validateRoomThemeManifestV1({
+    ...data,
+    manifestVersion: ROOM_THEME_MANIFEST_VERSION,
+  }, documentId);
+  if (!base || !hasExactKeys(data.motion, ['background', 'ambient'])) return undefined;
+  if (data.motion.background !== null && !isMotionReference(data.motion.background)) return undefined;
+  if (!Array.isArray(data.motion.ambient) || data.motion.ambient.length > 2) return undefined;
+  const seen = new Set();
+  for (const slot of data.motion.ambient) {
+    if (
+      !hasExactKeys(slot, ['id', 'asset', 'x', 'y', 'width', 'height'])
+      || typeof slot.id !== 'string'
+      || !/^[a-z0-9][a-z0-9-]{1,31}$/.test(slot.id)
+      || seen.has(slot.id)
+      || !isMotionReference(slot.asset)
+      || !inRange(slot.x, 0.05, 0.95)
+      || !inRange(slot.y, 0.08, 0.85)
+      || !inRange(slot.width, 0.05, 0.6)
+      || !inRange(slot.height, 0.05, 0.6)
+      || slot.x + slot.width > 0.95
+      || slot.y + slot.height > 0.85
+    ) return undefined;
+    seen.add(slot.id);
+  }
+  return {
+    ...base,
+    manifestVersion: ROOM_THEME_MANIFEST_VERSION_V2,
+    motion: data.motion,
+  };
+}
+
+function validateRoomThemeManifestV3(data, documentId) {
+  if (!isRecord(data) || data.manifestVersion !== ROOM_THEME_MANIFEST_VERSION_V3) return undefined;
+  const base = validateRoomThemeManifestV2({
+    ...data,
+    manifestVersion: ROOM_THEME_MANIFEST_VERSION_V2,
+  }, documentId);
+  if (!base || !hasExactKeys(data.scene, ['background', 'stage', 'profiles'])) return undefined;
+  if (!validateSceneMedia(data.scene.background) || !validateSceneMedia(data.scene.stage)) return undefined;
+  if (!hasExactKeys(data.scene.profiles, ['compact', 'standard', 'tall'])) return undefined;
+  for (const profileName of ['compact', 'standard', 'tall']) {
+    const profile = data.scene.profiles[profileName];
+    if (!hasExactKeys(profile, ['layouts']) || !hasExactKeys(profile.layouts, ROOM_SEAT_COUNTS.map(String))) {
+      return undefined;
+    }
+    for (const count of ROOM_SEAT_COUNTS) {
+      if (!validateSeatLayout(profile.layouts[String(count)], count)) return undefined;
+    }
+  }
+  return {
+    ...base,
+    manifestVersion: ROOM_THEME_MANIFEST_VERSION_V3,
+    scene: data.scene,
+  };
+}
+
+function validateRoomThemeManifest(data, documentId) {
+  if (data?.manifestVersion === ROOM_THEME_MANIFEST_VERSION_V3) {
+    return validateRoomThemeManifestV3(data, documentId);
+  }
+  return data?.manifestVersion === ROOM_THEME_MANIFEST_VERSION_V2
+    ? validateRoomThemeManifestV2(data, documentId)
+    : validateRoomThemeManifestV1(data, documentId);
+}
+
 function isClientVersionCompatible(minimumVersion, currentVersion) {
   const minimum = parseVersion(minimumVersion);
   const current = parseVersion(currentVersion);
@@ -170,7 +239,7 @@ function validateSeatLayout(value, count) {
       || seen.has(seat.seatNumber)
       || !inRange(seat.x, 0.04, 0.96)
       || !inRange(seat.y, 0.04, 0.96)
-      || !inRange(seat.scale, 0.7, 1.3)
+      || !inRange(seat.scale, 0.5, 1.3)
       || !Number.isInteger(seat.z)
       || seat.z < 0
       || seat.z > 100
@@ -187,6 +256,13 @@ function validateSeatLayout(value, count) {
   return true;
 }
 
+function validateSceneMedia(value) {
+  return hasExactKeys(value, ['fit', 'focalX', 'focalY'])
+    && ['cover', 'contain'].includes(value.fit)
+    && inRange(value.focalX, 0, 1)
+    && inRange(value.focalY, 0, 1);
+}
+
 function parseVersion(value) {
   return VERSION_PATTERN.test(value) ? value.split('.').map(Number) : undefined;
 }
@@ -199,6 +275,14 @@ function timestampToMillis(value) {
 
 function inRange(value, minimum, maximum) {
   return Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+function isMotionReference(value) {
+  return hasExactKeys(value, ['assetId', 'assetVersionId'])
+    && typeof value.assetId === 'string'
+    && /^[a-z0-9][a-z0-9_-]{2,79}$/.test(value.assetId)
+    && typeof value.assetVersionId === 'string'
+    && /^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(value.assetVersionId);
 }
 
 function hasExactKeys(value, expected) {
@@ -216,11 +300,16 @@ module.exports = {
   DEFAULT_ROOM_THEME_ID,
   ROOM_THEME_ACTIONS,
   ROOM_THEME_MANIFEST_VERSION,
+  ROOM_THEME_MANIFEST_VERSION_V2,
+  ROOM_THEME_MANIFEST_VERSION_V3,
   buildRoomThemeFingerprint,
   isClientVersionCompatible,
   mapRoomThemeEntitlement,
   normalizeRoomThemeBody,
   roomThemeError,
   validateRoomThemeManifestV1,
+  validateRoomThemeManifestV2,
+  validateRoomThemeManifestV3,
+  validateRoomThemeManifest,
   validateRoomThemeRequest,
 };

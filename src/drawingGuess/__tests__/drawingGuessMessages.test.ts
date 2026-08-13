@@ -300,25 +300,22 @@ describe('Drawing Guess transport messages', () => {
     expect(appliedSnapshot?.state.phase).toBe('drawing');
   });
 
-  it('blocks drawing and guessing while recovering a snapshot', () => {
-    const state = createDrawingState();
-    const drawerViewModel = createDrawingGuessViewModel({
-      state,
-      roomCode: 'room-1',
-      localPlayerId: 'p1',
-      now: 3000,
-      isRecoveringSnapshot: true,
-    });
-    const guesserViewModel = createDrawingGuessViewModel({
-      state,
-      roomCode: 'room-1',
-      localPlayerId: 'p2',
-      now: 3000,
-      isRecoveringSnapshot: true,
+  it('maps stroke-undone control messages to drawer undo events', () => {
+    const event = mapInboundMessageToReducerEvent({
+      ...createControlMessage({
+        matchId: 'match-1',
+        messageId: 'undo-1',
+        senderId: 'p1',
+        clientTime: 3000,
+        sequence: 9,
+        payload: { type: 'stroke-undone' },
+      }),
+      receivedAt: 3001,
     });
 
-    expect(drawerViewModel.canDraw).toBe(false);
-    expect(guesserViewModel.canGuess).toBe(false);
-    expect(drawerViewModel.connectionLabel).toBe('Recovering local room');
+    expect(event).toEqual({
+      type: 'undo-latest-stroke',
+      actorId: 'p1',
+    });
   });
 });

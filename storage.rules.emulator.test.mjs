@@ -92,6 +92,7 @@ describe('storage.rules Personal Chat Wave 5 protected media', () => {
     const otherConversationId = 'b'.repeat(64);
     const uploadId = `dmu_${'c'.repeat(40)}`;
     const path = `direct-chat-quarantine/${conversationId}/${uploadId}/source`;
+    await setFirestoreDocument('appConfig/socialFeatures', { directMessageMedia: true, directMessages: true });
     await setFirestoreDocument(`directConversations/${conversationId}`, { memberUids: ['uid-1', 'uid-2'] });
     await setFirestoreDocument(`directChatUploadAuthorizations/uid-1/uploads/${uploadId}`, {
       contentType: 'image/png',
@@ -135,6 +136,7 @@ describe('storage.rules Personal Chat Wave 5 protected media', () => {
     const conversationId = 'e'.repeat(64);
     const uploadId = `dmu_${'f'.repeat(40)}`;
     const mediaPath = `direct-chat-media/${conversationId}/${uploadId}/image.webp`;
+    await setFirestoreDocument('appConfig/socialFeatures', { directMessageMedia: true, directMessages: true });
     await setFirestoreDocument(`directConversations/${conversationId}`, { memberUids: ['uid-1', 'uid-2'] });
     await setFirestoreDocument(`directChatUploads/${uploadId}`, { conversationId, mediaPath, state: 'finalized', uploadId });
     await testEnv.withSecurityRulesDisabled(async (context) => uploadBytes(ref(context.storage(), mediaPath), new Uint8Array([1, 2]), { contentType: 'image/webp' }));
@@ -143,6 +145,69 @@ describe('storage.rules Personal Chat Wave 5 protected media', () => {
     await assertFails(getBytes(ref(userStorage('uid-3'), mediaPath)));
     await assertFails(getBytes(ref(testEnv.unauthenticatedContext().storage(), mediaPath)));
     await assertFails(getBytes(ref(userStorage('uid-1'), `direct-chat-media/${conversationId}/${uploadId}/voice.m4a`)));
+    await setFirestoreDocument('appConfig/socialFeatures', { directMessageMedia: false, directMessages: true });
+    await assertSucceeds(getBytes(ref(userStorage('uid-1'), mediaPath)));
+    await setFirestoreDocument('appConfig/socialFeatures', { directMessageMedia: false, directMessages: false });
+    await assertFails(getBytes(ref(userStorage('uid-1'), mediaPath)));
+    await setFirestoreDocument('appConfig/socialFeatures', { directMessageMedia: true, directMessages: true });
+  });
+});
+
+describe('storage.rules Personal Chat Wave 6A report evidence', () => {
+  it('denies evidence copies even to the conversation members who may read the live derivative', async () => {
+    const conversationId = '1'.repeat(64);
+    const uploadId = `dmu_${'2'.repeat(40)}`;
+    const reportId = `dmr_${'3'.repeat(40)}`;
+    const mediaPath = `direct-chat-media/${conversationId}/${uploadId}/image.webp`;
+    const evidencePath = `direct-chat-evidence/${reportId}/${uploadId}/image.webp`;
+    await setFirestoreDocument('appConfig/socialFeatures', { directMessageMedia: true, directMessages: true });
+    await setFirestoreDocument(`directConversations/${conversationId}`, { memberUids: ['uid-1', 'uid-2'] });
+    await setFirestoreDocument(`directChatUploads/${uploadId}`, { conversationId, mediaPath, state: 'finalized', uploadId });
+    await setFirestoreDocument(`directChatReports/${reportId}`, {
+      accessPolicy: 'staff-only', conversationId, legalHold: false, reporterUid: 'uid-1', targetUid: 'uid-2',
+    });
+    await testEnv.withSecurityRulesDisabled(async (context) => Promise.all([
+      uploadBytes(ref(context.storage(), mediaPath), new Uint8Array([1, 2]), { contentType: 'image/webp' }),
+      uploadBytes(ref(context.storage(), evidencePath), new Uint8Array([1, 2]), { contentType: 'image/webp' }),
+    ]));
+
+    await assertSucceeds(getBytes(ref(userStorage('uid-1'), mediaPath)));
+    const staff = testEnv.authenticatedContext('staff-1', { admin: true, adminRole: 'owner', email_verified: true }).storage();
+    for (const storage of [userStorage('uid-1'), userStorage('uid-2'), userStorage('uid-3'), staff]) {
+      await assertFails(getBytes(ref(storage, evidencePath)));
+      await assertFails(uploadBytes(ref(storage, evidencePath), new Uint8Array([9]), { contentType: 'image/webp' }));
+      await assertFails(deleteObject(ref(storage, evidencePath)));
+    }
+    await assertFails(getBytes(ref(testEnv.unauthenticatedContext().storage(), evidencePath)));
+  });
+});
+
+describe('storage.rules Personal Chat Wave 6C isolated evidence media', () => {
+  it('keeps the per-message evidence copy backend-only for every caller', async () => {
+    const conversationId = '4'.repeat(64);
+    const reportId = `dmr_${'5'.repeat(40)}`;
+    const messageId = `dmm_${'6'.repeat(40)}`;
+    const paths = [
+      `direct-chat-evidence/${reportId}/${messageId}/image.webp`,
+      `direct-chat-evidence/${reportId}/${messageId}/voice.m4a`,
+    ];
+    await setFirestoreDocument(`directChatReports/${reportId}`, {
+      accessPolicy: 'staff-only', conversationId, legalHold: true, reporterUid: 'uid-1', targetUid: 'uid-2',
+    });
+    await testEnv.withSecurityRulesDisabled(async (context) => Promise.all(
+      paths.map((path) => uploadBytes(ref(context.storage(), path), new Uint8Array([1, 2]), { contentType: 'image/webp' })),
+    ));
+
+    const owner = testEnv.authenticatedContext('staff-1', { admin: true, adminRole: 'owner', email_verified: true }).storage();
+    const superModerator = testEnv.authenticatedContext('staff-2', { admin: true, adminRole: 'super-moderator', email_verified: true }).storage();
+    for (const path of paths) {
+      for (const storage of [userStorage('uid-1'), userStorage('uid-2'), owner, superModerator]) {
+        await assertFails(getBytes(ref(storage, path)));
+        await assertFails(uploadBytes(ref(storage, path), new Uint8Array([9]), { contentType: 'image/webp' }));
+        await assertFails(deleteObject(ref(storage, path)));
+      }
+      await assertFails(getBytes(ref(testEnv.unauthenticatedContext().storage(), path)));
+    }
   });
 });
 
@@ -153,6 +218,16 @@ describe('storage.rules room Rocket assets', () => {
     const sound = ref(adminStorage(), 'room-rockets/global-room-rocket/v1/launch.mp3');
     await assertSucceeds(uploadBytes(staticAsset, new Uint8Array([1]), { contentType: 'image/webp' }));
     await assertSucceeds(uploadBytes(animation, new Uint8Array([1]), { contentType: 'image/webp' }));
+    await assertSucceeds(uploadBytes(
+      ref(adminStorage(), 'room-rockets/global-room-rocket/v1/animation.mp4'),
+      new Uint8Array([1]),
+      { contentType: 'video/mp4' },
+    ));
+    await assertSucceeds(uploadBytes(
+      ref(adminStorage(), 'room-rockets/global-room-rocket/v1/animation.json'),
+      new Uint8Array([123, 125]),
+      { contentType: 'application/json' },
+    ));
     await assertSucceeds(uploadBytes(sound, new Uint8Array([1]), { contentType: 'audio/mpeg' }));
     await assertSucceeds(getBytes(ref(userStorage('uid-1'), 'room-rockets/global-room-rocket/v1/static.webp')));
     await assertFails(uploadBytes(animation, new Uint8Array([2]), { contentType: 'image/webp' }));
@@ -231,6 +306,18 @@ describe('storage.rules canonical cosmetics assets', () => {
     await assertFails(getBytes(ref(testEnv.unauthenticatedContext().storage(), path)));
   });
 
+  it('does not grant pair authority or audit storage namespaces', async () => {
+    const storage = userStorage('uid-1');
+    for (const path of [
+      'couple-effect-ownerships/rel_123/effect-1.json',
+      'couple-effect-audit/event-1.json',
+      'couple-entry-claims/room-1/claim-1.json',
+    ]) {
+      await assertFails(uploadBytes(ref(storage, path), new Uint8Array([1]), { contentType: 'application/json' }));
+      await assertFails(getBytes(ref(storage, path)));
+    }
+  });
+
   it('allows only pre-authorized owners to create immutable private submissions', async () => {
     await setFirestoreDocument('cosmeticUploadAuthorizations/uid-1', {
       active: true,
@@ -267,6 +354,20 @@ describe('storage.rules canonical cosmetics assets', () => {
       { contentType: 'image/png', customMetadata: { uploaderUid: 'uid-2' } },
     ));
   });
+
+  it('rejects in-place overwrite of approved user cosmetic assets', async () => {
+    const path = 'cosmetic-assets/users/uid-1/cu-pr-aaaaaaaaaaaaaaaaaaaa/v1-123456789abc/source.png';
+    await assertSucceeds(uploadBytes(ref(adminStorage(), path), new Uint8Array([1, 2, 3]), {
+      contentType: 'image/png',
+    }));
+    await assertFails(uploadBytes(ref(adminStorage(), path), new Uint8Array([9]), {
+      contentType: 'image/png',
+    }));
+    await assertFails(uploadBytes(ref(userStorage('uid-1'), path), new Uint8Array([1]), {
+      contentType: 'image/png',
+    }));
+    await assertFails(deleteObject(ref(adminStorage(), path)));
+  });
 });
 
 afterAll(async () => {
@@ -274,10 +375,33 @@ afterAll(async () => {
 });
 
 describe('storage.rules avatar protection', () => {
-  it('allows the owner to upload a bounded JPEG and authenticated users to read it', async () => {
+  it('accepts only the exact authorized quarantine object and keeps it private', async () => {
+    const uploadId = `avu_${'a'.repeat(40)}`;
+    const path = `avatar-quarantine/uid-1/${uploadId}/source.png`;
+    const sha256 = 'b'.repeat(64);
+    await setFirestoreDocument('avatarUploadAuthorizations/uid-1', {
+      active: true,
+      contentType: 'image/png',
+      expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+      sha256,
+      sizeBytes: 3,
+      sourcePath: path,
+      uid: 'uid-1',
+      uploadId,
+    });
+    await assertSucceeds(uploadBytes(ref(userStorage('uid-1'), path), new Uint8Array([1, 2, 3]), {
+      contentType: 'image/png',
+      customMetadata: { sha256, uploaderUid: 'uid-1', uploadId },
+    }));
+    await assertFails(getBytes(ref(userStorage('uid-1'), path)));
+    await assertFails(uploadBytes(ref(userStorage('uid-2'), path), new Uint8Array([1, 2, 3]), {
+      contentType: 'image/png', customMetadata: { sha256, uploaderUid: 'uid-2', uploadId },
+    }));
+  });
+
+  it('routes avatar uploads through quarantine authorization', async () => {
     const ownerRef = ref(userStorage('uid-1'), 'avatars/uid-1/profile.jpg');
-    await assertSucceeds(uploadBytes(ownerRef, new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' }));
-    await assertSucceeds(getBytes(ref(userStorage('uid-2'), 'avatars/uid-1/profile.jpg')));
+    await assertFails(uploadBytes(ownerRef, new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' }));
     await assertFails(getBytes(ref(testEnv.unauthenticatedContext().storage(), 'avatars/uid-1/profile.jpg')));
   });
 
@@ -304,11 +428,10 @@ describe('storage.rules avatar protection', () => {
     ));
   });
 
-  it('allows only the owner to delete an avatar', async () => {
+  it('keeps avatar deletion backend-only', async () => {
     const ownerRef = ref(userStorage('uid-1'), 'avatars/uid-1/profile.jpg');
-    await assertSucceeds(uploadBytes(ownerRef, new Uint8Array([1]), { contentType: 'image/jpeg' }));
     await assertFails(deleteObject(ref(userStorage('uid-2'), 'avatars/uid-1/profile.jpg')));
-    await assertSucceeds(deleteObject(ownerRef));
+    await assertFails(deleteObject(ownerRef));
   });
 });
 

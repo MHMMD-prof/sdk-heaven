@@ -78,6 +78,50 @@ describe('admin cosmetics asset input', () => {
     })).toMatchObject({ ok: true, value: { limit: 50 } });
     expect(normalizeAdminCosmeticsAssetQuery({ category: 'script-effect' }).ok).toBe(false);
   });
+
+  it('rejects unsupported couple-effect format, audio, and fallback shapes', () => {
+    const base = {
+      asset: {
+        assetId: 'royal-pair',
+        assetVersionId: 'v1-aaaaaaaaaaaa',
+        category: 'couple-effect',
+        format: 'png',
+        loop: false,
+        minimumClientVersion: '1.0.0',
+        ownerType: 'platform',
+        performanceTier: 'low',
+        usage: 'static',
+      },
+      expectedRevision: 0,
+      operation: 'validate-version',
+      reason: 'Wave 8 validation',
+      requestId: 'couple_asset_request_001',
+    };
+    expect(normalizeAdminCosmeticsAssetMutation(base).ok).toBe(true);
+    expect(normalizeAdminCosmeticsAssetMutation({
+      ...base,
+      asset: { ...base.asset, format: 'mp4', usage: 'one-shot' },
+    }).ok).toBe(false);
+    expect(normalizeAdminCosmeticsAssetMutation({
+      ...base,
+      asset: { ...base.asset, audioAssetId: 'pair-audio', audioAssetVersionId: 'v1-bbbbbbbbbbbb' },
+    }).ok).toBe(false);
+    expect(normalizeAdminCosmeticsAssetMutation({
+      ...base,
+      asset: { ...base.asset, format: 'lottie-json', usage: 'looping' },
+    }).ok).toBe(false);
+    expect(normalizeAdminCosmeticsAssetMutation({
+      ...base,
+      asset: {
+        ...base.asset,
+        fallbackAssetId: 'royal-pair-static',
+        fallbackAssetVersionId: 'v1-bbbbbbbbbbbb',
+        format: 'lottie-json',
+        loop: true,
+        usage: 'looping',
+      },
+    }).ok).toBe(true);
+  });
 });
 
 describe('cosmetics asset state transitions', () => {
@@ -161,5 +205,24 @@ describe('cosmetics asset state transitions', () => {
       publishedVersionId: version.assetVersionId,
       renderingEnabled: false,
     });
+  });
+});
+
+describe('admin custom submission mutate routing', () => {
+  it('routes custom submission and eligibility mutations through the asset mutate normalizer', () => {
+    expect(normalizeAdminCosmeticsAssetMutation({
+      expectedRevision: 1,
+      operation: 'approve-custom-submission',
+      reason: 'Owner-bound approve',
+      requestId: 'custom_approve_req_0001',
+      submissionId: 'submission_1234567890ab',
+    })).toMatchObject({ ok: true, value: { operation: 'approve-custom-submission' } });
+    expect(normalizeAdminCosmeticsAssetMutation({
+      categories: ['profile-skin'],
+      operation: 'grant-custom-eligibility',
+      reason: 'Allowlisted creator',
+      requestId: 'custom_grant_req_000001',
+      uid: 'user-1',
+    })).toMatchObject({ ok: true, value: { operation: 'grant-custom-eligibility' } });
   });
 });

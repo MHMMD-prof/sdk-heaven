@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import { VoiceRoom } from '../types/voice';
 import { debugError, debugLog } from '../utils/debugLog';
 import { VoiceConnectOptions, VoiceProviderConfig } from './types';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 type LiveKitTokenResponse = {
   serverUrl: string;
@@ -10,7 +11,7 @@ type LiveKitTokenResponse = {
   canPublishAudio?: boolean;
 };
 
-const liveKitTokenRequestTimeoutMs = 10000;
+const liveKitTokenRequestTimeoutMs = 20000;
 
 export async function requestLiveKitConnectOptions(
   room: VoiceRoom,
@@ -21,39 +22,30 @@ export async function requestLiveKitConnectOptions(
     throw new Error('LiveKit token endpoint is not configured.');
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), liveKitTokenRequestTimeoutMs);
-  let response: Response;
+  let idToken: string;
 
   try {
-    const idToken = await getIdToken();
-    debugLog('voice.token', 'request:start', {
-      roomId: room.id,
-      endpointConfigured: Boolean(config.tokenEndpoint),
-      localRole: room.localMember?.role,
-    });
-    response = await fetch(config.tokenEndpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        clientVersion: Constants.expoConfig?.version || '1.0.0',
-        roomId: room.id,
-      }),
-    });
+    idToken = await getIdToken(false);
   } catch (error) {
-    if (isAbortError(error)) {
-      debugError('voice.token', 'request:timeout', error, { roomId: room.id });
-      throw new Error('Voice token request timed out.');
-    }
+    debugError('voice.token', 'firebaseToken:error', error, { roomId: room.id });
+    throw new Error('Voice authentication could not be refreshed. Please sign in again.');
+  }
 
-    debugError('voice.token', 'request:networkError', error, { roomId: room.id });
-    throw new Error('Voice token request failed.');
-  } finally {
-    clearTimeout(timeout);
+  debugLog('voice.token', 'request:start', {
+    roomId: room.id,
+    endpointConfigured: Boolean(config.tokenEndpoint),
+    localRole: room.localMember?.role,
+  });
+  let response = await fetchTokenResponse(config.tokenEndpoint, room.id, idToken);
+
+  if (response.status === 401) {
+    try {
+      idToken = await getIdToken(true);
+    } catch (error) {
+      debugError('voice.token', 'firebaseToken:refreshError', error, { roomId: room.id });
+      throw new Error('Voice authentication could not be refreshed. Please sign in again.');
+    }
+    response = await fetchTokenResponse(config.tokenEndpoint, room.id, idToken);
   }
 
   if (!response.ok) {
@@ -95,12 +87,45 @@ export async function requestLiveKitConnectOptions(
   };
 }
 
+async function fetchTokenResponse(endpoint: string, roomId: string, idToken: string) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), liveKitTokenRequestTimeoutMs);
+    try {
+      return await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+          ...(await getVoiceAppCheckHeader()),
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          clientVersion: Constants.expoConfig?.version || '1.0.0',
+          roomId,
+        }),
+      });
+    } catch (error) {
+      const timedOut = controller.signal.aborted || isAbortError(error);
+      debugError('voice.token', timedOut ? 'request:timeout' : 'request:networkError', error, {
+        attempt: attempt + 1,
+        roomId,
+      });
+      if (timedOut) throw new Error('Voice token request timed out.');
+      if (attempt === 1) throw new Error('Voice token request failed.');
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw new Error('Voice token request failed.');
+}
+
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-async function getDefaultFirebaseIdToken() {
+async function getDefaultFirebaseIdToken(forceRefresh = false) {
   const { getCurrentFirebaseIdToken } = await import('../auth/getCurrentFirebaseIdToken');
 
-  return getCurrentFirebaseIdToken();
+  return getCurrentFirebaseIdToken(forceRefresh);
 }

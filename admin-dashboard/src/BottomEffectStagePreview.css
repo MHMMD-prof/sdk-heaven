@@ -1,0 +1,165 @@
+.bottom-effect-admin-preview {
+  background: #11151d;
+  border: 1px solid #3f5268;
+  border-radius: 14px;
+  color: #e9f1fb;
+  padding: 16px;
+}
+
+.bottom-effect-admin-preview > header {
+  align-items: end;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.bottom-effect-admin-preview > header div,
+.bottom-effect-admin-preview > header label {
+  display: grid;
+  gap: 4px;
+}
+
+.bottom-effect-admin-preview small { color: #91a3b8; }
+.bottom-effect-admin-preview select { min-width: 180px; }
+
+.bottom-effect-admin-layout {
+  align-items: center;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(190px, 260px) 1fr;
+}
+
+.bottom-effect-admin-phone {
+  background: linear-gradient(180deg, #12243a, #09111c 36%, #070b12);
+  border: 5px solid #05070a;
+  border-radius: 26px;
+  box-shadow: 0 12px 34px #0008;
+  max-height: 520px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.bottom-effect-admin-room-header {
+  background: #10263bde;
+  color: #dcecff;
+  font-size: 10px;
+  inset: 0 0 auto;
+  padding: 8% 8% 4%;
+  position: absolute;
+  text-align: center;
+}
+
+.bottom-effect-admin-seats {
+  display: grid;
+  gap: 7%;
+  grid-template-columns: repeat(4, 1fr);
+  inset: 20% 8% auto;
+  position: absolute;
+}
+
+.bottom-effect-admin-seats span {
+  align-items: center;
+  aspect-ratio: 1;
+  background: #20364a;
+  border: 1px solid #617c96;
+  border-radius: 50%;
+  color: #9db2c5;
+  display: flex;
+  font-size: 8px;
+  justify-content: center;
+}
+
+.bottom-effect-admin-safe-zone {
+  border: 1px dashed #f1b950;
+  bottom: 8%;
+  color: #f1b950;
+  font-size: 7px;
+  left: 4%;
+  padding: 2px;
+  position: absolute;
+  right: 4%;
+  text-align: center;
+}
+
+.bottom-effect-admin-controls {
+  align-items: center;
+  background: #10161eef;
+  bottom: 0;
+  display: flex;
+  height: 8%;
+  justify-content: space-around;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.bottom-effect-admin-stage {
+  background: #112238;
+  border: 1px solid #87b7e6;
+  color: white;
+  overflow: hidden;
+  position: absolute;
+  z-index: 2;
+}
+
+.bottom-effect-admin-stage.surface-bottom-stage { border-radius: 10px; }
+.bottom-effect-admin-stage.surface-compact { bottom: 11%; left: 8%; padding: 4%; right: 8%; }
+.bottom-effect-admin-stage.surface-target-seat { height: 18%; left: 8%; top: 20%; width: 21%; }
+
+.bottom-effect-admin-media {
+  align-items: center;
+  background: radial-gradient(circle at 50% 55%, #366da0, #101a2b 62%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+}
+
+.bottom-effect-admin-media b { color: #d5eaff55; font-size: 20px; }
+
+.bottom-effect-admin-copy {
+  align-items: center;
+  background: #07101add;
+  border: 1px solid #d7eaff99;
+  border-radius: 999px;
+  display: flex;
+  gap: 5px;
+  left: 5%;
+  padding: 4px 6px;
+  position: absolute;
+  right: 5%;
+  top: 5%;
+}
+
+.bottom-effect-admin-copy span {
+  align-items: center;
+  background: #2b6c9e;
+  border-radius: 999px;
+  display: flex;
+  flex: none;
+  font-size: 7px;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.bottom-effect-admin-copy p { font-size: 7px; line-height: 1.4; margin: 0; }
+.surface-compact .bottom-effect-admin-media,
+.surface-target-seat .bottom-effect-admin-media { opacity: .28; }
+.surface-compact .bottom-effect-admin-copy,
+.surface-target-seat .bottom-effect-admin-copy { inset: 8%; }
+
+.bottom-effect-admin-layout aside { display: grid; gap: 10px; }
+.bottom-effect-admin-layout aside p { color: #dbe8f4; line-height: 1.7; margin: 0; }
+.bottom-effect-admin-surface { color: #75c7ff; direction: ltr; font: 700 12px monospace; }
+.bottom-effect-admin-layout ul { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.bottom-effect-admin-layout li { background: #3a2024; border-radius: 999px; color: #e6a2aa; font-size: 11px; padding: 5px 9px; }
+.bottom-effect-admin-layout li.passed { background: #173a2b; color: #89dfae; }
+
+@media (max-width: 720px) {
+  .bottom-effect-admin-preview > header { align-items: stretch; flex-direction: column; }
+  .bottom-effect-admin-layout { grid-template-columns: 1fr; }
+  .bottom-effect-admin-phone { justify-self: center; max-width: 250px; }
+}

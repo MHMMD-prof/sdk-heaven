@@ -1,8 +1,9 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { SymbolView } from 'expo-symbols';
-import { ReactNode, useMemo, useRef, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Image,
   ImageBackground,
   ImageSourcePropType,
@@ -33,8 +34,17 @@ import { normalizeInviteCode } from '../voice/roomProfile';
 import { useVoiceRooms } from '../voice/useVoiceRooms';
 import { useAvatarFrameProjection } from '../social/useAvatarFrameProjection';
 import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import { useGrowthFeatureFlags } from '../growth/featureFlags';
+import { setGrowthMatchMask } from '../growth/matchSession';
 import { AvatarFrameLayer } from '../components/AvatarPresentation';
 import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import {
+  requestClaimLuckyBag,
+  requestQuickMatch,
+  requestSoftMatchCancel,
+  requestSoftMatchEnqueue,
+  requestSoftMatchStatus,
+} from '../social/requestSocialCommand';
 
 const bannerArtwork = require('../../assets/home/home-banner.jpg') as ImageSourcePropType;
 const voiceRoyalArtwork = require('../../assets/home/room-voice-royal-v3.jpg') as ImageSourcePropType;
@@ -81,6 +91,7 @@ const featureCards: ReadonlyArray<{
 type HomeScreenProps = {
   bottomNavigation: ReactNode;
   dailyLoginEntry?: ReactNode;
+  eventsEntry?: ReactNode;
   onOpenProfile: () => void;
   onOpenVoiceRoom: (roomId: string) => void;
 };
@@ -88,16 +99,19 @@ type HomeScreenProps = {
 export function HomeScreen({
   bottomNavigation,
   dailyLoginEntry,
+  eventsEntry,
   onOpenProfile,
   onOpenVoiceRoom,
 }: HomeScreenProps) {
   const cosmeticsFlags = useCosmeticsFeatureFlags();
+  const growthFlags = useGrowthFeatureFlags();
   const countryRailRef = useRef<ScrollView>(null);
   const {
     createPrivateRoom,
     createRoom,
     forgetVisitedRoom,
     isMyActiveRoomLoading,
+    joinPrivateRoom,
     joinRoom,
     myActiveRoom,
     rooms,
@@ -110,6 +124,7 @@ export function HomeScreen({
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchVisible, setSearchVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [noticeMessage, setNoticeMessage] = useState('');
   const [createErrorMessage, setCreateErrorMessage] = useState('');
   const [pendingRoomId, setPendingRoomId] = useState<string>();
   const [isCreateModalVisible, setCreateModalVisible] = useState(false);
@@ -118,6 +133,42 @@ export function HomeScreen({
   const [createInviteCode, setCreateInviteCode] = useState('');
   const [selectedCountryCode, setSelectedCountryCode] = useState<RoomCountryCode>('IQ');
   const [selectedRoomType, setSelectedRoomType] = useState<VoiceRoomType>('voice');
+  const [isMatching, setMatching] = useState(false);
+  const [isSoftMatching, setSoftMatching] = useState(false);
+  const [isClaimingBag, setClaimingBag] = useState(false);
+  const softMatchPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const softMatchWaitingRef = useRef(false);
+  const softMatchJoiningRef = useRef(false);
+
+  const clearSoftMatchPoll = () => {
+    if (softMatchPollRef.current) {
+      clearInterval(softMatchPollRef.current);
+      softMatchPollRef.current = null;
+    }
+  };
+
+  const stopSoftMatchClient = (message = '') => {
+    clearSoftMatchPoll();
+    softMatchWaitingRef.current = false;
+    softMatchJoiningRef.current = false;
+    setSoftMatching(false);
+    setNoticeMessage('');
+    if (message) setErrorMessage(message);
+  };
+
+  useEffect(() => () => {
+    clearSoftMatchPoll();
+    if (softMatchWaitingRef.current) {
+      softMatchWaitingRef.current = false;
+      void requestSoftMatchCancel();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (growthFlags.softOneToOneMatch || !isSoftMatching) return;
+    stopSoftMatchClient('تم إيقاف المحادثة الصوتية السريعة مؤقتاً.');
+    void requestSoftMatchCancel();
+  }, [growthFlags.softOneToOneMatch, isSoftMatching]);
 
   const visibleRooms = useMemo(
     () =>
@@ -211,6 +262,161 @@ export function HomeScreen({
     }
   };
 
+  const joinSoftMatchRoom = async (result: {
+    inviteCode: string;
+    roomId: string;
+  }) => {
+    if (softMatchJoiningRef.current) return;
+    softMatchJoiningRef.current = true;
+    softMatchWaitingRef.current = false;
+    setPendingRoomId(result.roomId);
+    try {
+      const joinedRoom = await joinRoom(result.roomId);
+      onOpenVoiceRoom(joinedRoom.id);
+    } catch {
+      const joinedRoom = await joinPrivateRoom({
+        inviteCode: result.inviteCode,
+        roomId: result.roomId,
+      });
+      onOpenVoiceRoom(joinedRoom.id);
+    } finally {
+      setPendingRoomId(undefined);
+      softMatchJoiningRef.current = false;
+    }
+  };
+
+  const applySoftMatchStatus = async () => {
+    if (softMatchJoiningRef.current) return;
+    const status = await requestSoftMatchStatus();
+    if (!status.ok) {
+      if (status.error.code === 'FEATURE_DISABLED') {
+        stopSoftMatchClient(status.error.messageAr || 'تم إيقاف المحادثة الصوتية السريعة مؤقتاً.');
+      } else if (status.error.code === 'RATE_LIMITED') {
+        setErrorMessage(status.error.messageAr || 'تجاوزت حد المحاولات. حاول لاحقاً.');
+      }
+      return;
+    }
+    if (status.result.status === 'matched') {
+      clearSoftMatchPoll();
+      softMatchWaitingRef.current = false;
+      setNoticeMessage('');
+      try {
+        await joinSoftMatchRoom(status.result);
+      } catch {
+        setErrorMessage('تعذر الانضمام للمحادثة الصوتية. تحقق من الاتصال وحاول مرة أخرى.');
+      } finally {
+        setSoftMatching(false);
+      }
+      return;
+    }
+    if (status.result.status === 'idle') {
+      stopSoftMatchClient('انتهى وقت الانتظار. حاول مرة أخرى.');
+    }
+  };
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      if (!softMatchWaitingRef.current || softMatchJoiningRef.current) return;
+      void applySoftMatchStatus();
+    });
+    return () => subscription.remove();
+  }, []);
+
+  const handleQuickMatch = async () => {
+    if (!growthFlags.quickMatch || isMatching) return;
+    setErrorMessage('');
+    setMatching(true);
+    try {
+      const preferred = country === 'all' ? undefined : country;
+      const response = await requestQuickMatch(preferred);
+      if (!response.ok) {
+        setErrorMessage(response.error.messageAr || 'تعذر إيجاد غرفة مناسبة الآن.');
+        return;
+      }
+      if (response.result.masked && response.result.mask) {
+        setGrowthMatchMask({
+          expiresAtMs: response.result.mask.expiresAtMs,
+          labelAr: response.result.mask.labelAr,
+          roomId: response.result.roomId,
+        });
+      }
+      setPendingRoomId(response.result.roomId);
+      const joinedRoom = await joinRoom(response.result.roomId);
+      onOpenVoiceRoom(joinedRoom.id);
+    } catch {
+      setErrorMessage('تعذر الانضمام بعد المطابقة. حاول مرة أخرى.');
+    } finally {
+      setPendingRoomId(undefined);
+      setMatching(false);
+    }
+  };
+
+  const handleSoftMatch = async () => {
+    if (!growthFlags.softOneToOneMatch || isSoftMatching || softMatchJoiningRef.current) return;
+    setErrorMessage('');
+    setNoticeMessage('');
+    setSoftMatching(true);
+    clearSoftMatchPoll();
+    try {
+      const response = await requestSoftMatchEnqueue();
+      if (!response.ok) {
+        const fallback = response.error.code === 'RATE_LIMITED'
+          ? 'تجاوزت حد المحاولات. حاول لاحقاً.'
+          : response.error.code === 'PERMISSION_DENIED'
+            ? 'لا يمكن بدء المحادثة الصوتية حالياً.'
+            : 'تعذر بدء المحادثة الصوتية الآن.';
+        stopSoftMatchClient(response.error.messageAr || fallback);
+        return;
+      }
+      if (response.result.status === 'matched') {
+        softMatchWaitingRef.current = false;
+        await joinSoftMatchRoom(response.result);
+        setSoftMatching(false);
+        return;
+      }
+      if (response.result.status !== 'waiting') {
+        stopSoftMatchClient();
+        return;
+      }
+      softMatchWaitingRef.current = true;
+      setNoticeMessage('جارٍ البحث عن محادثة صوتية قصيرة… اضغط إلغاء للتوقف.');
+      softMatchPollRef.current = setInterval(() => {
+        void applySoftMatchStatus();
+      }, 2000);
+    } catch {
+      stopSoftMatchClient('تعذر بدء المحادثة الصوتية. تحقق من الاتصال وحاول مرة أخرى.');
+    }
+  };
+
+  const handleSoftMatchCancel = async () => {
+    stopSoftMatchClient();
+    await requestSoftMatchCancel();
+  };
+
+  const handleLuckyBag = async () => {
+    if (!growthFlags.luckyBag || isClaimingBag) return;
+    setErrorMessage('');
+    setNoticeMessage('');
+    setClaimingBag(true);
+    try {
+      const response = await requestClaimLuckyBag();
+      if (!response.ok) {
+        setErrorMessage(response.error.messageAr || 'تعذر فتح كيس الحظ الآن.');
+        return;
+      }
+      if (response.result.alreadyClaimed) {
+        setNoticeMessage('لقد استلمت كيس الحظ اليوم. عد غداً!');
+        return;
+      }
+      setNoticeMessage(`تم إضافة ${response.result.amount} عملة إلى محفظتك.`);
+    } catch {
+      setErrorMessage('تعذر فتح كيس الحظ. تحقق من الاتصال وحاول مرة أخرى.');
+    } finally {
+      setClaimingBag(false);
+    }
+  };
+
   return (
     <ScreenContainer
       bottomInset
@@ -280,6 +486,62 @@ export function HomeScreen({
                   {myActiveRoom ? 'غرفتي' : 'إنشاء غرفة'}
                 </Text>
               </Pressable>
+              {growthFlags.quickMatch ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="مطابقة سريعة"
+                  disabled={isMatching}
+                  onPress={() => void handleQuickMatch()}
+                  style={({ pressed }) => [
+                    styles.roomAction,
+                    styles.matchAction,
+                    isMatching && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  {isMatching ? (
+                    <ActivityIndicator color="#F7D67C" size="small" />
+                  ) : (
+                    <SymbolView
+                      name={{ ios: 'shuffle', android: 'shuffle', web: 'shuffle' }}
+                      size={18}
+                      tintColor="#F7D67C"
+                    />
+                  )}
+                  <Text numberOfLines={1} style={styles.roomActionLabel}>مطابقة</Text>
+                </Pressable>
+              ) : null}
+              {growthFlags.softOneToOneMatch || isSoftMatching ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={isSoftMatching ? 'إلغاء المحادثة الصوتية السريعة' : 'محادثة صوتية سريعة'}
+                  onPress={() => {
+                    if (isSoftMatching) {
+                      void handleSoftMatchCancel();
+                      return;
+                    }
+                    void handleSoftMatch();
+                  }}
+                  style={({ pressed }) => [
+                    styles.roomAction,
+                    styles.matchAction,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  {isSoftMatching ? (
+                    <ActivityIndicator color="#F7D67C" size="small" />
+                  ) : (
+                    <SymbolView
+                      name={{ ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' }}
+                      size={18}
+                      tintColor="#F7D67C"
+                    />
+                  )}
+                  <Text numberOfLines={1} style={styles.roomActionLabel}>
+                    {isSoftMatching ? 'إلغاء' : 'صوت سريع'}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
 
@@ -307,8 +569,15 @@ export function HomeScreen({
         </LinearGradient>
 
         <Pressable
-          accessibilityLabel="عرض جميع الغرف النشطة"
-          onPress={resetDiscovery}
+          accessibilityLabel={growthFlags.luckyBag ? 'فتح كيس الحظ اليومي' : 'عرض جميع الغرف النشطة'}
+          disabled={growthFlags.luckyBag ? isClaimingBag : false}
+          onPress={() => {
+            if (growthFlags.luckyBag) {
+              void handleLuckyBag();
+              return;
+            }
+            resetDiscovery();
+          }}
           style={({ pressed }) => [styles.bannerShell, pressed && styles.pressed]}
         >
           <ImageBackground imageStyle={styles.coverImage} resizeMode="cover" source={bannerArtwork} style={styles.banner}>
@@ -319,16 +588,23 @@ export function HomeScreen({
               style={StyleSheet.absoluteFill}
             />
             <View style={styles.bannerCopy}>
-              <Text style={styles.bannerKicker}>كنز اليوم</Text>
-              <Text style={styles.bannerTitle}>نشاط الشحن اليومي</Text>
+              <Text style={styles.bannerKicker}>{growthFlags.luckyBag ? 'هدية المنصة' : 'كنز اليوم'}</Text>
+              <Text style={styles.bannerTitle}>
+                {growthFlags.luckyBag
+                  ? (isClaimingBag ? 'جارٍ الفتح…' : 'كيس الحظ اليومي')
+                  : 'نشاط الشحن اليومي'}
+              </Text>
               <Text style={styles.bannerBody}>
-                {rooms.length > 0 ? `${rooms.length} غرف نشطة بانتظارك` : 'ابدأ أول مجلس لهذا المساء'}
+                {growthFlags.luckyBag
+                  ? 'عملات مجانية يومياً — بدون حظ مدفوع'
+                  : rooms.length > 0 ? `${rooms.length} غرف نشطة بانتظارك` : 'ابدأ أول مجلس لهذا المساء'}
               </Text>
             </View>
           </ImageBackground>
         </Pressable>
 
         {dailyLoginEntry}
+        {eventsEntry}
 
         <View style={styles.featureRow}>
           {featureCards.map((card) => {
@@ -397,6 +673,7 @@ export function HomeScreen({
           <StatusNotice text="تعذر التحديث · نعرض غرفاً تجريبية مؤقتاً" />
         ) : null}
         {errorMessage ? <StatusNotice isError text={errorMessage} /> : null}
+        {noticeMessage ? <StatusNotice text={noticeMessage} /> : null}
 
         {roomsStatus === 'loading' ? (
           <View style={styles.roomGrid}>
@@ -779,6 +1056,10 @@ const styles = StyleSheet.create({
     minHeight: 36,
     minWidth: 82,
     paddingHorizontal: 6,
+  },
+  matchAction: {
+    backgroundColor: '#5A0E16',
+    minWidth: 72,
   },
   roomActionIcon: {
     height: 23,

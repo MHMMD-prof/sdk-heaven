@@ -17,9 +17,22 @@ export function validateStoreCatalogDraft(item: StoreCatalogDraft, reason: strin
   if (item.category === 'custom-ids' && !/^[0-9]{7}$/.test(item.customId || '')) errors.push('المعرّف المخصص يجب أن يتكون من سبعة أرقام.');
   if (!hasThumbnail || !hasPreview) errors.push('الصورة المصغرة وصورة المعاينة مطلوبتان.');
   if (reason.trim().length < 2) errors.push('اكتب سببًا واضحًا للتغيير.');
-  const cosmeticCategories = ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects'];
+  const cosmeticCategories = ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects', 'couple-effects'];
   if (item.cosmeticAsset && !cosmeticCategories.includes(item.category)) errors.push('Cosmetic asset references are only allowed for cosmetic equipment categories.');
   if (item.cosmeticAsset && (!/^[a-z0-9][a-z0-9_-]{2,79}$/.test(item.cosmeticAsset.assetId) || !/^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(item.cosmeticAsset.assetVersionId))) errors.push('Select an exact immutable cosmetic asset version.');
+  if (item.category === 'couple-effects' && !item.cosmeticAsset) errors.push('Select one exact approved couple-effect asset version.');
+  if (item.category === 'couple-effects' && !item.coupleEffectPresentation) errors.push('Choose the profile, paired-border, and entrance presentation modes.');
+  if (item.coupleEffectPresentation && item.category !== 'couple-effects') errors.push('Couple-effect presentations are only allowed for couple effects.');
+  if (item.coupleEffectPresentation) {
+    const presentation = item.coupleEffectPresentation;
+    if (!['off', 'static', 'looping'].includes(presentation.profileMode)
+      || !['off', 'static', 'looping'].includes(presentation.borderMode)
+      || !['off', 'static', 'one-shot'].includes(presentation.entranceMode)) {
+      errors.push('Choose only supported couple-effect presentation modes.');
+    } else if ([presentation.profileMode, presentation.borderMode, presentation.entranceMode].every((mode) => mode === 'off')) {
+      errors.push('Enable at least one couple-effect presentation surface.');
+    }
+  }
   if (item.category === 'stickers' && !item.stickerAsset) errors.push('Select an exact immutable sticker asset version.');
   if (item.stickerAsset && item.category !== 'stickers') errors.push('Sticker asset references are only allowed for stickers.');
   if (item.stickerAsset && (!/^[a-z0-9][a-z0-9_-]{2,79}$/.test(item.stickerAsset.assetId) || !/^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(item.stickerAsset.assetVersionId))) errors.push('Select an exact immutable sticker asset version.');

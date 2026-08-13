@@ -14,4 +14,11 @@ describe('parseDirectChatLink', () => {
     expect(parseDirectChatLink(`yallgame://chat/${'a'.repeat(129)}`)).toBe('');
     expect(parseDirectChatLink('yallgame://chat/%E0%A4%A')).toBe('');
   });
+
+  it('rejects javascript and nested-host spam shapes', () => {
+    expect(parseDirectChatLink('javascript:alert(1)')).toBe('');
+    expect(parseDirectChatLink('https://evil.test/chat/user_123@attacker')).toBe('');
+    expect(parseDirectChatLink('yallgame://chat/../admin')).toBe('');
+    expect(parseDirectChatLink('https://example.test/chat/user_123#fragment')).toBe('user_123');
+  });
 });

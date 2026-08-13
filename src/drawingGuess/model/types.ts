@@ -158,15 +158,36 @@ export type DrawingGuessEvent =
       actorId: string;
       now: number;
       reason?: DrawingGuessRoundEndReason;
+      revealedPrompt?: DrawingGuessPrompt;
+    }
+  | {
+      type: 'apply-scored-guess';
+      guessId: string;
+      playerId: string;
+      text: string;
+      now: number;
+      isCorrect: boolean;
+      pointsAwarded: number;
     }
   | {
       type: 'finish-match';
       actorId: string;
     }
   | {
+      type: 'host-yielded';
+      hostId: string;
+      matchId?: string;
+    }
+  | {
       type: 'apply-snapshot';
       state: DrawingGuessState;
     };
+
+export type DrawingGuessPresenceSyncResult = {
+  previousHostId?: string;
+  state: DrawingGuessState;
+  becameHost: boolean;
+};
 
 export type DrawingGuessSnapshot = {
   schemaVersion: 1;

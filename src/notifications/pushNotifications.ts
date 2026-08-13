@@ -51,7 +51,6 @@ async function getCurrentDeviceToken(requestPermission: boolean): Promise<PushRe
       importance: Notifications.AndroidImportance.HIGH,
       lightColor: '#B31224',
       name: 'التحديثات الاجتماعية',
-      sound: 'default',
       vibrationPattern: [0, 250, 180, 250],
     });
   }

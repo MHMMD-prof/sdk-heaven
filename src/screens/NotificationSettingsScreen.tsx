@@ -11,7 +11,18 @@ import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NotificationSettings'>;
-const defaultPreferences: NotificationPreferences = { coupleRequests: true, friendRequests: true, gifts: true, walletTransfers: true };
+const defaultPreferences: NotificationPreferences = {
+  coupleRequests: true,
+  directMessageRequests: true,
+  directMessages: true,
+  follows: true,
+  friendRequests: true,
+  gifts: true,
+  readReceipts: true,
+  showMessagePreview: true,
+  showOnlineStatus: true,
+  walletTransfers: true,
+};
 
 export function NotificationSettingsScreen({ navigation }: Props) {
   const [preferences, setPreferences] = useState(defaultPreferences);
@@ -112,6 +123,8 @@ export function NotificationSettingsScreen({ navigation }: Props) {
               <Text style={styles.sectionTitle}>أنواع التنبيهات</Text>
               <PreferenceRow label="طلبات الصداقة" description="الطلبات الجديدة وقبول طلباتك" value={preferences.friendRequests} onChange={(value) => void updatePreference('friendRequests', value)} />
               <View style={styles.divider} />
+              <PreferenceRow label="المتابعون" description="تنبيه عند متابعة حسابك" value={preferences.follows} onChange={(value) => void updatePreference('follows', value)} />
+              <View style={styles.divider} />
               <PreferenceRow label="طلبات الارتباط" description="طلبات الارتباط الجديدة وقبولها" value={preferences.coupleRequests} onChange={(value) => void updatePreference('coupleRequests', value)} />
               <View style={styles.divider} />
               <PreferenceRow label="الهدايا" description="تنبيه عند وصول هدية جديدة" value={preferences.gifts} onChange={(value) => void updatePreference('gifts', value)} />
@@ -119,9 +132,25 @@ export function NotificationSettingsScreen({ navigation }: Props) {
               <PreferenceRow label="شحن المحفظة" description="تنبيه عند إرسال أو استلام العملات والألماس عبر الوكيل" value={preferences.walletTransfers} onChange={(value) => void updatePreference('walletTransfers', value)} />
             </View>
 
+            <View style={styles.preferencesCard}>
+              <Text style={styles.sectionTitle}>الرسائل الخاصة</Text>
+              <PreferenceRow label="الرسائل المباشرة" description="تنبيه عند وصول رسالة في محادثة مقبولة" value={preferences.directMessages} onChange={(value) => void updatePreference('directMessages', value)} />
+              <View style={styles.divider} />
+              <PreferenceRow label="طلبات الرسائل" description="تنبيه عند وصول طلب رسالة من غير صديق" value={preferences.directMessageRequests} onChange={(value) => void updatePreference('directMessageRequests', value)} />
+              <View style={styles.divider} />
+              <PreferenceRow label="معاينة الرسالة" description="إظهار اسم المرسل ونص مختصر في الإشعار للمحادثات المقبولة" value={preferences.showMessagePreview} onChange={(value) => void updatePreference('showMessagePreview', value)} />
+            </View>
+
+            <View style={styles.preferencesCard}>
+              <Text style={styles.sectionTitle}>الخصوصية</Text>
+              <PreferenceRow label="إشعارات القراءة" description="السماح للطرف الآخر برؤية أنك قرأت الرسالة" value={preferences.readReceipts} onChange={(value) => void updatePreference('readReceipts', value)} />
+              <View style={styles.divider} />
+              <PreferenceRow label="الحالة المتصلة" description="إظهار أنك متصل أثناء فتح المحادثة" value={preferences.showOnlineStatus} onChange={(value) => void updatePreference('showOnlineStatus', value)} />
+            </View>
+
             <View style={styles.privacyNote}>
               <SymbolView name={{ ios: 'lock.shield.fill', android: 'verified_user', web: 'verified_user' }} size={21} tintColor={colors.gold} />
-              <Text style={styles.privacyText}>رمز الجهاز محفوظ بشكل محمي ولا يمكن قراءته أو تغييره مباشرة من التطبيق.</Text>
+              <Text style={styles.privacyText}>رمز الجهاز محفوظ بشكل محمي ولا يمكن قراءته أو تغييره مباشرة من التطبيق. طلبات الرسائل لا تكشف الاسم أو المحتوى في الإشعار.</Text>
             </View>
           </>
         )}

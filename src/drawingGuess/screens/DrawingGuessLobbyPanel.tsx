@@ -19,9 +19,19 @@ export function DrawingGuessLobbyPanel({ actions, viewModel }: DrawingGuessLobby
   return (
     <GlassCard style={styles.card}>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>{viewModel.isShowcaseMode ? 'Local party game' : viewModel.onlineStatusLabel}</Text>
-        <Text style={styles.title}>{viewModel.isShowcaseMode ? 'Ready to draw?' : viewModel.roomCode}</Text>
-        <Text style={styles.body}>{getLobbyBodyCopy(viewModel)}</Text>
+        <Text style={styles.eyebrow}>
+          {viewModel.isShowcaseMode ? 'Local party game' : viewModel.onlineStatusLabel}
+        </Text>
+        <Text style={styles.title}>
+          {viewModel.isShowcaseMode
+            ? 'Ready to draw?'
+            : viewModel.isVoiceRoomSession
+              ? viewModel.isHost
+                ? 'Host lobby'
+                : 'Joined lobby'
+              : viewModel.roomCode}
+        </Text>
+        <Text style={styles.body}>{viewModel.lobbyStatusLabel}</Text>
         <View style={styles.readyPill}>
           <Text style={styles.readyText}>{viewModel.connectedPlayerCount} players ready</Text>
         </View>
@@ -61,30 +71,38 @@ export function DrawingGuessLobbyPanel({ actions, viewModel }: DrawingGuessLobby
       ) : null}
 
       <View style={styles.actions}>
-        <LuxuryButton
-          accessibilityHint="Begin the local drawing match."
-          onPress={() => {
-            void triggerDrawingGuessHaptic(viewModel.canStart ? 'success' : 'warning');
-            actions.startMatch();
-          }}
-          disabled={!viewModel.canStart}
-          title="Start match"
-        />
-        {!viewModel.canStart && !viewModel.isShowcaseMode ? (
-          <Text style={styles.disabledHelp}>Waiting for enough ready players.</Text>
+        {viewModel.isHost || viewModel.isShowcaseMode ? (
+          <LuxuryButton
+            accessibilityHint="Begin the drawing match."
+            onPress={() => {
+              void triggerDrawingGuessHaptic(viewModel.canStart ? 'success' : 'warning');
+              actions.startMatch();
+            }}
+            disabled={!viewModel.canStart}
+            title="Start match"
+          />
         ) : null}
-        <Pressable
-          accessibilityHint="Reset this local game and return to setup."
-          accessibilityLabel="New local match"
-          accessibilityRole="button"
-          onPress={() => {
-            void triggerDrawingGuessHaptic('selection');
-            actions.createLocalRoom();
-          }}
-          style={styles.secondaryAction}
-        >
-          <Text style={styles.secondaryActionText}>New local match</Text>
-        </Pressable>
+        {!viewModel.canStart && !viewModel.isShowcaseMode ? (
+          <Text style={styles.disabledHelp}>
+            {viewModel.isVoiceRoomSession && !viewModel.isHost
+              ? 'Only the host can start this match.'
+              : 'Waiting for enough ready players.'}
+          </Text>
+        ) : null}
+        {viewModel.showRoomResetControls ? (
+          <Pressable
+            accessibilityHint="Reset this local game and return to setup."
+            accessibilityLabel="New local match"
+            accessibilityRole="button"
+            onPress={() => {
+              void triggerDrawingGuessHaptic('selection');
+              actions.createLocalRoom();
+            }}
+            style={styles.secondaryAction}
+          >
+            <Text style={styles.secondaryActionText}>New local match</Text>
+          </Pressable>
+        ) : null}
         {viewModel.showOnlineControls ? (
           <>
             <LuxuryButton onPress={() => actions.joinLocalRoom(roomCodeInput)} title="Join local room" />
@@ -92,25 +110,23 @@ export function DrawingGuessLobbyPanel({ actions, viewModel }: DrawingGuessLobby
             <LuxuryButton onPress={() => actions.joinOnlineRoom(roomCodeInput)} title="Join online room" />
           </>
         ) : null}
+        {viewModel.isVoiceRoomSession ? (
+          <Pressable
+            accessibilityHint="Leave this Drawing Guess match and return to the voice room."
+            accessibilityLabel="Back to voice room"
+            accessibilityRole="button"
+            onPress={() => {
+              void triggerDrawingGuessHaptic('selection');
+              actions.leaveGame();
+            }}
+            style={styles.secondaryAction}
+          >
+            <Text style={styles.secondaryActionText}>Back to voice room</Text>
+          </Pressable>
+        ) : null}
       </View>
     </GlassCard>
   );
-}
-
-function getLobbyBodyCopy(viewModel: DrawingGuessViewModel) {
-  if (viewModel.lastTransportError) {
-    return 'Fix the connection issue above, then create or join the room again.';
-  }
-
-  if (viewModel.isOnlineRoom && !viewModel.canStart) {
-    return 'Waiting for at least two connected players before the host can start.';
-  }
-
-  if (viewModel.isOnlineRoom) {
-    return 'Online room uses LiveKit data packets for preview strokes, committed strokes, guesses, and snapshots.';
-  }
-
-  return 'Draw the secret prompt, race the guesses, and climb the final scoreboard.';
 }
 
 const styles = StyleSheet.create({

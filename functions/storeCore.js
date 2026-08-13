@@ -1,4 +1,5 @@
 const { mapEntryPhysicalApproval, mapEntryPresentation } = require('./roomEntryPresentationCore');
+const { mapCoupleEffectPresentation } = require('./coupleEffectsCore');
 
 const STORE_CATEGORIES = Object.freeze([
   'game-items',
@@ -9,6 +10,7 @@ const STORE_CATEGORIES = Object.freeze([
   'nameplates',
   'cosmetic-badges',
   'seat-effects',
+  'couple-effects',
   'stickers',
   'cars',
   'custom-ids',
@@ -46,7 +48,7 @@ function isStoreAvailability(value) {
 function mapStoreCatalogItem(data, documentId) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
   if (Object.keys(data).some((key) => ![
-    'availability', 'category', 'cosmeticAsset', 'createdAt', 'customId', 'description', 'duration',
+    'availability', 'category', 'cosmeticAsset', 'coupleEffectPresentation', 'createdAt', 'customId', 'description', 'duration',
     'entryPresentation',
     'entryEffectAssetVersion', 'entryEffectDurationMs', 'entryEffectFallbackUrl',
     'entryEffectHeight', 'entryEffectMinimumClientVersion', 'entryEffectPerformanceTier',
@@ -85,8 +87,15 @@ function mapStoreCatalogItem(data, documentId) {
   if (data.category === 'custom-ids' && (duration.kind !== 'permanent' || stock.kind !== 'limited' || stock.remaining > 1)) return undefined;
   const cosmeticAsset = mapCosmeticAssetReference(data.cosmeticAsset);
   const stickerAsset = mapCosmeticAssetReference(data.stickerAsset);
-  const cosmeticCategories = ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects'];
+  const cosmeticCategories = ['avatar-frames', 'profile-skins', 'chat-bubbles', 'nameplates', 'cosmetic-badges', 'seat-effects', 'couple-effects'];
   if ((data.cosmeticAsset !== undefined && !cosmeticAsset) || (cosmeticAsset && !cosmeticCategories.includes(data.category))) return undefined;
+  const coupleEffectPresentation = data.coupleEffectPresentation === undefined
+    ? undefined
+    : mapCoupleEffectPresentation(data.coupleEffectPresentation);
+  if (
+    (data.category === 'couple-effects' && (!cosmeticAsset || !coupleEffectPresentation))
+    || (data.category !== 'couple-effects' && data.coupleEffectPresentation !== undefined)
+  ) return undefined;
   if ((data.stickerAsset !== undefined && !stickerAsset) || (data.category === 'stickers' && !stickerAsset) || (stickerAsset && data.category !== 'stickers')) return undefined;
   const entryPresentation = data.entryPresentation === undefined
     ? undefined
@@ -96,6 +105,7 @@ function mapStoreCatalogItem(data, documentId) {
     availability: data.availability,
     category: data.category,
     ...(cosmeticAsset ? { cosmeticAsset } : {}),
+    ...(coupleEffectPresentation ? { coupleEffectPresentation } : {}),
     ...(customId ? { customId } : {}),
     description,
     duration,

@@ -1,5 +1,6 @@
 import type { User } from 'firebase/auth';
-import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import lottie, { type AnimationItem } from 'lottie-web';
 
 import {
   AdminRocketAsset,
@@ -10,14 +11,8 @@ import {
   requestAdminRocketCampaign,
 } from './adminDashboardApi';
 import { useAdminFeedback } from './AdminFeedback';
-import { AdminCollectionState, AdminSectionHeader, AdminStatusBadge, AdminSurface } from './AdminUi';
+import { AdminCollectionState, AdminStatusBadge, AdminSurface } from './AdminUi';
 import { uploadRoomRocketAsset } from './roomRocketAssets';
-import { AttendanceShadowPanel } from './AttendanceShadowPanel';
-import { PayrollPanel } from './PayrollPanel';
-
-const RoomTargetPanel = lazy(() => import('./RoomTargetPanel').then((module) => ({ default: module.RoomTargetPanel })));
-const WeeklyIncentiveIntegrityPanel = lazy(() => import('./WeeklyIncentiveIntegrityPanel').then((module) => ({ default: module.WeeklyIncentiveIntegrityPanel })));
-const DailyLoginRewardsPanel = lazy(() => import('./DailyLoginRewardsPanel').then((module) => ({ default: module.DailyLoginRewardsPanel })));
 
 type RankDraft = { coins: string; diamonds: string; enabled: boolean; itemIds: string };
 type Draft = {
@@ -155,25 +150,6 @@ export function RocketCampaignPanel({ permissions, user }: { permissions: string
 
   return (
     <div className="settings-page rocket-campaign-page">
-      <AdminSectionHeader
-        actions={<button className="secondary-button compact" onClick={() => void load()} type="button">تحديث</button>}
-        description="قالب أسبوعي عالمي ثابت لكل الغرف. أي نشر جديد يبدأ من الأسبوع التالي ولا يغيّر دورة جارية."
-        eyebrow="الحوافز الأسبوعية"
-        title="حملة صاروخ الغرف"
-      />
-
-      <Suspense fallback={<AdminSurface className="settings-card"><p className="field-hint">جارٍ تحميل مكافآت الدخول اليومي…</p></AdminSurface>}>
-        <DailyLoginRewardsPanel permissions={permissions} user={user} />
-      </Suspense>
-      <AttendanceShadowPanel permissions={permissions} user={user} />
-      <PayrollPanel permissions={permissions} user={user} />
-      <Suspense fallback={<AdminSurface className="settings-card"><p className="field-hint">جاري تحميل إعدادات هدف الغرفة…</p></AdminSurface>}>
-        <RoomTargetPanel permissions={permissions} user={user} />
-      </Suspense>
-      <Suspense fallback={<AdminSurface className="settings-card"><p className="field-hint">جارٍ تحميل سلامة الحوافز…</p></AdminSurface>}>
-        <WeeklyIncentiveIntegrityPanel permissions={permissions} user={user} />
-      </Suspense>
-
       <div className="settings-kpis">
         <Metric label="الإصدار الإداري" value={String(revision)} />
         <Metric label="آخر إصدار منشور" value={String(detail.campaign?.lastPublishedRevision || 0)} />
@@ -191,8 +167,8 @@ export function RocketCampaignPanel({ permissions, user }: { permissions: string
         />
       </div>
 
-      <form className="settings-grid" onSubmit={(event) => void submit(event, 'save-draft')}>
-        <AdminSurface className="settings-card">
+      <form className="settings-grid rocket-editor-grid" onSubmit={(event) => void submit(event, 'save-draft')}>
+        <AdminSurface className="settings-card rocket-identity-card">
           <h3>الهدف والهوية</h3>
           <Field label="هدف نقاط الدعم"><input min="1" onChange={(event) => setDraft({ ...draft, target: event.target.value })} type="number" value={draft.target} /></Field>
           <Field label="اسم عربي"><input onChange={(event) => setDraft({ ...draft, nameAr: event.target.value })} value={draft.nameAr} /></Field>
@@ -200,21 +176,32 @@ export function RocketCampaignPanel({ permissions, user }: { permissions: string
           <Field label="أقل إصدار عميل"><input dir="ltr" onChange={(event) => setDraft({ ...draft, minimumClientVersion: event.target.value })} value={draft.minimumClientVersion} /></Field>
         </AdminSurface>
 
-        <AdminSurface className="settings-card">
+        <AdminSurface className="settings-card rocket-assets-card">
           <h3>الأصول الثابتة</h3>
           <AssetInput asset={assets.staticAsset} accept="image/png,image/webp" busy={busy} label="صورة تقليل الحركة" onFile={(file) => void upload('static', file)} slot="static" />
-          <AssetInput asset={assets.animationAsset} accept="image/webp" busy={busy} label="انفجار WebP متحرك" onFile={(file) => void upload('animation', file)} slot="animation" />
+          <AssetInput asset={assets.animationAsset} accept="video/mp4,application/json,image/webp,.json,.mp4,.webp" busy={busy} label="حركة الصاروخ (MP4 / Lottie / WebP)" onFile={(file) => void upload('animation', file)} slot="animation" />
           <Field label="مدة الحركة بالمللي ثانية"><input min="500" max="12000" onChange={(event) => setDraft({ ...draft, animationDurationMs: event.target.value })} type="number" value={draft.animationDurationMs} /></Field>
           <AssetInput asset={assets.soundAsset} accept="audio/mpeg,audio/mp4,audio/x-m4a" busy={busy} label="صوت اختياري" onFile={(file) => void upload('sound', file)} slot="sound" />
           <p className="field-hint">الإصدار التالي للأصول: v{assetVersion}. لا يمكن استبدال ملف بعد رفعه.</p>
         </AdminSurface>
 
-        <AdminSurface className="settings-card">
+        <AdminSurface className="settings-card rocket-approval-card">
           <h3>اعتماد الحركة على جهاز فعلي</h3>
           <Field label="معرّف الاعتماد"><input dir="ltr" onChange={(event) => setDraft({ ...draft, approvalId: event.target.value })} value={draft.approvalId} /></Field>
           <Field label="الجهاز الفعلي"><input onChange={(event) => setDraft({ ...draft, device: event.target.value })} value={draft.device} /></Field>
           <Field label="إصدار العميل المختبَر"><input dir="ltr" onChange={(event) => setDraft({ ...draft, testedClientVersion: event.target.value })} value={draft.testedClientVersion} /></Field>
           <p className="field-hint">النشر يثبت أن الذاكرة، تقليل الحركة، والصورة البديلة اختُبرت على الجهاز المذكور.</p>
+        </AdminSurface>
+
+        <AdminSurface className="settings-card rocket-publish-card">
+          <h3>النشر والحوكمة</h3>
+          <Field label="سبب التغيير"><textarea onChange={(event) => setReason(event.target.value)} rows={3} value={reason} /></Field>
+          <div className="button-row">
+            <button className="secondary-button" disabled={!canManage || Boolean(busy)} type="submit">حفظ مسودة</button>
+            <button className="primary-button" disabled={!canManage || Boolean(busy)} onClick={(event) => void submit(event, 'publish')} type="button">نشر للأسبوع القادم</button>
+            <button className="danger-button" disabled={!canManage || Boolean(busy) || !detail.campaign?.lastPublishedRevision} onClick={() => void mutateSimple('emergency-disable')} type="button">إيقاف عرض طارئ</button>
+          </div>
+          {!canManage && <AdminStatusBadge tone="warning">عرض فقط</AdminStatusBadge>}
         </AdminSurface>
 
         <AdminSurface className="settings-card rocket-preview-card">
@@ -252,50 +239,41 @@ export function RocketCampaignPanel({ permissions, user }: { permissions: string
             />
           ))}
           <p className="field-hint">المراتب المفعلة: {enabledRankCount}. صيغة العنصر: item-id أو item-id|coins|100 لتحديد بديل التكرار.</p>
-          <p className="field-hint">أقصى التزام للدورة لكل غرفة: {liability ? `${liability.coins} Coins · ${liability.diamonds} Diamonds · ${liability.items} items` : 'بيانات غير صالحة'}</p>
+          <p className="field-hint">أقصى التزام للدورة لكل غرفة: {liability ? `${liability.coins} عملات · ${liability.diamonds} ألماس · ${liability.items} عناصر` : 'بيانات غير صالحة'}</p>
           <div className="rocket-cost-summary">
             <span><small>التكلفة القصوى المعيارية</small><b>{liability ? `${liability.coins.toLocaleString('ar-IQ')} عملة · ${liability.diamonds.toLocaleString('ar-IQ')} ماسة · ${liability.items.toLocaleString('ar-IQ')} عنصر` : '—'}</b></span>
             <span><small>عملات الجوائز نسبةً إلى الهدف</small><b>{liability && Number(draft.target) > 0 ? `${((liability.coins / Number(draft.target)) * 100).toFixed(2)}%` : '—'}</b></span>
           </div>
         </AdminSurface>
-
-        <AdminSurface className="settings-card rocket-publish-card">
-          <h3>النشر والحوكمة</h3>
-          <Field label="سبب التغيير"><textarea onChange={(event) => setReason(event.target.value)} rows={3} value={reason} /></Field>
-          <div className="button-row">
-            <button className="secondary-button" disabled={!canManage || Boolean(busy)} type="submit">حفظ مسودة</button>
-            <button className="primary-button" disabled={!canManage || Boolean(busy)} onClick={(event) => void submit(event, 'publish')} type="button">نشر للأسبوع القادم</button>
-            <button className="danger-button" disabled={!canManage || Boolean(busy) || !detail.campaign?.lastPublishedRevision} onClick={() => void mutateSimple('emergency-disable')} type="button">إيقاف عرض طارئ</button>
-          </div>
-          {!canManage && <AdminStatusBadge tone="warning">عرض فقط</AdminStatusBadge>}
-        </AdminSurface>
       </form>
 
-      <AdminSurface className="settings-card rocket-active-cycles">
-        <h3>لقطة الدورات الحديثة</h3>
-        <div className="settings-list">
-          {detail.operations.activeCycles.map((cycle) => (
-            <div className="settings-row" key={`${cycle.roomId}:${cycle.cycleId}`}>
-              <div><strong dir="ltr">{cycle.roomId}</strong><small dir="ltr">{cycle.cycleId} · {cycle.state}</small></div>
-              <b>{cycle.supportPoints.toLocaleString('ar-IQ')} / {cycle.targetSupportPoints.toLocaleString('ar-IQ')}</b>
-            </div>
-          ))}
-          {detail.operations.activeCycles.length === 0 ? <p className="field-hint">لا توجد دورات صاروخ منشأة بعد.</p> : null}
-        </div>
-      </AdminSurface>
+      <div className="settings-grid rocket-ops-grid">
+        <AdminSurface className="settings-card rocket-active-cycles">
+          <h3>لقطة الدورات الحديثة</h3>
+          <div className="settings-list">
+            {detail.operations.activeCycles.map((cycle) => (
+              <div className="settings-row" key={`${cycle.roomId}:${cycle.cycleId}`}>
+                <div><strong dir="ltr">{cycle.roomId}</strong><small dir="ltr">{cycle.cycleId} · {cycle.state}</small></div>
+                <b>{cycle.supportPoints.toLocaleString('ar-IQ')} / {cycle.targetSupportPoints.toLocaleString('ar-IQ')}</b>
+              </div>
+            ))}
+            {detail.operations.activeCycles.length === 0 ? <p className="field-hint">لا توجد دورات صاروخ منشأة بعد.</p> : null}
+          </div>
+        </AdminSurface>
 
-      <AdminSurface className="settings-card">
-        <h3>الإصدارات المنشورة</h3>
-        <div className="settings-list">
-          {detail.versions.map((version) => (
-            <div className="settings-row" key={version.revision}>
-              <div><strong>v{version.revision}</strong><small>{version.effectiveFromCycleId}</small></div>
-              <button className="secondary-button compact" disabled={!canManage || Boolean(busy) || version.revision === detail.campaign?.lastPublishedRevision} onClick={() => void mutateSimple('rollback', version.revision)} type="button">استرجاع كإصدار جديد</button>
-            </div>
-          ))}
-          {detail.versions.length === 0 && <p className="field-hint">لا توجد نسخة منشورة بعد.</p>}
-        </div>
-      </AdminSurface>
+        <AdminSurface className="settings-card rocket-versions-card">
+          <h3>الإصدارات المنشورة</h3>
+          <div className="settings-list">
+            {detail.versions.map((version) => (
+              <div className="settings-row" key={version.revision}>
+                <div><strong>v{version.revision}</strong><small>{version.effectiveFromCycleId}</small></div>
+                <button className="secondary-button compact" disabled={!canManage || Boolean(busy) || version.revision === detail.campaign?.lastPublishedRevision} onClick={() => void mutateSimple('rollback', version.revision)} type="button">استرجاع كإصدار جديد</button>
+              </div>
+            ))}
+            {detail.versions.length === 0 && <p className="field-hint">لا توجد نسخة منشورة بعد.</p>}
+          </div>
+        </AdminSurface>
+      </div>
     </div>
   );
 }
@@ -412,11 +390,17 @@ function AssetInput({ accept, asset, busy, label, onFile, slot }: {
   onFile: (file?: File) => void;
   slot: 'animation' | 'sound' | 'static';
 }) {
-  return <label className="field"><span>{label}</span><input accept={accept} disabled={Boolean(busy)} onChange={(event) => onFile(event.target.files?.[0])} type="file" /><small>{asset ? `${asset.format} · ${(asset.bytes / 1024).toFixed(0)} KB · v${asset.version}` : 'غير مرفوع'}</small></label>;
+  return (
+    <label className="field field-asset">
+      <span>{label}</span>
+      <input accept={accept} disabled={Boolean(busy)} onChange={(event) => onFile(event.target.files?.[0])} type="file" />
+      <small>{asset ? `${asset.format} · ${(asset.bytes / 1024).toFixed(0)} KB · v${asset.version}` : 'غير مرفوع'}</small>
+    </label>
+  );
 }
 
 function RankEditor({ draft, locked, onChange, rank }: { draft: RankDraft; locked: boolean; onChange: (value: RankDraft) => void; rank: string }) {
-  return <fieldset className="rocket-rank-editor"><legend>المرتبة {rank}</legend><label><input checked={draft.enabled} disabled={locked} onChange={(event) => onChange({ ...draft, enabled: event.target.checked })} type="checkbox" /> مفعلة</label><input aria-label={`Coins rank ${rank}`} min="0" onChange={(event) => onChange({ ...draft, coins: event.target.value })} placeholder="Coins" type="number" value={draft.coins} /><input aria-label={`Diamonds rank ${rank}`} min="0" onChange={(event) => onChange({ ...draft, diamonds: event.target.value })} placeholder="Diamonds" type="number" value={draft.diamonds} /><input aria-label={`Items rank ${rank}`} dir="ltr" onChange={(event) => onChange({ ...draft, itemIds: event.target.value })} placeholder="item-one, item-two" value={draft.itemIds} /></fieldset>;
+  return <fieldset className="rocket-rank-editor"><legend>المرتبة {rank}</legend><label className="field economy-checkbox"><span>مفعلة</span><input checked={draft.enabled} disabled={locked} onChange={(event) => onChange({ ...draft, enabled: event.target.checked })} type="checkbox" /></label><label className="field"><span>عملات</span><input aria-label={`عملات المرتبة ${rank}`} min="0" onChange={(event) => onChange({ ...draft, coins: event.target.value })} placeholder="عملات" type="number" value={draft.coins} /></label><label className="field"><span>ألماس</span><input aria-label={`ألماس المرتبة ${rank}`} min="0" onChange={(event) => onChange({ ...draft, diamonds: event.target.value })} placeholder="ألماس" type="number" value={draft.diamonds} /></label><label className="field"><span>معرّفات العناصر</span><input aria-label={`عناصر المرتبة ${rank}`} dir="ltr" onChange={(event) => onChange({ ...draft, itemIds: event.target.value })} placeholder="item-one, item-two" value={draft.itemIds} /></label></fieldset>;
 }
 
 function RocketAppearancePreview({
@@ -428,12 +412,70 @@ function RocketAppearancePreview({
   reducedMotion: boolean;
   target: number;
 }) {
-  const source = reducedMotion ? appearance.staticAsset?.uri : appearance.animationAsset?.uri || appearance.staticAsset?.uri;
-  return <div className={`rocket-appearance-preview${reducedMotion ? ' is-reduced' : ''}`}>
-    <div className="rocket-preview-rings" />
-    {source ? <img alt="" src={source} /> : <span aria-label="صاروخ" className="rocket-preview-fallback">🚀</span>}
-    <div><small>{reducedMotion ? 'بديل ثابت لتقليل الحركة' : 'انفجار الهدف الكامل'}</small><strong>{appearance.name.ar || 'اسم الصاروخ'}</strong><p>{target.toLocaleString('ar-IQ')} نقطة دعم</p></div>
-  </div>;
+  const animation = appearance.animationAsset;
+  const staticUri = appearance.staticAsset?.uri;
+  const motionUri = animation?.uri;
+  const format = animation?.format;
+  const showStatic = reducedMotion || !motionUri;
+  const source = showStatic ? staticUri : motionUri;
+
+  return (
+    <div className={`rocket-appearance-preview${reducedMotion ? ' is-reduced' : ''}`}>
+      <div className="rocket-preview-rings" />
+      {showStatic ? (
+        source ? <img alt="" src={source} /> : <span aria-label="صاروخ" className="rocket-preview-fallback">🚀</span>
+      ) : format === 'mp4' && motionUri ? (
+        <video autoPlay className="rocket-preview-media" key={motionUri} muted playsInline src={motionUri} />
+      ) : format === 'lottie-json' && motionUri ? (
+        <RocketLottiePreview key={motionUri} uri={motionUri} />
+      ) : motionUri ? (
+        <img alt="" src={motionUri} />
+      ) : (
+        <span aria-label="صاروخ" className="rocket-preview-fallback">🚀</span>
+      )}
+      <div>
+        <small>{reducedMotion ? 'بديل ثابت لتقليل الحركة' : format === 'mp4' ? 'انفجار MP4' : format === 'lottie-json' ? 'انفجار Lottie' : 'انفجار الهدف الكامل'}</small>
+        <strong>{appearance.name.ar || 'اسم الصاروخ'}</strong>
+        <p>{target.toLocaleString('ar-IQ')} نقطة دعم</p>
+      </div>
+    </div>
+  );
+}
+
+function RocketLottiePreview({ uri }: { uri: string }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    let cancelled = false;
+    let animation: AnimationItem | undefined;
+    void fetch(uri)
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to load Lottie');
+        return response.json();
+      })
+      .then((animationData) => {
+        if (cancelled || !hostRef.current) return;
+        host.innerHTML = '';
+        animation = lottie.loadAnimation({
+          animationData,
+          autoplay: true,
+          container: host,
+          loop: false,
+          renderer: 'svg',
+        });
+      })
+      .catch(() => {
+        if (hostRef.current) hostRef.current.textContent = 'تعذر تحميل معاينة Lottie';
+      });
+    return () => {
+      cancelled = true;
+      animation?.destroy();
+    };
+  }, [uri]);
+
+  return <div className="rocket-preview-media rocket-preview-lottie" ref={hostRef} />;
 }
 
 function buildReward(value: RankDraft): AdminRocketRewardBundle {

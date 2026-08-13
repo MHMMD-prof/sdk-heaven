@@ -127,6 +127,7 @@ function normalizeLaunchPolicy(policy = {}) {
       ? policy.minimumClientVersion
       : '',
     recordingDecision: policy.recordingDecision === 'rejected' ? 'rejected' : '',
+    broadReleaseReady: policy.broadReleaseReady === true,
     verification: isObject(policy.verification) ? policy.verification : {},
   };
 }
@@ -170,7 +171,10 @@ function evaluateLaunchStage(features = {}, stageId, options = {}) {
     stage: launchStage,
     policy,
     ready,
-    broadReleaseReady: ready && stageId === 10 && missingEvidence.length === 0,
+    broadReleaseReady: ready
+      && stageId === 10
+      && policy.broadReleaseReady
+      && missingEvidence.length === 0,
     missingTrue,
     leakingFalse,
     policyProblems,
@@ -225,7 +229,10 @@ function evaluateVoiceRoomLaunchAccess({
   const admin = decodedToken.admin === true;
   const explicitlyAllowed = normalized.allowedUids.includes(uid);
   const regionAllowed = normalized.allowedRegionCodes.includes(String(countryCode).toUpperCase());
-  const allowed = normalized.audienceMode === 'public'
+  const publicAllowed = normalized.audienceMode === 'public'
+    && normalized.stageId === 10
+    && normalized.broadReleaseReady;
+  const allowed = publicAllowed
     || admin
     || explicitlyAllowed
     || (normalized.audienceMode === 'region' && regionAllowed);

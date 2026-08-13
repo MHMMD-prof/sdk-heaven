@@ -79,6 +79,57 @@ describe('Battleship setup actions', () => {
     expect(notifySuccess).toHaveBeenCalledOnce();
   });
 
+  it('confirms an online fleet without entering hot-seat handoff', () => {
+    const phase = createSetter<GamePhase>('setup-player-1');
+    const onlineConfirmed: MiniGameTarget[][] = [];
+    const setupTargets = [
+      {
+        id: 'ship-1',
+        name: 'Ship',
+        shortLabel: 'S',
+        footprint: { columns: 2, rows: 1 },
+        cells: ['0-0', '0-1'],
+        isPlaced: true,
+      },
+    ];
+
+    const actions = useBattleshipSetupActions({
+      clearSunkEffects: noop,
+      getCellIdFromBoardEvent: () => undefined,
+      impactLight: noop,
+      impactMedium: noop,
+      mode: navalMode,
+      notifyError: noop,
+      notifySuccess: noop,
+      onOnlineFleetConfirmed: (targets) => onlineConfirmed.push(targets),
+      phase: phase.get(),
+      playInvalidSound: noop,
+      playTapSound: noop,
+      previewCellId: undefined,
+      selectedTarget: undefined,
+      selectedTargetId: undefined,
+      setCurrentPlayer: createSetter<1 | 2>(1).set,
+      setLastShot: createSetter<LastShot | undefined>(undefined).set,
+      setPendingTurnPass: createSetter(false).set,
+      setPhase: phase.set,
+      setPlayerOneGuesses: createSetter(new Set<string>()).set,
+      setPlayerOneTargets: createSetter<MiniGameTarget[]>(setupTargets).set,
+      setPlayerTwoGuesses: createSetter(new Set<string>()).set,
+      setPlayerTwoTargets: createSetter<MiniGameTarget[]>(createEmptyTargets(navalMode)).set,
+      setPreviewCellId: createSetter<string | undefined>(undefined).set,
+      setSelectedTargetId: createSetter<string | undefined>(undefined).set,
+      setupFleetReady: true,
+      setupPlayer: 1,
+      setupTargets,
+      playerTwoTargets: createEmptyTargets(navalMode),
+    });
+
+    actions.confirmSetupFleet();
+
+    expect(phase.get()).toBe('setup-player-1');
+    expect(onlineConfirmed).toEqual([setupTargets]);
+  });
+
   it('confirms Player 2 setup into battle with cleared battle state', () => {
     const phase = createSetter<GamePhase>('setup-player-2');
     const currentPlayer = createSetter<1 | 2>(2);

@@ -1,4 +1,5 @@
 import { VoiceProviderConfig } from './types';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomOwnershipAction =
   | 'offer-ownership-transfer'
@@ -61,6 +62,7 @@ export async function requestRoomOwnershipCommand(
       headers: {
         Authorization: `Bearer ${await getIdToken(true)}`,
         'Content-Type': 'application/json',
+        ...(await getVoiceAppCheckHeader()),
       },
       method: 'POST',
       signal: controller.signal,

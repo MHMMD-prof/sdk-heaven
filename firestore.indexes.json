@@ -269,6 +269,14 @@
       ]
     },
     {
+      "collectionGroup": "adminAuditEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "action", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "reports",
       "queryScope": "COLLECTION",
       "fields": [
@@ -449,6 +457,15 @@
       ]
     },
     {
+      "collectionGroup": "familyInvites",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetUid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "notificationDeliveries",
       "queryScope": "COLLECTION",
       "fields": [
@@ -495,6 +512,30 @@
       "fields": [
         { "fieldPath": "legalHold", "order": "ASCENDING" },
         { "fieldPath": "retentionUntilMs", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "directChatReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "legalHold", "order": "ASCENDING" },
+        { "fieldPath": "retentionUntilMs", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "evidence",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "evidenceMediaState", "order": "ASCENDING" },
+        { "fieldPath": "capturedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "evidence",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "attachmentId", "order": "ASCENDING" },
+        { "fieldPath": "evidenceMediaState", "order": "ASCENDING" }
       ]
     },
     {
@@ -580,6 +621,14 @@
       ]
     },
     {
+      "collectionGroup": "adminPushCampaigns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "targetCycles",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -650,6 +699,76 @@
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "updatedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cosmeticSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "ownerUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "countryCode", "order": "ASCENDING" },
+        { "fieldPath": "wealthCoins", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "countryCode", "order": "ASCENDING" },
+        { "fieldPath": "charmScore", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "softMatchQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "expiresAtMs", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "softMatchSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "expiresAtMs", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "softMatchQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "purgeAfterMs", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "softMatchSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "purgeAfterMs", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "accountLifecycles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "purgeAfter", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avatarSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
       ]
     }
   ],

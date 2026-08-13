@@ -32,6 +32,24 @@ describe('store editor policy', () => {
     expect(validateStoreCatalogDraft({ ...validDraft, availability: 'disabled', featured: true }, 'Hide item', true, true)).toContain('لا يمكن عرض عنصر متوقف كبطاقة مميّزة في واجهة المتجر.');
   });
 
+  it('requires exact couple-effect authoring with at least one enabled surface', () => {
+    const couple: StoreCatalogDraft = {
+      ...validDraft,
+      category: 'couple-effects',
+      cosmeticAsset: { assetId: 'royal-pair', assetVersionId: 'v1-aaaaaaaaaaaa' },
+      coupleEffectPresentation: { borderMode: 'static', entranceMode: 'off', profileMode: 'looping' },
+    };
+    expect(validateStoreCatalogDraft(couple, 'Wave 8 review', true, true)).toEqual([]);
+    expect(validateStoreCatalogDraft({
+      ...couple,
+      coupleEffectPresentation: { borderMode: 'off', entranceMode: 'off', profileMode: 'off' },
+    }, 'Wave 8 review', true, true)).toContain('Enable at least one couple-effect presentation surface.');
+    expect(validateStoreCatalogDraft({
+      ...couple,
+      cosmeticAsset: undefined,
+    }, 'Wave 8 review', true, true)).toContain('Select one exact approved couple-effect asset version.');
+  });
+
   it('creates isolated immutable asset paths', () => {
     expect(buildStoreAssetPath('gold_frame', 'preview', 'version_123')).toBe('store-assets/gold_frame/preview/version_123');
     expect(() => buildStoreAssetPath('../escape', 'preview', 'version_123')).toThrow();

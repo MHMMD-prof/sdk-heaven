@@ -12,4 +12,22 @@ describe('equipment cosmetic projections', () => {
       profileSkin: { assetId: 'profile-skin', assetVersionId: 'v1-123456789abc', itemId: 'profile-skin-item' },
     });
   });
+
+  it('preserves custom source for owner-bound equipment', () => {
+    expect(readEquipmentCosmetics({ equippedCosmetics: {
+      profileSkin: {
+        assetId: 'cu-pr-aaaaaaaaaaaaaaaaaaaa',
+        assetVersionId: 'v1-123456789abc',
+        itemId: 'cu-pr-aaaaaaaaaaaaaaaaaaaa',
+        source: 'custom',
+      },
+    } })).toEqual({
+      profileSkin: {
+        assetId: 'cu-pr-aaaaaaaaaaaaaaaaaaaa',
+        assetVersionId: 'v1-123456789abc',
+        itemId: 'cu-pr-aaaaaaaaaaaaaaaaaaaa',
+        source: 'custom',
+      },
+    });
+  });
 });

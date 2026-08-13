@@ -17,6 +17,8 @@ import { colors, radius, spacing, typography } from '../../theme';
 import { activeVoiceProviderConfig } from '../../voice/activeVoiceProviderConfig';
 import { requestRoomTargetRosterUpdate, requestRoomTargetUserSearch } from '../../voice/requestRoomTargetCommand';
 import type { RoomTargetPublicMemberV1 } from '../../voice/roomTargetContract';
+import type { RoomThemeManifest } from '../../voice/roomThemeContract';
+import { resolveRoomTargetRailSummary } from '../../voice/roomIncentivePresentationModel';
 import type { RoomTargetData } from '../../voice/useRoomTargetData';
 import { RoomSheet } from './VoiceRoomSheets';
 import { AvatarPresentation } from '../AvatarPresentation';
@@ -25,32 +27,39 @@ import type { AvatarFrameProjection } from '../../cosmetics/avatarFrameProjectio
 
 export function RoomTargetButton({
   data,
+  manifest,
   onPress,
 }: {
   data: RoomTargetData;
+  manifest: RoomThemeManifest;
   onPress: () => void;
 }) {
   if (!data.renderingEnabled) return null;
-  const progress = resolveProgress(data);
+  const summary = resolveRoomTargetRailSummary(data);
   return (
     <Pressable
       accessibilityHint="يعرض الهدف الأسبوعي وقائمة المشاركين المؤهلين"
-      accessibilityLabel={`هدف الغرفة، ${Math.round(progress * 100)} بالمئة`}
+      accessibilityLabel={`هدف الغرفة، ${summary.progressPercent} بالمئة، العائد المتوقع ${summary.projectedReturn}`}
       accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => [styles.launcher, pressed && styles.pressed]}
     >
-      <LinearGradient colors={['#70111B', '#28070B', '#090203']} style={styles.launcherCore}>
+      <LinearGradient
+        colors={[manifest.colors.rubyBright, manifest.colors.ruby, manifest.colors.panel]}
+        style={[styles.launcherCore, { borderColor: manifest.colors.goldSoft, shadowColor: manifest.colors.rubyBright }]}
+      >
         <SymbolView
           name={{ ios: 'scope', android: 'track_changes', web: 'track_changes' }}
-          size={20}
-          tintColor={colors.goldSoft}
+          size={18}
+          tintColor={manifest.colors.goldSoft}
         />
+        <Text style={[styles.launcherPercent, { color: manifest.colors.text }]}>{summary.progressPercent}٪</Text>
       </LinearGradient>
       <View style={styles.launcherCopy}>
-        <Text style={styles.launcherLabel}>هدف الغرفة</Text>
-        <View style={styles.miniTrack}>
-          <View style={[styles.miniFill, { width: `${Math.max(3, progress * 100)}%` }]} />
+        <Text style={[styles.launcherLabel, { color: manifest.colors.goldSoft }]}>العائد</Text>
+        <Text numberOfLines={1} style={[styles.launcherReturn, { color: manifest.colors.text }]}>{summary.projectedReturnLabel}</Text>
+        <View style={[styles.miniTrack, { backgroundColor: `${manifest.colors.panelRaised}F2` }]}>
+          <View style={[styles.miniFill, { backgroundColor: manifest.colors.gold, width: `${Math.max(3, summary.progress * 100)}%` }]} />
         </View>
       </View>
     </Pressable>
@@ -62,6 +71,7 @@ export function RoomTargetSheet({
   data,
   isOwner,
   ownerUid,
+  payoutsEnabled,
   roomId,
   visible,
   onClose,
@@ -70,6 +80,7 @@ export function RoomTargetSheet({
   data: RoomTargetData;
   isOwner: boolean;
   ownerUid: string;
+  payoutsEnabled: boolean;
   roomId: string;
   visible: boolean;
   onClose: () => void;
@@ -174,6 +185,11 @@ export function RoomTargetSheet({
           <Text style={styles.rule}>
             تُحتسب فقط هدايا مالك الغرفة والأشخاص الموجودين في القائمة المقفلة. الهدايا العادية من غيرهم لا تدخل في هذا الهدف.
           </Text>
+          {!payoutsEnabled ? (
+            <Text style={styles.testNotice}>العرض قيد التتبع؛ صرف عوائد الهدف متوقف حالياً.</Text>
+          ) : (
+            <Text style={styles.liveNotice}>صرف العوائد مفعّل عند اكتمال الهدف ومراجعة الإدارة عند الحاجة.</Text>
+          )}
         </View>
 
         <View style={styles.sectionHeading}>
@@ -192,13 +208,16 @@ export function RoomTargetSheet({
         {isOwner ? (
           <View style={styles.ownerCard}>
             <View style={styles.sectionHeading}>
-              <Text style={styles.sectionTitle}>قائمة الأسبوع القادم</Text>
+              <Text style={styles.sectionTitle}>استقطاب المضيفين · الأسبوع القادم</Text>
               <Text style={styles.sectionNote}>
                 {data.nextRoster
                   ? `${data.nextRoster.roster.length - 1} من ${data.nextRoster.maxSelectedUsers} مختارين`
                   : 'المالك موجود تلقائياً'}
               </Text>
             </View>
+            <Text style={styles.recruitHint}>
+              ابحث بالاسم أو رقم المستخدم وأضِف المضيفين إلى قائمة الأسبوع القادم قبل قفل الدورة.
+            </Text>
             {selectedProfiles.length ? (
               <View style={styles.selectedWrap}>
                 {selectedProfiles.map((profile) => profile ? (
@@ -327,11 +346,13 @@ function formatCountdown(milliseconds: number) {
 
 const styles = StyleSheet.create({
   content: { gap: spacing.md, paddingBottom: spacing.xl },
-  launcher: { alignItems: 'center', backgroundColor: 'rgba(10,3,5,0.96)', borderColor: 'rgba(221,164,77,0.72)', borderRadius: radius.full, borderWidth: 1, flexDirection: 'row-reverse', gap: 8, padding: 5, paddingEnd: 10, shadowColor: '#E73348', shadowOpacity: 0.25, shadowRadius: 10 },
-  launcherCore: { alignItems: 'center', borderColor: colors.goldSoft, borderRadius: radius.full, borderWidth: 1, height: 40, justifyContent: 'center', width: 40 },
-  launcherCopy: { gap: 3, width: 58 },
-  launcherLabel: { color: colors.goldSoft, fontSize: 9, fontWeight: typography.weights.black, textAlign: 'right' },
-  miniTrack: { backgroundColor: '#301419', borderRadius: radius.full, height: 4, overflow: 'hidden' },
+  launcher: { alignItems: 'center', gap: 2, minHeight: 82, shadowColor: '#E73348', shadowOpacity: 0.25, shadowRadius: 10, width: 58 },
+  launcherCore: { alignItems: 'center', backgroundColor: 'rgba(10,3,5,0.96)', borderRadius: radius.full, borderWidth: 1.5, height: 47, justifyContent: 'center', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 8, width: 47 },
+  launcherPercent: { bottom: 3, fontSize: 8, fontWeight: typography.weights.black, position: 'absolute' },
+  launcherCopy: { alignItems: 'center', gap: 1, width: 56 },
+  launcherLabel: { fontSize: 7, fontWeight: typography.weights.black, textAlign: 'center' },
+  launcherReturn: { fontSize: 8, fontWeight: typography.weights.black, maxWidth: 54, textAlign: 'center' },
+  miniTrack: { backgroundColor: '#301419', borderRadius: radius.full, height: 3, overflow: 'hidden', width: 34 },
   miniFill: { backgroundColor: '#F1B75D', borderRadius: radius.full, height: '100%' },
   pressed: { opacity: 0.75, transform: [{ scale: 0.97 }] },
   hero: { alignItems: 'center', borderColor: colors.borderGold, borderRadius: radius.xl, borderWidth: 1, flexDirection: 'row', gap: spacing.md, minHeight: 120, overflow: 'hidden', padding: spacing.lg },
@@ -347,6 +368,9 @@ const styles = StyleSheet.create({
   track: { backgroundColor: '#2B1115', borderRadius: radius.full, height: 11, overflow: 'hidden' },
   fill: { borderRadius: radius.full, height: '100%' },
   rule: { color: colors.textMuted, fontSize: 11, lineHeight: 18, textAlign: 'right' },
+  testNotice: { color: '#F0C57E', fontSize: 11, lineHeight: 17, textAlign: 'right' },
+  liveNotice: { color: '#9AD7A8', fontSize: 11, lineHeight: 17, textAlign: 'right' },
+  recruitHint: { color: colors.textMuted, fontSize: 11, lineHeight: 17, textAlign: 'right' },
   sectionHeading: { alignItems: 'flex-end', gap: 2 },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: typography.weights.black },
   sectionNote: { color: colors.textSubtle, fontSize: 10 },

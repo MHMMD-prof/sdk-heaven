@@ -1,6 +1,10 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const {
+  ROOM_EFFECT_COPY_TEMPLATE_VERSION,
+  resolveRoomEffectSurface,
+} = require('./roomEffectPresentationCore');
 
 const ENTRY_SOUND_POLICIES = Object.freeze(['off', 'soft', 'full']);
 const PERFORMANCE_TIERS = Object.freeze(['low', 'standard', 'high']);
@@ -115,6 +119,7 @@ function inspectApprovedEntryPresentation({ presentation, records }) {
     || records.visual.version.durationMs !== presentation.durationMs
     || (records.visual.version.format === 'lottie-json' && records.visual.version.transparent !== true)
     || (records.visual.version.format === 'mp4' && records.visual.version.transparent !== false)
+    || (records.visual.version.format === 'mp4' && records.visual.version.audioCodec !== '')
   ) return { ok: false, code: 'ENTRY_PRESENTATION_REGION_INVALID' };
   if (
     records.visual.version.fallbackAssetId !== presentation.fallbackAsset.assetId
@@ -152,6 +157,10 @@ function inspectApprovedEntryPresentation({ presentation, records }) {
     || receipt.minimumClientVersion !== presentation.minimumClientVersion
     || receipt.performanceTier !== presentation.performanceTier
     || receipt.soundPolicy !== presentation.soundPolicy
+    || (receipt.copyTemplateVersion !== undefined
+      && receipt.copyTemplateVersion !== ROOM_EFFECT_COPY_TEMPLATE_VERSION)
+    || (receipt.presentationSurface !== undefined
+      && receipt.presentationSurface !== resolveRoomEffectSurface('room-entry'))
     || receipt.androidPassed !== true
     || receipt.iosPassed !== true
     || receipt.controlsSafeZonePassed !== true

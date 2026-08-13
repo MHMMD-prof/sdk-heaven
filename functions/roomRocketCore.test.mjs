@@ -83,6 +83,28 @@ describe('roomRocketCore', () => {
     expect(validateRoomRocketTemplateV1(candidate)).toBeUndefined();
   });
 
+  it('accepts mp4 and lottie-json animation assets', () => {
+    for (const [format, fileName] of [
+      ['mp4', 'animation.mp4'],
+      ['lottie-json', 'animation.json'],
+    ]) {
+      const candidate = template();
+      candidate.appearance.animationAsset = {
+        ...candidate.appearance.animationAsset,
+        format,
+        storagePath: `room-rockets/global-room-rocket/v3/${fileName}`,
+        uri: `https://cdn.example.com/${fileName}`,
+      };
+      expect(validateRoomRocketTemplateV1(candidate)?.appearance.animationAsset.format).toBe(format);
+    }
+  });
+
+  it('rejects unsupported animation formats', () => {
+    const candidate = template();
+    candidate.appearance.animationAsset.format = 'gif';
+    expect(validateRoomRocketTemplateV1(candidate)).toBeUndefined();
+  });
+
   it('unlocks exactly at the target crossing', () => {
     expect(applyRocketGiftProgress({
       giftCount: 2,

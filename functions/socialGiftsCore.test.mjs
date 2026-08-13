@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const {
   mapGiftCatalogItem,
+  isExpectedAdminGiftRevisionCurrent,
   normalizeAdminGiftCatalogInput,
   normalizeGiftCenterInput,
   normalizeSendGiftInput,
@@ -38,7 +39,13 @@ describe('socialGiftsCore', () => {
       .toMatchObject({ ok: false });
   });
 
-  it('keeps animation off by default and requires both physical-device approvals', () => {
+  it('rejects stale admin gift revisions while allowing creates and exact revisions', () => {
+    expect(isExpectedAdminGiftRevisionCurrent('', '2026-08-10T00:00:00.000Z')).toBe(true);
+    expect(isExpectedAdminGiftRevisionCurrent('2026-08-10T00:00:00.000Z', '2026-08-10T00:00:00.000Z')).toBe(true);
+    expect(isExpectedAdminGiftRevisionCurrent('2026-08-09T00:00:00.000Z', '2026-08-10T00:00:00.000Z')).toBe(false);
+  });
+
+  it('requires exact Android, iOS, and safe-zone approval for every new animated gift', () => {
     const base = {
       giftId: 'rose', iconKey: 'rose', nameAr: 'وردة ملكية', price: 20,
       reason: 'إضافة العرض', requestId: 'admin_123456789', scoreValue: 5, status: 'available',
@@ -53,35 +60,54 @@ describe('socialGiftsCore', () => {
         animationEnabled: true,
         durationMs: 3000,
         fallbackAsset: { assetId: 'gift-fallback', assetVersionId: 'v1-bbbbbbbbbbbb' },
-        hapticPolicy: 'light',
+        hapticPolicy: 'off',
         minimumClientVersion: '1.0.0',
         performanceTier: 'standard',
         soundPolicy: 'off',
-        tier: 'targeted',
+        tier: 'major',
         visualAsset: { assetId: 'gift-motion', assetVersionId: 'v1-aaaaaaaaaaaa' },
       },
     };
     expect(normalizeAdminGiftCatalogInput(animated)).toMatchObject({ ok: false });
     expect(normalizeAdminGiftCatalogInput({
       ...animated,
+      presentation: { ...animated.presentation, approvalMode: 'strict' },
+    })).toMatchObject({ ok: false });
+    expect(normalizeAdminGiftCatalogInput({
+      ...animated,
       physicalApproval: {
         androidDevice: 'Pixel 9',
         androidPassed: true,
+        controlsSafeZonePassed: true,
         iosDevice: 'iPhone 16',
         iosPassed: true,
         notes: 'Voice coexistence passed',
         testedClientVersion: '1.0.0',
       },
+      presentation: { ...animated.presentation, approvalMode: 'strict' },
     })).toMatchObject({
       ok: true,
       value: {
         physicalApproval: { androidPassed: true, iosPassed: true },
         presentation: {
           animationEnabled: true,
+          approvalMode: 'strict',
           physicalApprovalReceiptId: expect.stringMatching(/^gift_physical_/),
-          tier: 'targeted',
+          tier: 'major',
         },
       },
     });
+    expect(normalizeAdminGiftCatalogInput({
+      ...animated,
+      physicalApproval: {
+        androidDevice: 'Pixel 9',
+        androidPassed: true,
+        controlsSafeZonePassed: false,
+        iosDevice: 'iPhone 16',
+        iosPassed: true,
+        testedClientVersion: '1.0.0',
+      },
+      presentation: { ...animated.presentation, approvalMode: 'strict' },
+    })).toMatchObject({ ok: false });
   });
 });

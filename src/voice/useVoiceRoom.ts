@@ -43,6 +43,10 @@ export function useVoiceRoom() {
         dispatch({ type: 'speakingChanged', participantIds: event.participantIds });
       }
 
+      if (event.type === 'roomReactionReceived') {
+        dispatch({ type: 'roomReactionReceived', envelope: event.envelope });
+      }
+
       if (event.type === 'connectionStateChanged') {
         debugLog('voice.session', 'event:connectionStateChanged', {
           connectionState: event.connectionState,
@@ -191,6 +195,11 @@ export function useVoiceRoom() {
     [client],
   );
 
+  const setBlockedParticipantIds = useCallback(
+    (participantIds: Iterable<string>) => client.setBlockedParticipantIds(participantIds),
+    [client],
+  );
+
   const setConnectionError = useCallback((error: unknown) => {
     dispatch({
       type: 'connectionErrorChanged',
@@ -244,6 +253,7 @@ export function useVoiceRoom() {
       isConnecting: state.connectionState === 'connecting',
       isMicMuted: state.isMicMuted,
       isSpeakerEnabled: state.isSpeakerEnabled,
+      latestRoomReaction: state.latestRoomReaction,
       listeners,
       participants: state.participants,
       roomId: state.roomId,
@@ -256,6 +266,7 @@ export function useVoiceRoom() {
       state.errorMessage,
       state.isMicMuted,
       state.isSpeakerEnabled,
+      state.latestRoomReaction,
       state.participants,
       state.roomId,
       state.speakingParticipantIds,
@@ -276,6 +287,7 @@ export function useVoiceRoom() {
     reconnect,
     reportParticipant,
     setConnectionError,
+    setBlockedParticipantIds,
     setSpeakerEnabled,
     unmuteMic,
   };
@@ -297,6 +309,7 @@ function getErrorMessage(error: unknown) {
       error.message === 'Voice token request timed out.' ||
       error.message === 'Voice token request failed.' ||
       error.message === 'Voice token request was denied.' ||
+      error.message === 'Voice authentication could not be refreshed. Please sign in again.' ||
       error.message === 'Requested voice audio output is not available.'
     ) {
       return error.message;

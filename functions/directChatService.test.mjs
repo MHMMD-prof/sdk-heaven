@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 
+import { createFakeBucket, createFakeDb, seedPair } from './directChatTestSupport.mjs';
+
 const require = createRequire(import.meta.url);
 const { createDirectConversationId } = require('./directChatCore');
 const { createFriendshipId } = require('./socialFriendsCore');
@@ -252,6 +254,28 @@ describe('directChatService', () => {
     expect(db.read(`directConversationMembers/user-1/items/${conversationId}`)).toMatchObject({ archived: false, muted: true, unreadCount: 2 });
   });
 
+  it('advances unread without publishing a peer receipt when read receipts are off', async () => {
+    const db = createFakeDb();
+    seedPair(db, { friends: true });
+    db.write('notificationPreferences/user-2', {
+      coupleRequests: true,
+      directMessageRequests: true,
+      directMessages: true,
+      friendRequests: true,
+      gifts: true,
+      readReceipts: false,
+      showMessagePreview: true,
+      showOnlineStatus: true,
+      walletTransfers: true,
+    });
+    await execute(db, 'user-1', directMessage('user-2', 'privacy_send_000001', 'Hidden receipt'));
+    const conversationId = createDirectConversationId('user-1', 'user-2');
+    await expect(execute(db, 'user-2', markRead('user-1', 'privacy_mark_000001', 1)))
+      .resolves.toMatchObject({ ok: true, result: { changed: true, lastReadSequence: 1, unreadCount: 0 } });
+    expect(db.read(`directConversationMembers/user-2/items/${conversationId}`)).toMatchObject({ lastReadSequence: 1, unreadCount: 0 });
+    expect(db.read(`directConversations/${conversationId}/receipts/user-2`)).toBeUndefined();
+  });
+
   it('paginates a 10,000-message thread with bounded opaque cursor pages', async () => {
     const db = createFakeDb();
     seedPair(db, { friends: true });
@@ -358,6 +382,174 @@ describe('directChatService', () => {
     expect(db.read('directChatCommands/user-1/requests/expired_command_001')).toBeUndefined();
     expect(db.read('directChatCommands/user-1/requests/future_command_001')).toBeDefined();
   });
+
+  it('captures a bounded staff-only report case without leaking evidence to the reporter', async () => {
+    const db = createFakeDb();
+    seedPair(db, { friends: true });
+    db.write('publicProfiles/user-1', { countryCode: 'iq', displayName: 'One', moderationStatus: 'active', publicId: 'PUB-1', uid: 'user-1' });
+    db.write('publicProfiles/user-2', { countryCode: 'jo', displayName: 'Two', moderationStatus: 'active', publicId: 'PUB-2', uid: 'user-2' });
+    const abusive = await execute(db, 'user-2', directMessage('user-1', 'report_seed_000001', 'Abusive message'));
+    await execute(db, 'user-2', directMessage('user-1', 'report_seed_000002', 'Context message'));
+    const conversationId = createDirectConversationId('user-1', 'user-2');
+
+    const submitted = await execute(db, 'user-1', reportChat('user-2', 'report_send_000001', [abusive.result.messageId], 'threat', 'He threatened me'));
+    expect(submitted).toMatchObject({
+      ok: true,
+      replayed: false,
+      result: { capturedMessageCount: 2, status: 'open' },
+    });
+    expect(submitted.result.reportId).toMatch(/^dmr_[a-f0-9]{40}$/);
+    expect(JSON.stringify(submitted.result)).not.toContain('Abusive message');
+
+    const reportId = submitted.result.reportId;
+    expect(db.read(`reports/${reportId}`)).toMatchObject({
+      category: 'threat',
+      contentExcerpt: '',
+      countryCode: 'JO',
+      evidenceId: reportId,
+      messageSnapshot: null,
+      reporterPublicId: 'PUB-1',
+      reporterUid: 'user-1',
+      roomId: '',
+      severity: 'high',
+      source: 'direct-chat-safety-v1',
+      status: 'open',
+      subjectType: 'direct-message',
+      targetPublicId: 'PUB-2',
+      targetUid: 'user-2',
+    });
+    expect(db.read(`directChatReports/${reportId}`)).toMatchObject({
+      accessPolicy: 'staff-only',
+      conversationId,
+      legalHold: false,
+      selectedMessageIds: [abusive.result.messageId],
+      snapshotCount: 2,
+      targetUid: 'user-2',
+    });
+    const evidencePaths = db.paths(`directChatReports/${reportId}/evidence/`);
+    expect(evidencePaths).toHaveLength(2);
+    expect(db.read(`directChatReports/${reportId}/evidence/${abusive.result.messageId}`)).toMatchObject({
+      conversationId,
+      selected: true,
+      senderUid: 'user-2',
+      text: 'Abusive message',
+    });
+    expect(db.read(`adminAuditEvents/direct_chat_report_${reportId}`)).toMatchObject({
+      action: 'direct-chat-report-create',
+      actorUid: 'user-1',
+      kind: 'direct-chat-report',
+      reportId,
+      targetUid: 'user-2',
+    });
+
+    // The snapshot is immutable, so a later unsend cannot erase captured evidence.
+    await execute(db, 'user-2', unsend('user-1', 'report_unsend_00001', abusive.result.messageId));
+    expect(db.read(`directConversations/${conversationId}/messages/${abusive.result.messageId}`)).toMatchObject({ text: '', visibilityState: 'unsent' });
+    expect(db.read(`directChatReports/${reportId}/evidence/${abusive.result.messageId}`)).toMatchObject({
+      text: 'Abusive message',
+      visibilityState: 'visible',
+    });
+  });
+
+  it('keeps delete-for-me watermark ahead of a racing unsend without restoring cleared history', async () => {
+    const db = createFakeDb();
+    seedPair(db, { friends: true });
+    const first = await execute(db, 'user-1', directMessage('user-2', 'race_send_00000001', 'Keep'));
+    const second = await execute(db, 'user-1', directMessage('user-2', 'race_send_00000002', 'Clear me'));
+    const conversationId = createDirectConversationId('user-1', 'user-2');
+    const cleared = await execute(db, 'user-1', targetCommand('delete-conversation-for-me', 'user-2', 'race_clear_0000001'));
+    expect(cleared).toMatchObject({ ok: true, result: { clearedThroughSequence: 2 } });
+    await execute(db, 'user-1', unsend('user-2', 'race_unsend_000001', first.result.messageId));
+    expect(db.read(`directConversationMembers/user-1/items/${conversationId}`)).toMatchObject({
+      clearedThroughSequence: 2,
+    });
+    expect(db.read(`directConversations/${conversationId}/messages/${second.result.messageId}`)).toMatchObject({
+      sequence: 2,
+    });
+  });
+
+  it('replays a report once, conflicts on a changed payload, and never writes a second case', async () => {
+    const db = createFakeDb();
+    seedPair(db, { friends: true });
+    const sent = await execute(db, 'user-2', directMessage('user-1', 'report_seed_000003', 'Spam link'));
+    const body = reportChat('user-2', 'report_send_000002', [sent.result.messageId], 'spam');
+    const first = await execute(db, 'user-1', body);
+    expect(first).toMatchObject({ ok: true, replayed: false });
+    await expect(execute(db, 'user-1', body)).resolves.toMatchObject({ ok: true, replayed: true, result: first.result });
+    await expect(execute(db, 'user-1', reportChat('user-2', 'report_send_000002', [sent.result.messageId], 'scam')))
+      .resolves.toMatchObject({ code: 'REQUEST_CONFLICT', ok: false });
+    expect(db.paths('reports/')).toHaveLength(1);
+    expect(db.paths('directChatReports/').filter((path) => path.split('/').length === 2)).toHaveLength(1);
+  });
+
+  it('keeps reporting available after a block and while the reporter is chat-restricted', async () => {
+    const db = createFakeDb();
+    const clock = seedPair(db, { friends: true });
+    const sent = await execute(db, 'user-2', directMessage('user-1', 'report_seed_000004', 'Harassment'));
+    db.write('blocks/user-1/blocked/user-2', { blockerUid: 'user-1' });
+    db.write('publicProfiles/user-2', { displayName: 'Two', moderationStatus: 'suspended', uid: 'user-2' });
+    db.write('directChatRestrictions/user-1', {
+      actorUid: 'platform-owner', reason: 'Safety', startsAt: clock.now - 1, state: 'restricted', uid: 'user-1',
+    });
+    db.write('appConfig/socialFeatures', { directMessageRequests: false, directMessages: false });
+    await expect(execute(db, 'user-1', directMessage('user-2', 'report_seed_000005', 'Blocked send')))
+      .resolves.toMatchObject({ ok: false });
+    await expect(execute(db, 'user-1', reportChat('user-2', 'report_send_000003', [sent.result.messageId], 'harassment')))
+      .resolves.toMatchObject({ ok: true, result: { status: 'open' } });
+  });
+
+  it('denies outsiders, unknown messages, and repeated reports of the same conversation', async () => {
+    const db = createFakeDb();
+    seedPair(db, { friends: true });
+    const sent = await execute(db, 'user-2', directMessage('user-1', 'report_seed_000006', 'Message'));
+    db.write('publicProfiles/user-3', { moderationStatus: 'active', uid: 'user-3' });
+    await expect(execute(db, 'user-3', reportChat('user-2', 'report_send_000004', [sent.result.messageId], 'spam')))
+      .resolves.toMatchObject({ code: 'NOT_FOUND', ok: false });
+    await expect(execute(db, 'user-1', reportChat('user-2', 'report_send_000005', ['dmm_absent00001'], 'spam')))
+      .resolves.toMatchObject({ code: 'EVIDENCE_UNAVAILABLE', ok: false });
+    await expect(execute(db, 'user-1', reportChat('user-2', 'report_send_000006', [sent.result.messageId], 'spam')))
+      .resolves.toMatchObject({ ok: true });
+    await expect(execute(db, 'user-1', reportChat('user-2', 'report_send_000007', [sent.result.messageId], 'scam')))
+      .resolves.toMatchObject({ code: 'RATE_LIMITED', ok: false });
+    expect(db.paths('reports/')).toHaveLength(1);
+  });
+
+  it('holds reported attachments against retention cleanup', async () => {
+    const db = createFakeDb();
+    const bucket = createFakeBucket();
+    seedPair(db, { friends: true });
+    db.write('appConfig/socialFeatures', { directMessageMedia: true, directMessageRequests: true, directMessages: true });
+    const source = await sharp({ create: { background: '#D41836', channels: 4, height: 2, width: 2 } }).png().toBuffer();
+    const authorized = await execute(db, 'user-2', {
+      action: 'create-direct-chat-upload',
+      payload: { contentType: 'image/png', kind: 'image', sizeBytes: source.length, targetUid: 'user-1' },
+      requestId: 'report_upload_00001',
+      version: 1,
+    }, {}, { bucket, safetyAdapter: { inspectImage: async () => ({ ok: true, provider: 'test' }) } });
+    expect(authorized).toMatchObject({ ok: true });
+    bucket.seed(authorized.result.storagePath, source, {
+      contentType: 'image/png',
+      metadata: { conversationId: authorized.result.conversationId, kind: 'image', uploaderUid: 'user-2', uploadId: authorized.result.uploadId },
+      size: source.length,
+    });
+    const finalized = await execute(db, 'user-2', {
+      action: 'finalize-direct-chat-upload',
+      payload: { targetUid: 'user-1', uploadId: authorized.result.uploadId },
+      requestId: 'report_upload_00002',
+      version: 1,
+    }, {}, { bucket, safetyAdapter: { inspectImage: async () => ({ ok: true, provider: 'test' }) } });
+    expect(finalized).toMatchObject({ ok: true });
+
+    const reported = await execute(db, 'user-1', reportChat('user-2', 'report_send_000008', [finalized.result.messageId], 'sexual-content'));
+    expect(reported).toMatchObject({ ok: true });
+    expect(db.read(`directChatUploads/${authorized.result.uploadId}`)).toMatchObject({ evidenceHold: true, state: 'finalized' });
+    expect(db.read(`directChatReports/${reported.result.reportId}`)).toMatchObject({ attachmentIds: [authorized.result.uploadId] });
+    expect(db.read(`directChatReports/${reported.result.reportId}/evidence/${finalized.result.messageId}`)).toMatchObject({
+      attachmentId: authorized.result.uploadId,
+      kind: 'image',
+      mediaContentType: 'image/webp',
+    });
+  });
 });
 
 function directMessage(targetUid, requestId, text, replyToMessageId = '') {
@@ -375,6 +567,15 @@ function messageRequest(targetUid, requestId, text) {
 
 function targetCommand(action, targetUid, requestId) {
   return { action, payload: { targetUid }, requestId, version: 1 };
+}
+
+function reportChat(targetUid, requestId, messageIds, category, details = '') {
+  return {
+    action: 'report-direct-chat',
+    payload: { category, ...(details ? { details } : {}), messageIds, targetUid },
+    requestId,
+    version: 1,
+  };
 }
 
 function unsend(targetUid, requestId, messageId) {
@@ -405,157 +606,4 @@ function execute(db, uid, body, claims = {}, services = {}) {
     db,
     decodedToken: { email: `${uid}@example.test`, email_verified: true, uid, ...claims },
   });
-}
-
-function seedPair(db, { friends = false } = {}) {
-  db.write('appConfig/socialFeatures', { directMessageRequests: true, directMessages: true });
-  db.write('appConfig/voiceRoomModeration', { keywordTerms: [] });
-  db.write('publicProfiles/user-1', { displayName: 'One', moderationStatus: 'active', uid: 'user-1' });
-  db.write('publicProfiles/user-2', { displayName: 'Two', moderationStatus: 'active', uid: 'user-2' });
-  if (friends) {
-    db.write(`friendships/${createFriendshipId('user-1', 'user-2')}`, { memberUids: ['user-1', 'user-2'] });
-  }
-  return db.clock;
-}
-
-function createFakeDb() {
-  const documents = new Map();
-  const clock = {
-    now: Date.UTC(2026, 7, 2, 12),
-    nowMillis() { return this.now; },
-    timestampFromMillis(value) { return value; },
-  };
-  const makeRef = (path) => ({
-    id: path.split('/').at(-1),
-    path,
-    collection(name) { return makeCollection(`${path}/${name}`); },
-    async get() { return snapshot(makeRef(path)); },
-  });
-  const snapshot = (reference) => ({
-    exists: documents.has(reference.path),
-    id: reference.id,
-    data: () => documents.get(reference.path),
-    ref: reference,
-  });
-  const makeQuery = (collectionId, prefix = '') => {
-    const filters = [];
-    const ordering = [];
-    let afterValues;
-    let maximum = Number.POSITIVE_INFINITY;
-    const query = {
-      __query: true,
-      where(field, operator, value) { filters.push([field, operator, value]); return query; },
-      orderBy(field, direction = 'asc') { ordering.push([field, direction]); return query; },
-      startAfter(...values) { afterValues = values; return query; },
-      limit(value) { maximum = value; db.queryLimits.push(value); return query; },
-      async get() {
-        let entries = [...documents.entries()]
-          .filter(([path]) => matchesCollection(path, collectionId, prefix))
-          .filter(([, value]) => filters.every(([field, operator, expected]) => compare(value?.[field], operator, expected)));
-        entries.sort((left, right) => compareOrdered(left[1], right[1], ordering));
-        if (afterValues) {
-          entries = entries.filter(([, value]) => isAfter(value, ordering, afterValues));
-        }
-        const docs = entries.slice(0, maximum).map(([path]) => snapshot(makeRef(path)));
-        return { docs, empty: docs.length === 0, size: docs.length };
-      },
-    };
-    return query;
-  };
-  const makeCollection = (path) => ({
-    doc(id) { return makeRef(`${path}/${id}`); },
-    ...makeQuery(path.split('/').at(-1), path),
-  });
-  const transaction = {
-    async get(reference) { return reference?.__query ? reference.get() : snapshot(reference); },
-    create(reference, value) {
-      if (documents.has(reference.path)) throw new Error(`already exists: ${reference.path}`);
-      documents.set(reference.path, structuredClone(value));
-    },
-    delete(reference) { documents.delete(reference.path); },
-    set(reference, value, options) {
-      documents.set(reference.path, options?.merge
-        ? { ...(documents.get(reference.path) || {}), ...structuredClone(value) }
-        : structuredClone(value));
-    },
-    update(reference, value) {
-      if (!documents.has(reference.path)) throw new Error(`missing: ${reference.path}`);
-      documents.set(reference.path, { ...documents.get(reference.path), ...structuredClone(value) });
-    },
-  };
-  let transactionTail = Promise.resolve();
-  const db = {
-    clock,
-    queryLimits: [],
-    batch() {
-      const deletes = [];
-      return { delete(reference) { deletes.push(reference); }, async commit() { deletes.forEach((reference) => documents.delete(reference.path)); } };
-    },
-    collection(path) { return makeCollection(path); },
-    collectionGroup(id) { return makeQuery(id); },
-    delete(path) { documents.delete(path); },
-    doc(path) { return makeRef(path); },
-    async getAll(...references) { return references.map(snapshot); },
-    paths(prefix) { return [...documents.keys()].filter((path) => path.startsWith(prefix)); },
-    read(path) { return documents.get(path); },
-    runTransaction(callback) {
-      const result = transactionTail.then(() => callback(transaction));
-      transactionTail = result.catch(() => undefined);
-      return result;
-    },
-    write(path, value) { documents.set(path, structuredClone(value)); },
-  };
-  return db;
-}
-
-function createFakeBucket() {
-  const objects = new Map();
-  const file = (path) => ({
-    async delete() { objects.delete(path); },
-    async download() { const object = objects.get(path); if (!object) throw new Error('missing'); return [Buffer.from(object.bytes)]; },
-    async getMetadata() { const object = objects.get(path); if (!object) throw new Error('missing'); return [{ ...object.metadata, size: String(object.bytes.length) }]; },
-    async save(bytes, options) {
-      if (options?.preconditionOpts?.ifGenerationMatch === 0 && objects.has(path)) { const error = new Error('exists'); error.code = 412; throw error; }
-      objects.set(path, { bytes: Buffer.from(bytes), metadata: options.metadata });
-    },
-  });
-  return {
-    file,
-    paths(prefix) { return [...objects.keys()].filter((path) => path.startsWith(prefix)); },
-    read(path) { return objects.get(path); },
-    seed(path, bytes, metadata) { objects.set(path, { bytes: Buffer.from(bytes), metadata }); },
-  };
-}
-
-function matchesCollection(path, collectionId, prefix) {
-  const parts = path.split('/');
-  if (prefix) return path.startsWith(`${prefix}/`) && parts.length === prefix.split('/').length + 1;
-  return parts.length >= 2 && parts.at(-2) === collectionId;
-}
-
-function compare(actual, operator, expected) {
-  if (operator === '==') return actual === expected;
-  if (operator === '<=') return actual <= expected;
-  if (operator === '>') return actual > expected;
-  if (operator === '<') return actual < expected;
-  throw new Error(`unsupported operator ${operator}`);
-}
-
-function compareOrdered(left, right, ordering) {
-  for (const [field, direction] of ordering) {
-    const comparison = left?.[field] === right?.[field] ? 0 : left?.[field] < right?.[field] ? -1 : 1;
-    if (comparison !== 0) return direction === 'desc' ? -comparison : comparison;
-  }
-  return 0;
-}
-
-function isAfter(value, ordering, afterValues) {
-  for (let index = 0; index < ordering.length; index += 1) {
-    const [field, direction] = ordering[index];
-    const current = value?.[field];
-    const boundary = afterValues[index];
-    if (current === boundary) continue;
-    return direction === 'desc' ? current < boundary : current > boundary;
-  }
-  return false;
 }

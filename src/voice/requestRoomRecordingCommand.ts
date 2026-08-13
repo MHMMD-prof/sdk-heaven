@@ -1,4 +1,5 @@
 import { VoiceProviderConfig } from './types';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomRecordingAction =
   | 'get-recording-status'
@@ -95,6 +96,7 @@ export async function requestRoomRecordingCommand(
       headers: {
         Authorization: `Bearer ${await getIdToken(true)}`,
         'Content-Type': 'application/json',
+        ...(await getVoiceAppCheckHeader()),
       },
       method: 'POST',
       signal: controller.signal,

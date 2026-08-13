@@ -65,6 +65,33 @@ describe('roomEntryEffectService', () => {
     expect(paths(db, '/entryEffectRequests/')).toHaveLength(0);
   });
 
+  it.each([
+    ['offline status', (presence) => { presence.status = 'offline'; }],
+    ['expired lease', (presence) => { presence.leaseExpiresAt = timestamp(nowMs); }],
+    ['future join timestamp', (presence) => { presence.joinedAt = timestamp(nowMs + 1); }],
+  ])('requires genuine current presence when %s', async (_label, mutate) => {
+    const db = seededDb();
+    mutate(db.documents.get('rooms/room-1/presence/user-1'));
+
+    expect(await execute(db, body(`presence_rejected_${_label.replace(/\s/g, '_')}_0001`)))
+      .toMatchObject({ code: 'SESSION_MISMATCH', ok: false, status: 409 });
+    expect(paths(db, '/events/')).toHaveLength(0);
+    expect(paths(db, '/entryEffectClaims/')).toHaveLength(0);
+  });
+
+  it('does not create another event when the same presence session reconnects', async () => {
+    const db = seededDb();
+    const first = await execute(db, body('entryfx_reconnect_00001'));
+    db.documents.get('rooms/room-1/presence/user-1').status = 'reconnecting';
+    db.documents.get('rooms/room-1/presence/user-1').leaseExpiresAt = timestamp(nowMs + 60_000);
+    const replay = await execute(db, body('entryfx_reconnect_00002'));
+
+    expect(first).toMatchObject({ ok: true, result: { reason: 'ANNOUNCED' } });
+    expect(replay).toMatchObject({ ok: true, replayed: true });
+    expect(paths(db, '/events/')).toHaveLength(1);
+    expect(paths(db, '/entryEffectClaims/')).toHaveLength(1);
+  });
+
   it('rate limits repeated rejected ownership checks', async () => {
     const db = seededDb();
     db.documents.set('storeOwnerships/user-1/items/car-1', {
@@ -85,11 +112,12 @@ describe('roomEntryEffectService', () => {
     const db = seededDb();
     db.documents.set('rooms/room-1/entryEffectRequests/old-request', { purgeAfter: timestamp(nowMs - 1) });
     db.documents.set('rooms/room-1/entryEffectClaims/old-claim', { purgeAfter: timestamp(nowMs - 1) });
+    db.documents.set('rooms/room-1/coupleEntryClaims/old-pair-claim', { purgeAfter: timestamp(nowMs - 1) });
     db.documents.set('rooms/room-1/entryEffectRateLimits/old-rate', { purgeAfter: timestamp(nowMs - 1) });
     db.documents.set('rooms/room-1/events/old-event', { kind: 'room-entry', purgeAfter: timestamp(nowMs - 1) });
     db.documents.set('rooms/room-1/events/future-event', { kind: 'room-entry', purgeAfter: timestamp(nowMs + 1) });
 
-    expect(await cleanupExpiredRoomEntryEffectRecords({ clock, db })).toEqual({ deleted: 4, scanned: 4 });
+    expect(await cleanupExpiredRoomEntryEffectRecords({ clock, db })).toEqual({ deleted: 5, scanned: 5 });
     expect(db.read('rooms/room-1/events/future-event')).toBeDefined();
     expect(db.read('rooms/room-1/events/old-event')).toBeUndefined();
   });
@@ -120,14 +148,92 @@ describe('roomEntryEffectService', () => {
       visualAsset: { assetId: 'royal-entry', assetVersionId: 'v1-aaaaaaaaaaaa' },
     });
   });
+
+  it('delivers the exact approved static fallback when entry motion is disabled', async () => {
+    const db = seededDb();
+    seedApprovedEntryBundle(db);
+    db.documents.get('appConfig/cosmeticsFeatures').room_entry_animations = false;
+
+    const result = await execute(db, body('entryfx_static_fallback_0001'));
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        effect: {
+          animationEnabled: false,
+          cosmeticAsset: {
+            assetId: 'royal-entry-static',
+            assetVersionId: 'v1-bbbbbbbbbbbb',
+          },
+          presentationSurface: 'bottom-stage',
+        },
+      },
+    });
+    expect(result.result.effect.assetSnapshot).toMatchObject({
+      fallbackAsset: { assetId: 'royal-entry-static', assetVersionId: 'v1-bbbbbbbbbbbb' },
+      visualAsset: { assetId: 'royal-entry', assetVersionId: 'v1-aaaaaaaaaaaa' },
+    });
+  });
+
+  it('coalesces concurrent couple entries into one pair event and one rate-limit debit', async () => {
+    const db = seededDb();
+    seedActiveCoupleEntrance(db);
+    const [first, second] = await Promise.all([
+      execute(db, body('couple_entry_request_0001'), 'user-1'),
+      execute(db, {
+        ...body('couple_entry_request_0002'),
+        sessionId: 'presence_session_0002',
+      }, 'user-2'),
+    ]);
+    expect(first).toMatchObject({ ok: true, result: { pairEntrance: true } });
+    expect(second).toMatchObject({ ok: true, result: { pairEntrance: true } });
+    expect(paths(db, '/events/')).toHaveLength(1);
+    expect(paths(db, '/coupleEntryClaims/')).toHaveLength(1);
+    expect(paths(db, '/entryEffectClaims/')).toHaveLength(2);
+    expect(paths(db, '/entryEffectRateLimits/')).toHaveLength(1);
+    const event = db.read(`rooms/room-1/events/${first.result.eventId}`);
+    expect(event.payload).toEqual(expect.objectContaining({
+      assetId: 'couple-entry',
+      assetVersionId: 'v1-cccccccccccc',
+      coupleEntrance: true,
+      memberDisplayNames: ['Ali', 'Noor'],
+      memberUids: ['user-1', 'user-2'],
+    }));
+    expect(event.payload).not.toHaveProperty('coupleIdHash');
+    expect(event.payload).not.toHaveProperty('relationshipId');
+  });
+
+  it.each([
+    ['pair flag off', (db) => { db.documents.set('appConfig/cosmeticsFeatures', { cosmetics_couple_effects: true, cosmetics_couple_entrances: false }); }],
+    ['stale public pair', (db) => { db.documents.get('publicProfiles/user-2').coupleEffect.coupleIdHash = 'f'.repeat(64); }],
+    ['disabled exact asset', (db) => { db.documents.get('cosmeticAssets/couple-entry').renderingEnabled = false; }],
+    ['expired ownership', (db) => { db.documents.get(`coupleEffectOwnerships/rel_${'b'.repeat(40)}/items/couple-fx`).expiresAt = timestamp(nowMs); }],
+    ['outside entrance window', (db) => { db.documents.get('rooms/room-1/presence/user-2').joinedAt = timestamp(nowMs - 8_001); }],
+    ['partner is only present in another room', (db) => {
+      const partnerPresence = db.documents.get('rooms/room-1/presence/user-2');
+      db.documents.delete('rooms/room-1/presence/user-2');
+      db.documents.set('rooms/room-2/presence/user-2', partnerPresence);
+    }],
+  ])('falls back to the individual entrance when %s', async (_label, mutate) => {
+    const db = seededDb();
+    seedActiveCoupleEntrance(db);
+    mutate(db);
+    const result = await execute(db, body(`fallback_${_label.replace(/\s/g, '_')}_0001`), 'user-1');
+    expect(result).toMatchObject({
+      ok: true,
+      result: { announced: true, reason: 'ANNOUNCED' },
+    });
+    expect(result.result).not.toHaveProperty('pairEntrance');
+    expect(paths(db, '/events/')).toHaveLength(1);
+    expect(paths(db, '/coupleEntryClaims/')).toHaveLength(0);
+  });
 });
 
-function execute(db, requestBody) {
+function execute(db, requestBody, uid = 'user-1') {
   return executeRoomEntryEffectCommand({
     body: requestBody,
     clock,
     db,
-    decodedToken: { uid: 'user-1' },
+    decodedToken: { uid },
     fieldValue,
   });
 }
@@ -160,6 +266,8 @@ function seededDb() {
       uid: 'user-1',
     },
     'rooms/room-1/presence/user-1': {
+      joinedAt: timestamp(nowMs - 1_000),
+      leaseExpiresAt: timestamp(nowMs + 45_000),
       sessionId: 'presence_session_0001',
       status: 'online',
       uid: 'user-1',
@@ -226,6 +334,120 @@ function seedApprovedEntryBundle(db) {
     opaqueCompositionPassed: false, performanceTier: 'standard', soundPolicy: 'off',
     status: 'passed', testedClientVersion: '1.0.0', visualAssetId: visual.assetId,
     visualAssetVersionId: visual.assetVersionId, visualChecksum: 'a'.repeat(64),
+  });
+}
+
+function seedActiveCoupleEntrance(db) {
+  const relationshipId = `rel_${'b'.repeat(40)}`;
+  const coupleIdHash = require('./coupleEffectsCore').createCoupleIdHash(relationshipId);
+  const projection = {
+    assetId: 'couple-entry',
+    assetVersionId: 'v1-cccccccccccc',
+    borderMode: 'looping',
+    coupleIdHash,
+    entranceMode: 'one-shot',
+    fallbackAssetId: 'couple-entry-static',
+    fallbackAssetVersionId: 'v1-dddddddddddd',
+    format: 'lottie-json',
+    itemId: 'couple-fx',
+    profileMode: 'looping',
+  };
+  db.documents.set('appConfig/cosmeticsFeatures', {
+    cosmetics_couple_effects: true,
+    cosmetics_couple_entrances: true,
+  });
+  db.documents.set('couples/couple-1', {
+    createdAt: timestamp(nowMs - 100_000),
+    memberUids: ['user-1', 'user-2'],
+    relationshipId,
+  });
+  db.documents.set('coupleMemberships/user-1', {
+    coupleId: 'couple-1', partnerUid: 'user-2', relationshipId, uid: 'user-1',
+  });
+  db.documents.set('coupleMemberships/user-2', {
+    coupleId: 'couple-1', partnerUid: 'user-1', relationshipId, uid: 'user-2',
+  });
+  db.documents.set('publicProfiles/user-1', {
+    ...db.read('publicProfiles/user-1'),
+    coupleEffect: projection,
+  });
+  db.documents.set('publicProfiles/user-2', {
+    coupleEffect: projection,
+    displayName: 'Noor',
+    moderationStatus: 'active',
+    uid: 'user-2',
+  });
+  db.documents.set('rooms/room-1/members/user-2', { status: 'active', uid: 'user-2' });
+  db.documents.set('rooms/room-1/presence/user-1', {
+    ...db.read('rooms/room-1/presence/user-1'),
+    joinedAt: timestamp(nowMs - 1_000),
+    leaseExpiresAt: timestamp(nowMs + 30_000),
+  });
+  db.documents.set('rooms/room-1/presence/user-2', {
+    joinedAt: timestamp(nowMs - 500),
+    leaseExpiresAt: timestamp(nowMs + 30_000),
+    sessionId: 'presence_session_0002',
+    status: 'online',
+    uid: 'user-2',
+  });
+  db.documents.set(`coupleEffectEquipment/${relationshipId}`, {
+    coupleId: 'couple-1',
+    itemId: 'couple-fx',
+    memberUids: ['user-1', 'user-2'],
+    projection,
+    relationshipId,
+    state: 'equipped',
+  });
+  db.documents.set(`coupleEffectOwnerships/${relationshipId}/items/couple-fx`, {
+    equipped: true,
+    itemId: 'couple-fx',
+    kind: 'couple-effect-ownership',
+    memberUids: ['user-1', 'user-2'],
+    ownershipId: 'couple-fx',
+    purchaserUid: 'user-1',
+    relationshipId,
+    state: 'active',
+  });
+  db.documents.set('storeCatalog/couple-fx', {
+    availability: 'available',
+    category: 'couple-effects',
+    cosmeticAsset: { assetId: 'couple-entry', assetVersionId: 'v1-cccccccccccc' },
+    coupleEffectPresentation: {
+      borderMode: 'looping', entranceMode: 'one-shot', profileMode: 'looping',
+    },
+    description: { ar: 'دخول ثنائي', en: 'Couple entrance' },
+    duration: { kind: 'permanent' },
+    itemId: 'couple-fx',
+    name: { ar: 'دخول ثنائي', en: 'Couple entrance' },
+    order: 2,
+    previewAssetUrl: 'https://cdn.example.test/couple-entry-preview.png',
+    prices: { coins: 100 },
+    purchasingEnabled: true,
+    stock: { kind: 'unlimited' },
+    thumbnailUrl: 'https://cdn.example.test/couple-entry-thumbnail.png',
+  });
+  seedCoupleAsset(db, 'couple-entry', 'v1-cccccccccccc', 'lottie-json', 'c'.repeat(64), {
+    fallbackAssetId: 'couple-entry-static',
+    fallbackAssetVersionId: 'v1-dddddddddddd',
+  });
+  seedCoupleAsset(db, 'couple-entry-static', 'v1-dddddddddddd', 'png', 'd'.repeat(64));
+}
+
+function seedCoupleAsset(db, assetId, assetVersionId, format, checksum, extra = {}) {
+  db.documents.set(`cosmeticAssets/${assetId}`, {
+    approvalId: `${assetId}__${assetVersionId}`,
+    approvedVersionId: assetVersionId,
+    assetId,
+    moderationStatus: 'approved',
+    publicationStatus: 'published',
+    publishedVersionId: assetVersionId,
+    renderingEnabled: true,
+  });
+  db.documents.set(`cosmeticAssets/${assetId}/versions/${assetVersionId}`, {
+    assetId, assetVersionId, category: 'couple-effect', format, sha256: checksum, ...extra,
+  });
+  db.documents.set(`cosmeticAssetApprovals/${assetId}__${assetVersionId}`, {
+    assetId, assetVersionId, checksum, decision: 'approved',
   });
 }
 

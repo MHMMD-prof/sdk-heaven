@@ -1,3 +1,4 @@
+import { startPersonalChatOperation } from '../observability/personalChatTelemetry';
 import { DirectChatAction, DIRECT_CHAT_COMMAND_VERSION } from './directChatContract';
 
 export type DirectChatCommandInput = {
@@ -28,12 +29,23 @@ export async function requestDirectChatCommand<T = Record<string, unknown>>(
   input: DirectChatCommandInput,
   options: {
     endpoint?: string;
+    getAppCheckToken?: (forceRefresh?: boolean) => Promise<string>;
     getIdToken?: () => Promise<string>;
     timeoutMs?: number;
   } = {},
 ): Promise<DirectChatCommandResult<T>> {
+  const operation = startPersonalChatOperation('command', { command_action: input.action });
+  let operationFinished = false;
+  const finishOperation = (outcome: 'failure' | 'success', errorCode = '') => {
+    if (operationFinished) return;
+    operationFinished = true;
+    operation.finish(outcome, errorCode);
+  };
   const endpoint = resolveDirectChatCommandEndpoint(options.endpoint);
-  if (!endpoint) throw new DirectChatCommandError('ENDPOINT_MISSING', 'خدمة المحادثات الشخصية غير مهيأة.', 0);
+  if (!endpoint) {
+    finishOperation('failure', 'ENDPOINT_MISSING');
+    throw new DirectChatCommandError('ENDPOINT_MISSING', 'خدمة المحادثات الشخصية غير مهيأة.', 0);
+  }
   const requestId = input.requestId || createDirectChatRequestId();
   const body = {
     action: input.action,
@@ -42,15 +54,21 @@ export async function requestDirectChatCommand<T = Record<string, unknown>>(
     version: DIRECT_CHAT_COMMAND_VERSION,
   };
   const getIdToken = options.getIdToken || getDefaultFirebaseIdToken;
+  const getAppCheckToken = options.getAppCheckToken || getDefaultFirebaseAppCheckToken;
   const idToken = await getIdToken();
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 10_000);
     try {
+      const appCheckToken = await getAppCheckToken(attempt > 0);
       const response = await fetch(endpoint, {
         body: JSON.stringify(body),
-        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+          ...(appCheckToken ? { 'X-Firebase-AppCheck': appCheckToken } : {}),
+        },
         method: 'POST',
         signal: controller.signal,
       });
@@ -61,12 +79,14 @@ export async function requestDirectChatCommand<T = Record<string, unknown>>(
           payload.messageAr || payload.error || 'تعذر تنفيذ طلب المحادثة الشخصية.',
           response.status,
         );
-        if (response.status >= 500 && attempt === 0) {
+        if ((response.status >= 500 || error.code === 'APP_CHECK_INVALID') && attempt === 0) {
           lastError = error;
           continue;
         }
+        finishOperation('failure', error.code);
         throw error;
       }
+      finishOperation('success');
       return { ok: true, replayed: payload.replayed === true, result: payload.result };
     } catch (error) {
       if (error instanceof DirectChatCommandError) throw error;
@@ -76,8 +96,10 @@ export async function requestDirectChatCommand<T = Record<string, unknown>>(
       clearTimeout(timeout);
     }
   }
+  const finalCode = lastError instanceof Error && lastError.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR';
+  finishOperation('failure', finalCode);
   throw new DirectChatCommandError(
-    lastError instanceof Error && lastError.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR',
+    finalCode,
     'تعذر الاتصال بخدمة المحادثات الشخصية.',
     0,
   );
@@ -123,4 +145,9 @@ async function readPayload<T>(response: Response): Promise<{
 async function getDefaultFirebaseIdToken() {
   const { getCurrentFirebaseIdToken } = await import('../auth/getCurrentFirebaseIdToken');
   return getCurrentFirebaseIdToken();
+}
+
+async function getDefaultFirebaseAppCheckToken(forceRefresh = false) {
+  const { getFirebaseAppCheckToken } = await import('../auth/appCheck');
+  return getFirebaseAppCheckToken(forceRefresh);
 }

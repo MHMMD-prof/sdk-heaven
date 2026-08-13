@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const { getCoupleOverview, getCoupleStatus, mutateCouple } = require('./socialCouplesService');
 
-const fieldValue = { serverTimestamp: () => ({ __serverTimestamp: true }) };
+const fieldValue = {
+  delete: () => ({ __delete: true }),
+  serverTimestamp: () => ({ __serverTimestamp: true }),
+};
 
 describe('socialCouplesService', () => {
   it('requires the remotely controlled couples flag', async () => {

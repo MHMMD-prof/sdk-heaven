@@ -7,6 +7,8 @@ const { normalizeRoomGiftPolicyUpdate } = require('./roomGiftPolicyCore');
 const ADMIN_DASHBOARD_ACTIONS = [
   'admin-settings',
   'admin-settings-update',
+  'account-deletion-jobs',
+  'account-deletion-retry',
   'administrator-action',
   'administrators',
   'attendance-outage-mutate',
@@ -18,9 +20,20 @@ const ADMIN_DASHBOARD_ACTIONS = [
   'client-error',
   'cosmetic-assets',
   'cosmetic-assets-mutate',
+  'cosmetic-custom-eligibility',
+  'cosmetic-custom-submission-preview',
+  'cosmetic-custom-submissions',
+  'cosmetics-renderer-disable',
   'couple-dissolve',
   'daily-login-campaign',
   'daily-login-campaign-mutate',
+  'ops-events',
+  'ops-events-mutate',
+  'direct-chat-action',
+  'direct-chat-evidence',
+  'direct-chat-ops-status',
+  'direct-chat-retention-get',
+  'direct-chat-retention-set',
   'economy-export',
   'economy-history',
   'feature-flag-update',
@@ -29,6 +42,9 @@ const ADMIN_DASHBOARD_ACTIONS = [
   'overview',
   'payroll-mutate',
   'payroll-overview',
+  'push-audience-estimate',
+  'push-campaigns-list',
+  'push-notification-send',
   'report-action',
   'report-detail',
   'report-summary',
@@ -72,7 +88,26 @@ const ADMIN_DASHBOARD_ACTIONS = [
   'wallet-credit',
 ];
 const ADMIN_ROLES = ['owner', 'super-moderator', 'moderator', 'support', 'catalog-manager', 'auditor'];
-const APPROVED_ADMIN_FEATURE_FLAGS = ['usersDiscovery', 'friends', 'wallet', 'gifts', 'couples', 'pushNotifications', 'representativeTransfers'];
+const APPROVED_ADMIN_FEATURE_FLAGS = [
+  'avatarUploads',
+  'usersDiscovery',
+  'friends',
+  'wallet',
+  'gifts',
+  'couples',
+  'pushNotifications',
+  'representativeTransfers',
+  'directMessages',
+  'directMessageRequests',
+  'directMessageMedia',
+  'personalChatsFrontendV2',
+];
+const APPROVED_COSMETICS_DARK_FLAGS = [
+  'cosmetics_couple_effects',
+  'cosmetics_couple_entrances',
+  'cosmetics_custom_submissions',
+  'cosmetics_custom_rendering',
+];
 const MAX_STORE_CATALOG_RESULTS = 50;
 const MAX_STORE_FILTER_SCAN_RESULTS = 100;
 const MAX_ECONOMY_RESULTS = 25;
@@ -264,6 +299,60 @@ function normalizeAdminFeatureFlagUpdate(body = {}) {
   if (expectedUpdatedAt !== 'missing' && !Number.isFinite(Date.parse(expectedUpdatedAt))) return { ok: false, status: 400, error: 'A current feature flag revision is required.' };
   if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) return { ok: false, status: 400, error: 'A valid requestId is required.' };
   return { ok: true, value: { enabled, expectedUpdatedAt: expectedUpdatedAt === 'missing' ? 'missing' : new Date(expectedUpdatedAt).toISOString(), flag, reason, requestId } };
+}
+
+function readRetentionDays(body, key) {
+  if (body[key] === undefined || body[key] === null || body[key] === '') return undefined;
+  const days = Number(body[key]);
+  if (!Number.isInteger(days) || days < 1) return { ok: false };
+  return { ok: true, value: days };
+}
+
+function normalizeAdminDirectChatRetentionSet(body = {}) {
+  const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 300) : '';
+  const requestId = typeof body.requestId === 'string' ? body.requestId.trim() : '';
+  const messageRetentionDays = readRetentionDays(body, 'messageRetentionDays');
+  const evidenceRetentionDays = readRetentionDays(body, 'evidenceRetentionDays');
+  const legalHoldRetentionDays = readRetentionDays(body, 'legalHoldRetentionDays');
+  if (messageRetentionDays && messageRetentionDays.ok === false) {
+    return { ok: false, status: 400, error: 'messageRetentionDays must be a whole number of days.' };
+  }
+  if (evidenceRetentionDays && evidenceRetentionDays.ok === false) {
+    return { ok: false, status: 400, error: 'evidenceRetentionDays must be a whole number of days.' };
+  }
+  if (legalHoldRetentionDays && legalHoldRetentionDays.ok === false) {
+    return { ok: false, status: 400, error: 'legalHoldRetentionDays must be a whole number of days.' };
+  }
+  if (
+    messageRetentionDays?.value === undefined
+    && evidenceRetentionDays?.value === undefined
+    && legalHoldRetentionDays?.value === undefined
+  ) {
+    return { ok: false, status: 400, error: 'Provide at least one retention day field.' };
+  }
+  if (reason.length < 3) return { ok: false, status: 400, error: 'A reason with at least 3 characters is required.' };
+  if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) return { ok: false, status: 400, error: 'A valid requestId is required.' };
+  return {
+    ok: true,
+    value: {
+      ...(evidenceRetentionDays?.value !== undefined ? { evidenceRetentionDays: evidenceRetentionDays.value } : {}),
+      ...(legalHoldRetentionDays?.value !== undefined ? { legalHoldRetentionDays: legalHoldRetentionDays.value } : {}),
+      ...(messageRetentionDays?.value !== undefined ? { messageRetentionDays: messageRetentionDays.value } : {}),
+      reason,
+      requestId,
+    },
+  };
+}
+
+function normalizeAdminCosmeticsRendererDisable(body = {}) {
+  const flag = typeof body.flag === 'string' ? body.flag.trim() : '';
+  const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 300) : '';
+  const requestId = typeof body.requestId === 'string' ? body.requestId.trim() : '';
+  if (!APPROVED_COSMETICS_DARK_FLAGS.includes(flag)) return { ok: false, status: 400, error: 'This cosmetics renderer flag is not approved for emergency control.' };
+  if (body.enabled !== undefined && body.enabled !== false) return { ok: false, status: 400, error: 'Emergency cosmetics controls can only force false.' };
+  if (reason.length < 3) return { ok: false, status: 400, error: 'A reason with at least 3 characters is required.' };
+  if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) return { ok: false, status: 400, error: 'A valid requestId is required.' };
+  return { ok: true, value: { flag, reason, requestId } };
 }
 
 function normalizeAdminClientError(body = {}) {
@@ -648,17 +737,42 @@ function resolveAdminDashboardRequest({ body = {}, decodedToken }) {
 }
 
 function createAdminOverviewPayload(counts, generatedAt = new Date().toISOString()) {
+  const growth = counts.growthHealth && typeof counts.growthHealth === 'object'
+    ? counts.growthHealth
+    : {};
   return {
     activeRooms: readCount(counts.activeRooms),
     adminAuditEvents: readCount(counts.adminAuditEvents),
     gameRooms: readCount(counts.gameRooms),
     generatedAt,
+    growthHealth: {
+      emptyRoomJoinRate: readRate(growth.emptyRoomJoinRate),
+      emptyRoomJoins: readCount(growth.emptyRoomJoins),
+      giftGmvCoins: readCount(growth.giftGmvCoins),
+      giftGmvDiamonds: readCount(growth.giftGmvDiamonds),
+      matchAttempts: readCount(growth.matchAttempts),
+      matchRoomLandings: readCount(growth.matchRoomLandings),
+      matchToRoomRate: readRate(growth.matchToRoomRate),
+      nonemptyRoomJoins: readCount(growth.nonemptyRoomJoins),
+      softMatchAttempts: readCount(growth.softMatchAttempts),
+      softMatchPaired: readCount(growth.softMatchPaired),
+      softMatchPairRate: readRate(growth.softMatchPairRate),
+      stageId: Number.isInteger(growth.stageId) ? growth.stageId : 0,
+      stageName: typeof growth.stageName === 'string' && growth.stageName.trim()
+        ? growth.stageName.trim()
+        : 'dark',
+      vipConversions: readCount(growth.vipConversions),
+    },
     moderationEvents: readCount(counts.moderationEvents),
     privateRooms: readCount(counts.privateRooms),
     reports: readCount(counts.reports),
     systemStatus: 'ok',
     users: readCount(counts.users),
   };
+}
+
+function readRate(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 function mapAdminUserProfileDocument(id, data = {}, publicData, reservationData, notificationPreferences, walletData) {
@@ -1040,6 +1154,7 @@ function readTimestampIso(value) {
 module.exports = {
   ADMIN_DASHBOARD_ACTIONS,
   APPROVED_ADMIN_FEATURE_FLAGS,
+  APPROVED_COSMETICS_DARK_FLAGS,
   createAdminOverviewPayload,
   filterAdminAuditEventRows,
   filterAdminReportRows,
@@ -1061,6 +1176,8 @@ module.exports = {
   normalizeAdminAuditQuery,
   normalizeAdminAuditLookup,
   normalizeAdminClientError,
+  normalizeAdminCosmeticsRendererDisable,
+  normalizeAdminDirectChatRetentionSet,
   normalizeAdminFeatureFlagUpdate,
   normalizeRoomGiftPolicyUpdate,
   normalizeAdministratorAction,

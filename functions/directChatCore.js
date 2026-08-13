@@ -57,6 +57,7 @@ const DIRECT_CHAT_ERRORS = Object.freeze({
   CONTENT_FILTERED: safeError(422, 'The message contains blocked content.', 'تحتوي الرسالة على محتوى غير مسموح.'),
   CURSOR_INVALID: safeError(400, 'The page cursor is invalid or expired.', 'مؤشر الصفحة غير صالح أو منتهي.'),
   EMAIL_VERIFICATION_REQUIRED: safeError(403, 'Email verification is required.', 'يجب تأكيد البريد الإلكتروني للمتابعة.'),
+  EVIDENCE_UNAVAILABLE: safeError(422, 'The selected messages are unavailable.', 'الرسائل المحددة غير متاحة للإبلاغ.'),
   FEATURE_DISABLED: safeError(503, 'Personal chat is not available.', 'المحادثات الشخصية غير متاحة حالياً.'),
   INTERNAL: safeError(500, 'The personal chat request failed.', 'تعذر تنفيذ طلب المحادثة. حاول مرة أخرى.'),
   INVALID_REQUEST: safeError(400, 'The personal chat request is invalid.', 'طلب المحادثة الشخصية غير صالح.'),
@@ -313,6 +314,9 @@ function normalizeDirectChatText(value) {
     .normalize('NFKC')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+    .replace(/\uFFFD/g, '')
+    // Drop unpaired surrogates; keep valid surrogate pairs (emoji) intact.
+    .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (match) => (match.length === 2 ? match : ''))
     .replace(/\r\n?/g, '\n')
     .replace(/[\t ]+/g, ' ')
     .replace(/ *\n */g, '\n')

@@ -100,11 +100,11 @@ test('enforces burst and owner slow mode limits', () => {
   });
 });
 
-test('fails closed and enforces friends-only room chat', () => {
+test('fails closed and enforces followers-only room chat', () => {
   const input = {
     authority: 'member',
     featureFlags: { voice_room_chat: true },
-    isFriendOfOwner: false,
+    isFollowerOfOwner: false,
     membership: { status: 'active', uid: 'actor' },
     nowMs: 1_000,
     profile: { uid: 'actor' },
@@ -117,9 +117,9 @@ test('fails closed and enforces friends-only room chat', () => {
   assert.equal(resolveSendMessage({
     ...input,
     featureFlags: {},
-    isFriendOfOwner: true,
+    isFollowerOfOwner: true,
   }).code, 'FEATURE_DISABLED');
-  assert.equal(resolveSendMessage({ ...input, isFriendOfOwner: true }).ok, true);
+  assert.equal(resolveSendMessage({ ...input, isFollowerOfOwner: true }).ok, true);
 });
 
 test('applies configured server keyword terms', () => {

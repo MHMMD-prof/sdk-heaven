@@ -19,6 +19,7 @@ function normalizeRoomGiftBody(body = {}) {
     action: typeof body.action === 'string' ? body.action.trim() : '',
     clientVersion: typeof body.clientVersion === 'string' ? body.clientVersion.trim() : '',
     giftId: typeof body.giftId === 'string' ? body.giftId.trim() : '',
+    magicFrameTemplateId: typeof body.magicFrameTemplateId === 'string' ? body.magicFrameTemplateId.trim() : '',
     quantity: Number.isInteger(body.quantity) && body.quantity >= 1 ? body.quantity : 1,
     quoteId: typeof body.quoteId === 'string' ? body.quoteId.trim() : '',
     requestId: typeof body.requestId === 'string' ? body.requestId.trim() : '',
@@ -364,6 +365,7 @@ function buildRoomGiftFingerprint(uid, command) {
       command.targetUid,
       command.targetMode,
       String(command.quantity),
+      command.magicFrameTemplateId || '',
       command.quoteId || '',
       command.requestId,
     ].join('|'))

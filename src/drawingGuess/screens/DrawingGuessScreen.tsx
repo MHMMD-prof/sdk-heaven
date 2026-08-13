@@ -290,13 +290,23 @@ function MatchResultsPanel({ actions, viewModel }: DrawingGuessPanelProps) {
       <LuxuryButton
         onPress={() => {
           void triggerDrawingGuessHaptic('success');
+          if (viewModel.isVoiceRoomSession) {
+            actions.leaveGame();
+            return;
+          }
           if (viewModel.isOnlineRoom) {
             actions.createOnlineRoom();
             return;
           }
           actions.createLocalRoom();
         }}
-        title={viewModel.isOnlineRoom ? 'New online room' : 'New local match'}
+        title={
+          viewModel.isVoiceRoomSession
+            ? 'Back to voice room'
+            : viewModel.isOnlineRoom
+              ? 'New online room'
+              : 'New local match'
+        }
       />
     </View>
   );

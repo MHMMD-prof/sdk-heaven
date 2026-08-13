@@ -8,6 +8,7 @@ import {
 
 export type ResolvedDrawingGuessLaunch = {
   displayName: string;
+  hostUid: string;
   roomCode: string;
   mode: DrawingGuessRouteMode;
   playerId: string;
@@ -27,11 +28,13 @@ export const resolveDrawingGuessLaunch = (
   const playerId = params?.playerId?.trim() || createDrawingGuessPlayerId('local');
   const displayName = params?.displayName?.trim() || 'You';
   const sessionId = params?.sessionId?.trim() || '';
+  const hostUid = params?.hostUid?.trim() || '';
 
   if (source === 'voice-room') {
     return {
       roomCode,
       displayName,
+      hostUid,
       mode,
       playerId,
       sessionId,
@@ -39,7 +42,7 @@ export const resolveDrawingGuessLaunch = (
       title: `Voice room ${roomCode}`,
       subtitle:
         mode === 'online'
-          ? 'Using this voice room id for a separate Drawing Guess LiveKit game connection.'
+          ? 'Joined from the voice room. Stay here while friends join from the invite card.'
           : 'Using this voice room id for a local Drawing Guess test room.',
     };
   }
@@ -47,6 +50,7 @@ export const resolveDrawingGuessLaunch = (
   return {
     roomCode,
     displayName,
+    hostUid,
     mode,
     playerId,
     sessionId,

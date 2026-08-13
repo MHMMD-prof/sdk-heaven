@@ -1,14 +1,19 @@
 import { ROOM_SEAT_COUNTS } from './roomV2Contract';
+import { createProductionRoomThemeLayouts } from './roomThemeProductionLayouts';
 
 export const ROOM_THEME_MANIFEST_VERSION = 1 as const;
+export const ROOM_THEME_MANIFEST_VERSION_V2 = 2 as const;
+export const ROOM_THEME_MANIFEST_VERSION_V3 = 3 as const;
 export const DEFAULT_ROOM_THEME_ID = 'majlis-default' as const;
 export const ROOM_THEME_IDS = [
   DEFAULT_ROOM_THEME_ID,
   'royal-theater',
   'ruby-constellation',
 ] as const;
+export const BUILT_IN_ROOM_THEME_REVISION = 8 as const;
 
 export type RoomThemeId = string;
+export type RoomThemeViewportProfile = 'compact' | 'standard' | 'tall';
 export type RoomThemePublicationStatus = 'draft' | 'published' | 'disabled';
 export type RoomThemeAssetSlot =
   | 'background'
@@ -56,8 +61,58 @@ export type RoomThemeManifestV1 = {
   layouts: Record<'5' | '10' | '15' | '20', RoomThemeSeatPositionV1[]>;
 };
 
+export type RoomThemeMotionAssetV2 = {
+  assetId: string;
+  assetVersionId: string;
+};
+
+export type RoomThemeAmbientSlotV2 = {
+  id: string;
+  asset: RoomThemeMotionAssetV2;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type RoomThemeManifestV2 = Omit<RoomThemeManifestV1, 'manifestVersion'> & {
+  manifestVersion: typeof ROOM_THEME_MANIFEST_VERSION_V2;
+  motion: {
+    background: RoomThemeMotionAssetV2 | null;
+    ambient: RoomThemeAmbientSlotV2[];
+  };
+};
+
+export type RoomThemeSceneMediaV3 = {
+  fit: 'cover' | 'contain';
+  focalX: number;
+  focalY: number;
+};
+
+export type RoomThemeSceneProfileV3 = {
+  layouts: Record<'5' | '10' | '15' | '20', RoomThemeSeatPositionV1[]>;
+};
+
+export type RoomThemeManifestV3 = Omit<RoomThemeManifestV2, 'manifestVersion'> & {
+  manifestVersion: typeof ROOM_THEME_MANIFEST_VERSION_V3;
+  scene: {
+    background: RoomThemeSceneMediaV3;
+    stage: RoomThemeSceneMediaV3;
+    profiles: Record<RoomThemeViewportProfile, RoomThemeSceneProfileV3>;
+  };
+};
+
+export type RoomThemeManifest = RoomThemeManifestV1 | RoomThemeManifestV2 | RoomThemeManifestV3;
+
+export type ResolvedRoomThemeScene = {
+  background: RoomThemeSceneMediaV3;
+  layouts: RoomThemeManifestV1['layouts'];
+  stage: RoomThemeSceneMediaV3;
+  viewportProfile: RoomThemeViewportProfile;
+};
+
 export type RoomThemeManifestValidationResult =
-  | { ok: true; manifest: RoomThemeManifestV1 }
+  | { ok: true; manifest: RoomThemeManifest }
   | { ok: false; reason: string };
 
 const THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
@@ -139,6 +194,117 @@ export function validateRoomThemeManifestV1(
   return { ok: true, manifest: value as RoomThemeManifestV1 };
 }
 
+export function validateRoomThemeManifestV2(
+  value: unknown,
+  options: { allowBundledAssets?: boolean } = {},
+): RoomThemeManifestValidationResult {
+  if (!isRecord(value) || value.manifestVersion !== ROOM_THEME_MANIFEST_VERSION_V2) {
+    return invalid('Unsupported manifest version.');
+  }
+  const base = validateRoomThemeManifestV1({
+    ...value,
+    manifestVersion: ROOM_THEME_MANIFEST_VERSION,
+  }, options);
+  if (!base.ok || !isRecord(value.motion) || !hasExactKeys(value.motion, ['background', 'ambient'])) {
+    return invalid('Invalid animated theme manifest.');
+  }
+  if (value.motion.background !== null && !isMotionReference(value.motion.background)) {
+    return invalid('Invalid animated background reference.');
+  }
+  if (!Array.isArray(value.motion.ambient) || value.motion.ambient.length > 2) {
+    return invalid('Invalid ambient theme slots.');
+  }
+  const seen = new Set<string>();
+  for (const slot of value.motion.ambient) {
+    if (
+      !isRecord(slot)
+      || !hasExactKeys(slot, ['id', 'asset', 'x', 'y', 'width', 'height'])
+      || typeof slot.id !== 'string'
+      || !/^[a-z0-9][a-z0-9-]{1,31}$/.test(slot.id)
+      || seen.has(slot.id)
+      || !isMotionReference(slot.asset)
+      || !inRange(slot.x, 0.05, 0.95)
+      || !inRange(slot.y, 0.08, 0.85)
+      || !inRange(slot.width, 0.05, 0.6)
+      || !inRange(slot.height, 0.05, 0.6)
+      || slot.x + slot.width > 0.95
+      || slot.y + slot.height > 0.85
+    ) {
+      return invalid('Invalid ambient theme slot.');
+    }
+    seen.add(slot.id);
+  }
+  return { ok: true, manifest: value as RoomThemeManifestV2 };
+}
+
+export function validateRoomThemeManifestV3(
+  value: unknown,
+  options: { allowBundledAssets?: boolean } = {},
+): RoomThemeManifestValidationResult {
+  if (!isRecord(value) || value.manifestVersion !== ROOM_THEME_MANIFEST_VERSION_V3) {
+    return invalid('Unsupported manifest version.');
+  }
+  const base = validateRoomThemeManifestV2({
+    ...value,
+    manifestVersion: ROOM_THEME_MANIFEST_VERSION_V2,
+  }, options);
+  if (!base.ok || !isRecord(value.scene) || !hasExactKeys(value.scene, ['background', 'stage', 'profiles'])) {
+    return invalid('Invalid responsive theme scene.');
+  }
+  if (!validateSceneMedia(value.scene.background) || !validateSceneMedia(value.scene.stage)) {
+    return invalid('Invalid scene media positioning.');
+  }
+  if (!isRecord(value.scene.profiles) || !hasExactKeys(value.scene.profiles, ['compact', 'standard', 'tall'])) {
+    return invalid('Compact, standard and tall scene profiles are required.');
+  }
+  for (const profileName of ['compact', 'standard', 'tall'] as const) {
+    const profile = value.scene.profiles[profileName];
+    if (!isRecord(profile) || !hasExactKeys(profile, ['layouts']) || !isRecord(profile.layouts)) {
+      return invalid(`Invalid ${profileName} scene profile.`);
+    }
+    if (!hasExactKeys(profile.layouts, ROOM_SEAT_COUNTS.map(String))) {
+      return invalid(`Layouts for 5, 10, 15 and 20 seats are required in ${profileName}.`);
+    }
+    for (const count of ROOM_SEAT_COUNTS) {
+      const result = validateSeatLayout(profile.layouts[String(count)], count);
+      if (!result.ok) return invalid(`${profileName}: ${result.reason}`);
+    }
+  }
+  return { ok: true, manifest: value as RoomThemeManifestV3 };
+}
+
+export function validateRoomThemeManifest(
+  value: unknown,
+  options: { allowBundledAssets?: boolean } = {},
+): RoomThemeManifestValidationResult {
+  if (isRecord(value) && value.manifestVersion === ROOM_THEME_MANIFEST_VERSION_V3) {
+    return validateRoomThemeManifestV3(value, options);
+  }
+  return isRecord(value) && value.manifestVersion === ROOM_THEME_MANIFEST_VERSION_V2
+    ? validateRoomThemeManifestV2(value, options)
+    : validateRoomThemeManifestV1(value, options);
+}
+
+export function resolveRoomThemeScene(
+  manifest: RoomThemeManifest,
+  viewportProfile: RoomThemeViewportProfile,
+): ResolvedRoomThemeScene {
+  if (manifest.manifestVersion === ROOM_THEME_MANIFEST_VERSION_V3) {
+    return {
+      background: manifest.scene.background,
+      layouts: manifest.scene.profiles[viewportProfile].layouts,
+      stage: manifest.scene.stage,
+      viewportProfile,
+    };
+  }
+  return {
+    background: DEFAULT_SCENE_MEDIA,
+    layouts: manifest.layouts,
+    stage: DEFAULT_STAGE_MEDIA,
+    viewportProfile,
+  };
+}
+
 export function isClientVersionCompatible(minimumVersion: string, currentVersion: string) {
   const minimum = parseVersion(minimumVersion);
   const current = parseVersion(currentVersion);
@@ -157,9 +323,9 @@ export const MAJLIS_DEFAULT_MANIFEST: RoomThemeManifestV1 = {
   renderingEnabled: true,
   purchasingEnabled: false,
   minimumClientVersion: '1.0.0',
-  revision: 1,
+  revision: BUILT_IN_ROOM_THEME_REVISION,
   assets: {
-    background: { uri: 'bundle://room-themes/majlis-default/background', version: 1 },
+    background: { uri: 'bundle://room-themes/majlis-default/stage-v2', version: 2 },
     stage: null,
     emptySeatFrame: null,
     badge: null,
@@ -177,12 +343,7 @@ export const MAJLIS_DEFAULT_MANIFEST: RoomThemeManifestV1 = {
     text: '#FFF4DE',
     textMuted: '#CDBB9D',
   },
-  layouts: {
-    '5': horseshoeLayout(5),
-    '10': horseshoeLayout(10),
-    '15': horseshoeLayout(15),
-    '20': horseshoeLayout(20),
-  },
+  layouts: createProductionRoomThemeLayouts(DEFAULT_ROOM_THEME_ID, 'standard'),
 };
 
 export function createBuiltInRoomThemeManifest(
@@ -197,9 +358,10 @@ export function createBuiltInRoomThemeManifest(
     assets: {
       ...MAJLIS_DEFAULT_MANIFEST.assets,
       background: {
-        uri: `bundle://room-themes/${themeId}/background`,
-        version: 1,
+        uri: `bundle://room-themes/${themeId}/stage-v2`,
+        version: 2,
       },
+      stage: null,
     },
     colors: royal
       ? {
@@ -218,11 +380,26 @@ export function createBuiltInRoomThemeManifest(
           ruby: '#731630',
           rubyBright: '#B72A4E',
         },
-    layouts: {
-      '5': royal ? theaterLayout(5) : constellationLayout(5),
-      '10': royal ? theaterLayout(10) : constellationLayout(10),
-      '15': royal ? theaterLayout(15) : constellationLayout(15),
-      '20': royal ? theaterLayout(20) : constellationLayout(20),
+    layouts: createProductionRoomThemeLayouts(themeId, 'standard'),
+  };
+}
+
+export function createBuiltInRoomThemeManifestV3(
+  themeId: (typeof ROOM_THEME_IDS)[number],
+): RoomThemeManifestV3 {
+  const base = createBuiltInRoomThemeManifest(themeId);
+  return {
+    ...base,
+    manifestVersion: ROOM_THEME_MANIFEST_VERSION_V3,
+    motion: { ambient: [], background: null },
+    scene: {
+      background: { fit: 'cover', focalX: 0.5, focalY: 0.5 },
+      stage: { fit: 'cover', focalX: 0.5, focalY: 0.5 },
+      profiles: {
+        compact: { layouts: createProductionRoomThemeLayouts(themeId, 'compact') },
+        standard: { layouts: createProductionRoomThemeLayouts(themeId, 'standard') },
+        tall: { layouts: createProductionRoomThemeLayouts(themeId, 'tall') },
+      },
     },
   };
 }
@@ -247,7 +424,7 @@ function validateSeatLayout(value: unknown, count: number): RoomThemeManifestVal
       || seen.has(seatNumber)
       || !inRange(x, 0.04, 0.96)
       || !inRange(y, 0.04, 0.96)
-      || !inRange(scale, 0.7, 1.3)
+      || !inRange(scale, 0.5, 1.3)
       || !Number.isInteger(z)
       || z < 0
       || z > 100
@@ -269,75 +446,38 @@ function validateSeatLayout(value: unknown, count: number): RoomThemeManifestVal
   return { ok: true, manifest: MAJLIS_DEFAULT_MANIFEST };
 }
 
-function horseshoeLayout(count: number): RoomThemeSeatPositionV1[] {
-  if (count === 5) {
-    return points([[0.16, 0.34], [0.32, 0.18], [0.5, 0.13], [0.68, 0.18], [0.84, 0.34]]);
-  }
-  const rows = Math.ceil(count / 5);
-  const output: Array<[number, number]> = [];
-  for (let row = 0; row < rows; row += 1) {
-    const rowCount = Math.min(5, count - output.length);
-    const progress = rows === 1 ? 1 : row / (rows - 1);
-    output.push(...spreadRow(
-      rowCount,
-      0.18 - progress * 0.08,
-      0.82 + progress * 0.08,
-      rows === 2 ? 0.22 + row * 0.48 : 0.1 + row * (0.78 / (rows - 1)),
-    ));
-  }
-  return points(output);
+function validateSceneMedia(value: unknown): value is RoomThemeSceneMediaV3 {
+  return isRecord(value)
+    && hasExactKeys(value, ['fit', 'focalX', 'focalY'])
+    && (value.fit === 'cover' || value.fit === 'contain')
+    && inRange(Number(value.focalX), 0, 1)
+    && inRange(Number(value.focalY), 0, 1);
 }
 
-function theaterLayout(count: number): RoomThemeSeatPositionV1[] {
-  const rows = Math.ceil(count / 5);
-  const output: Array<[number, number]> = [];
-  for (let row = 0; row < rows; row += 1) {
-    const rowCount = Math.min(5, count - output.length);
-    const progress = rows === 1 ? 1 : row / (rows - 1);
-    output.push(...spreadRow(
-      rowCount,
-      0.2 - progress * 0.1,
-      0.8 + progress * 0.1,
-      rows === 1 ? 0.42 : 0.12 + row * (0.76 / (rows - 1)),
-    ));
-  }
-  return points(output);
-}
+const DEFAULT_SCENE_MEDIA: RoomThemeSceneMediaV3 = Object.freeze({
+  fit: 'cover',
+  focalX: 0.5,
+  focalY: 0.5,
+});
 
-function constellationLayout(count: number): RoomThemeSeatPositionV1[] {
-  const columns = count <= 5 ? count : 5;
-  const rows = Math.ceil(count / columns);
-  const output: Array<[number, number]> = [];
-  for (let row = 0; row < rows; row += 1) {
-    const rowCount = Math.min(columns, count - output.length);
-    output.push(...spreadRow(rowCount, 0.11, 0.89, rows === 1 ? 0.4 : 0.16 + row * (0.68 / Math.max(1, rows - 1))));
-  }
-  return points(output);
-}
-
-function spreadRow(count: number, start: number, end: number, y: number): Array<[number, number]> {
-  if (count <= 0) return [];
-  if (count === 1) return [[0.5, y]];
-  return Array.from({ length: count }, (_, index) => [start + ((end - start) * index) / (count - 1), y]);
-}
-
-function points(values: Array<[number, number]>): RoomThemeSeatPositionV1[] {
-  return values.map(([x, y], index) => ({
-    seatNumber: index + 1,
-    x: round(x),
-    y: round(y),
-    scale: 1,
-    z: index + 1,
-  }));
-}
+const DEFAULT_STAGE_MEDIA: RoomThemeSceneMediaV3 = Object.freeze({
+  fit: 'contain',
+  focalX: 0.5,
+  focalY: 0.5,
+});
 
 function parseVersion(value: string) {
   if (!CLIENT_VERSION_PATTERN.test(value)) return null;
   return value.split('.').map(Number);
 }
 
-function round(value: number) {
-  return Math.round(value * 1000) / 1000;
+function isMotionReference(value: unknown): value is RoomThemeMotionAssetV2 {
+  return isRecord(value)
+    && hasExactKeys(value, ['assetId', 'assetVersionId'])
+    && typeof value.assetId === 'string'
+    && /^[a-z0-9][a-z0-9_-]{2,79}$/.test(value.assetId)
+    && typeof value.assetVersionId === 'string'
+    && /^v[1-9][0-9]{0,8}-[a-f0-9]{12}$/.test(value.assetVersionId);
 }
 
 function inRange(value: number, minimum: number, maximum: number) {

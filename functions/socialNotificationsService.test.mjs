@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 const require = createRequire(import.meta.url);
 const { createPushTokenId } = require('./socialNotificationsCore');
 const {
+  deliverDirectChatNotification,
   deliverNotificationForCommand,
   deliverSocialNotification,
   getNotificationSettings,
@@ -12,6 +13,7 @@ const {
 } = require('./socialNotificationsService');
 const fieldValue = { serverTimestamp: () => ({ __serverTimestamp: true }) };
 const token = 'ExponentPushToken[abcdefghijklmnopqrstuv]';
+const conversationId = 'a'.repeat(64);
 
 describe('socialNotificationsService', () => {
   it('keeps registration behind the remote feature flag', async () => {
@@ -30,9 +32,21 @@ describe('socialNotificationsService', () => {
     await expect(mutateNotificationSettings(registration)).resolves.toMatchObject({ result: { registered: true } });
     expect(db.documents.get(`pushDevices/self/tokens/${createPushTokenId(token)}`).active).toBe(true);
 
-    const preferences = { coupleRequests: false, friendRequests: true, gifts: false, walletTransfers: true };
+    const preferences = {
+      coupleRequests: false,
+      directMessageRequests: true,
+      directMessages: true,
+      follows: true,
+      friendRequests: true,
+      gifts: false,
+      readReceipts: true,
+      showMessagePreview: true,
+      showOnlineStatus: true,
+      walletTransfers: true,
+    };
     await expect(mutateNotificationSettings({
-      action: 'update-notification-preferences', db, fieldValue, input: preferences,
+      action: 'update-notification-preferences', db, fieldValue,
+      input: { coupleRequests: false, friendRequests: true, gifts: false, walletTransfers: true },
       requestId: 'push_prefs_1234567', uid: 'self',
     })).resolves.toEqual({ result: { preferences } });
     await expect(getNotificationSettings({ db, uid: 'self' })).resolves.toMatchObject({ result: { preferences, registeredDeviceCount: 1 } });
@@ -85,6 +99,182 @@ describe('socialNotificationsService', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('delivers accepted direct messages and suppresses muted blocked preference and duplicate pushes', async () => {
+    const db = socialDb(true);
+    const tokenId = createPushTokenId(token);
+    db.documents.set(`pushDevices/target/tokens/${tokenId}`, { active: true, token });
+    const fetchImpl = vi.fn(async () => ({
+      json: async () => ({ data: [{ id: 'ticket-dm-1', status: 'ok' }] }),
+      ok: true,
+      status: 200,
+    }));
+
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message',
+      messageKind: 'text',
+      nowMs: 1_000_000,
+      recipientUid: 'target',
+      requestId: 'dm_push_000000000001',
+      text: 'hello friend',
+    })).resolves.toMatchObject({ status: 'submitted' });
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)[0]).toMatchObject({
+      body: 'hello friend',
+      data: { route: 'DirectChat', targetUid: 'self' },
+      title: 'Self',
+    });
+
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message',
+      messageKind: 'text',
+      nowMs: 1_000_000,
+      recipientUid: 'target',
+      requestId: 'dm_push_000000000001',
+      text: 'hello friend',
+    })).resolves.toEqual({ status: 'duplicate' });
+
+    db.documents.set(`directConversationMembers/target/items/${conversationId}`, { muted: true });
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message',
+      messageKind: 'text',
+      nowMs: 1_100_000,
+      recipientUid: 'target',
+      requestId: 'dm_push_000000000002',
+      text: 'muted',
+    })).resolves.toEqual({ status: 'muted' });
+
+    db.documents.delete(`directConversationMembers/target/items/${conversationId}`);
+    db.documents.set('blocks/target/blocked/self', { targetUid: 'self' });
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message',
+      messageKind: 'text',
+      nowMs: 1_100_000,
+      recipientUid: 'target',
+      requestId: 'dm_push_000000000003',
+      text: 'blocked',
+    })).resolves.toEqual({ status: 'blocked' });
+
+    db.documents.delete('blocks/target/blocked/self');
+    db.documents.set('notificationPreferences/target', {
+      coupleRequests: true,
+      directMessageRequests: true,
+      directMessages: false,
+      friendRequests: true,
+      gifts: true,
+      readReceipts: true,
+      showMessagePreview: true,
+      showOnlineStatus: true,
+      walletTransfers: true,
+    });
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message',
+      messageKind: 'text',
+      nowMs: 1_100_000,
+      recipientUid: 'target',
+      requestId: 'dm_push_000000000004',
+      text: 'disabled',
+    })).resolves.toEqual({ status: 'preference-disabled' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides request and preview-off content and coalesces rapid conversation pushes', async () => {
+    const db = socialDb(true);
+    const tokenId = createPushTokenId(token);
+    db.documents.set(`pushDevices/target/tokens/${tokenId}`, { active: true, token });
+    db.documents.set('notificationPreferences/target', {
+      coupleRequests: true,
+      directMessageRequests: true,
+      directMessages: true,
+      friendRequests: true,
+      gifts: true,
+      readReceipts: true,
+      showMessagePreview: false,
+      showOnlineStatus: true,
+      walletTransfers: true,
+    });
+    const fetchImpl = vi.fn(async () => ({
+      json: async () => ({ data: [{ id: 'ticket-dm-2', status: 'ok' }] }),
+      ok: true,
+      status: 200,
+    }));
+
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message-request',
+      messageKind: 'text',
+      nowMs: 2_000_000,
+      recipientUid: 'target',
+      requestId: 'dm_req_000000000001',
+      text: 'please reply',
+    })).resolves.toMatchObject({ status: 'submitted' });
+    const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)[0];
+    expect(requestPayload.title).toBe('طلب رسالة جديدة');
+    expect(requestPayload.body).toBe('لديك طلب رسالة جديد');
+    expect(requestPayload.body).not.toContain('please');
+    expect(requestPayload.title).not.toContain('Self');
+
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message',
+      messageKind: 'text',
+      nowMs: 2_010_000,
+      recipientUid: 'target',
+      requestId: 'dm_push_000000000010',
+      text: 'secret body',
+    })).resolves.toEqual({ status: 'coalesced' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    await expect(deliverDirectChatNotification({
+      actorUid: 'self',
+      conversationId,
+      db,
+      fieldValue,
+      fetchImpl,
+      kind: 'direct-message',
+      messageKind: 'text',
+      nowMs: 2_100_000,
+      recipientUid: 'target',
+      requestId: 'dm_push_000000000011',
+      text: 'secret body',
+    })).resolves.toMatchObject({ status: 'submitted' });
+    const hiddenPayload = JSON.parse(fetchImpl.mock.calls[1][1].body)[0];
+    expect(hiddenPayload).toMatchObject({ body: 'لديك رسالة جديدة', title: 'رسالة جديدة' });
+    expect(hiddenPayload.body).not.toContain('secret');
+    expect(hiddenPayload.title).not.toContain('Self');
+  });
+
   it('processes Expo receipts and disables tokens rejected after submission', async () => {
     const db = socialDb(true);
     const tokenId = createPushTokenId(token);
@@ -133,6 +323,11 @@ class FakeFirestore {
       },
       get: async () => snapshot(ref, this.documents.get(path)),
       path,
+      set: async (data, options) => {
+        this.documents.set(path, options?.merge
+          ? { ...(this.documents.get(path) || {}), ...data }
+          : data);
+      },
       update: async (data) => this.documents.set(path, { ...this.documents.get(path), ...data }),
     };
     return ref;

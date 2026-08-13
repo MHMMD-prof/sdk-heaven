@@ -3,7 +3,7 @@ import type { RewardBundleV1 } from './weeklyIncentiveContract';
 
 export type RoomRocketAssetV1 = {
   durationMs?: number;
-  format: 'png' | 'webp' | 'animated-webp' | 'mp3' | 'm4a';
+  format: 'png' | 'webp' | 'animated-webp' | 'mp4' | 'lottie-json' | 'mp3' | 'm4a';
   height?: number;
   uri: string;
   width?: number;
@@ -178,7 +178,7 @@ function mapAppearance(value: unknown): RoomRocketCycleV1['appearance'] | undefi
   const ar = typeof value.name.ar === 'string' ? value.name.ar.trim().slice(0, 60) : '';
   const en = typeof value.name.en === 'string' ? value.name.en.trim().slice(0, 60) : '';
   const staticAsset = mapAsset(value.staticAsset, ['png', 'webp']);
-  const animationAsset = mapAsset(value.animationAsset, ['animated-webp']);
+  const animationAsset = mapAsset(value.animationAsset, ['mp4', 'lottie-json', 'animated-webp']);
   const soundAsset = mapAsset(value.soundAsset, ['mp3', 'm4a']);
   if (!ar || !en || !staticAsset || !animationAsset) return undefined;
   return { animationAsset, name: { ar, en }, ...(soundAsset ? { soundAsset } : {}), staticAsset };

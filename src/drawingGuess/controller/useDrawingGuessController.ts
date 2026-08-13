@@ -6,6 +6,21 @@ import {
   shouldAutoEndRound,
 } from '../model/drawingGuessReducer';
 import { getPromptAnswers, normalizeGuess } from '../model/guessNormalization';
+import {
+  applyOnlineStateForViewer,
+  canAcceptForeignAuthority,
+  createAuthorityClaimGrace,
+  hasOnlineMatchProgress,
+  observePeersForAuthorityClaimGrace,
+  PEER_ABSENT_INTERVALS_BEFORE_CLAIM,
+  resolveOnlineInboundGameplay,
+  shouldAdoptPeerSnapshot,
+  shouldClaimHostAfterAuthorityProbe,
+  shouldDeferInstantHostClaimOnPresenceFlap,
+  shouldIgnorePeerSnapshotAsHost,
+  syncPresencePlayers,
+  tickAuthorityClaimGraceOnProbe,
+} from '../model/onlineGameplayReliability';
 import { chunkSnapshot, DrawingGuessSnapshotReassembler } from '../model/snapshot';
 import { DrawingGuessPrompt, DrawingGuessSnapshot, DrawingPoint, DrawingStroke } from '../model/types';
 import { getPromptById } from '../model/wordBank';
@@ -41,6 +56,7 @@ import {
   createDrawingGuessViewModel,
   createLocalSimulatedDrawingGuessState,
   createOnlineDrawingGuessState,
+  resolveOnlineBootstrapMatchId,
 } from './drawingGuessControllerModel';
 import { DrawingGuessController, DrawingGuessRouteParams } from './drawingGuessControllerTypes';
 import { resolveDrawingGuessLaunch } from './resolveDrawingGuessLaunch';
@@ -66,6 +82,7 @@ export function useDrawingGuessController(
   const localPlayerId = initialLaunch.playerId;
   const localDisplayName = initialLaunch.displayName;
   const gameSessionId = initialLaunch.sessionId;
+  const sessionHostUid = initialLaunch.hostUid;
   const [launchSource, setLaunchSource] = useState(initialLaunch.source);
   const [launchTitle, setLaunchTitle] = useState(initialLaunch.title);
   const [launchSubtitle, setLaunchSubtitle] = useState(initialLaunch.subtitle);
@@ -81,8 +98,13 @@ export function useDrawingGuessController(
   const localConnectionRef = useRef<DrawingGuessConnection | undefined>(undefined);
   const simulatedConnectionRefs = useRef<Record<string, DrawingGuessConnection>>({});
   const connectionsRef = useRef<DrawingGuessConnection[]>([]);
+  const isRecoveringSnapshotRef = useRef(false);
   const stateRef = useRef(
-    createInitialState(initialRoomCode, initialMode, localPlayerId),
+    createInitialState(initialRoomCode, initialMode, localPlayerId, {
+      displayName: localDisplayName,
+      hostUid: sessionHostUid,
+      sessionId: gameSessionId,
+    }),
   );
   const sequenceRef = useRef(0);
   const previewThrottleRef = useRef<StrokePreviewThrottleState>(initialStrokePreviewThrottleState);
@@ -164,6 +186,10 @@ export function useDrawingGuessController(
   }, [state]);
 
   useEffect(() => {
+    isRecoveringSnapshotRef.current = isRecoveringSnapshot;
+  }, [isRecoveringSnapshot]);
+
+  useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
 
     return () => clearInterval(timer);
@@ -171,6 +197,152 @@ export function useDrawingGuessController(
 
   useEffect(() => {
     let isActive = true;
+    let hasClaimedHostSnapshot = false;
+    let claimGrace = createAuthorityClaimGrace();
+    let claimProbeTimer: ReturnType<typeof setTimeout> | undefined;
+    const AUTHORITY_PROBE_MS = 2500;
+
+    const clearClaimProbeTimer = () => {
+      if (claimProbeTimer) {
+        clearTimeout(claimProbeTimer);
+        claimProbeTimer = undefined;
+      }
+    };
+
+    const notePeersConnected = (peersConnected: boolean) => {
+      claimGrace = observePeersForAuthorityClaimGrace(claimGrace, peersConnected);
+    };
+
+    const clearRecoveringSnapshot = () => {
+      if (isRecoveringSnapshotRef.current) {
+        isRecoveringSnapshotRef.current = false;
+        setIsRecoveringSnapshot(false);
+      }
+    };
+
+    const claimHostAuthority = async (connection: DrawingGuessConnection) => {
+      if (stateRef.current.hostId !== localPlayerId) {
+        return;
+      }
+      hasClaimedHostSnapshot = true;
+      clearClaimProbeTimer();
+      clearRecoveringSnapshot();
+      claimGrace = createAuthorityClaimGrace();
+      await publishSnapshotChunks(createDrawingGuessMessageId());
+    };
+
+    const requestHostSnapshot = async (
+      connection: DrawingGuessConnection,
+      options?: { markRecovering?: boolean },
+    ) => {
+      if (options?.markRecovering !== false) {
+        isRecoveringSnapshotRef.current = true;
+        setIsRecoveringSnapshot(true);
+      }
+      await connection.publish(
+        createControlMessage({
+          matchId: stateRef.current.matchId,
+          messageId: createDrawingGuessMessageId(),
+          senderId: localPlayerId,
+          clientTime: Date.now(),
+          sequence: nextSequence(),
+          payload: {
+            type: 'snapshot-request',
+            snapshotId: createDrawingGuessMessageId(),
+          },
+        }),
+      );
+    };
+
+    const scheduleClaimIfProbeFails = (connection: DrawingGuessConnection) => {
+      if (claimProbeTimer || hasClaimedHostSnapshot) {
+        return;
+      }
+      claimProbeTimer = setTimeout(() => {
+        claimProbeTimer = undefined;
+        if (!isActive) {
+          return;
+        }
+        const current = stateRef.current;
+        const peersConnected = current.players.some(
+          (player) => player.id !== localPlayerId && player.isConnected,
+        );
+        claimGrace = tickAuthorityClaimGraceOnProbe(claimGrace, peersConnected);
+
+        const canClaim = shouldClaimHostAfterAuthorityProbe({
+          consecutivePeerAbsentIntervals: claimGrace.consecutivePeerAbsentIntervals,
+          hasClaimedHostSnapshot,
+          hasMatchProgress: hasOnlineMatchProgress(current),
+          isLocalHost: current.hostId === localPlayerId,
+          peersConnected,
+          requiredAbsentIntervals: PEER_ABSENT_INTERVALS_BEFORE_CLAIM,
+        });
+
+        if (canClaim) {
+          void claimHostAuthority(connection);
+          return;
+        }
+
+        if (
+          current.hostId === localPlayerId
+          && !hasClaimedHostSnapshot
+          && !hasOnlineMatchProgress(current)
+        ) {
+          if (peersConnected) {
+            void requestHostSnapshot(connection, { markRecovering: false });
+          }
+          scheduleClaimIfProbeFails(connection);
+          return;
+        }
+
+        clearRecoveringSnapshot();
+      }, AUTHORITY_PROBE_MS);
+    };
+
+    const claimOrProbeHostAuthority = async (connection: DrawingGuessConnection) => {
+      const current = stateRef.current;
+      if (current.hostId !== localPlayerId) {
+        await requestHostSnapshot(connection);
+        return;
+      }
+
+      const peersConnected = current.players.some(
+        (player) => player.id !== localPlayerId && player.isConnected,
+      );
+      notePeersConnected(peersConnected);
+
+      if (peersConnected && !hasOnlineMatchProgress(current) && !hasClaimedHostSnapshot) {
+        await requestHostSnapshot(connection);
+        scheduleClaimIfProbeFails(connection);
+        return;
+      }
+
+      if (
+        !peersConnected
+        && claimGrace.sawPeerWhileUnclaimed
+        && !hasClaimedHostSnapshot
+      ) {
+        scheduleClaimIfProbeFails(connection);
+        return;
+      }
+
+      await claimHostAuthority(connection);
+    };
+
+    const yieldToPeerHost = (hostId: string, matchId?: string) => {
+      if (!canAcceptForeignAuthority({ localPlayerId, senderId: hostId, state: stateRef.current })) {
+        return;
+      }
+      const nextState = drawingGuessReducer(stateRef.current, {
+        type: 'host-yielded',
+        hostId,
+        ...(matchId ? { matchId } : {}),
+      });
+      stateRef.current = nextState;
+      dispatch({ type: 'apply-snapshot', state: nextState });
+      clearClaimProbeTimer();
+      clearRecoveringSnapshot();
+    };
 
     const connectSimulation = async () => {
       await Promise.all(connectionsRef.current.map((connection) => connection.disconnect()));
@@ -215,13 +387,72 @@ export function useDrawingGuessController(
         }
 
         localConnection.onPresence((players) => {
+          if (mode === 'online') {
+            const synced = syncPresencePlayers({
+              localDisplayName,
+              localPlayerId,
+              players,
+              state: stateRef.current,
+            });
+            dispatch({
+              type: 'apply-snapshot',
+              state: applyOnlineStateForViewer(synced.state, localPlayerId),
+            });
+
+            const peersConnected = players.some(
+              (player) => player.id !== localPlayerId && player.isConnected !== false,
+            );
+            notePeersConnected(peersConnected);
+
+            if (synced.state.hostId === localPlayerId) {
+              if (
+                peersConnected
+                && !hasOnlineMatchProgress(stateRef.current)
+                && !hasClaimedHostSnapshot
+              ) {
+                if (!claimProbeTimer) {
+                  void requestHostSnapshot(localConnection);
+                  scheduleClaimIfProbeFails(localConnection);
+                }
+                return;
+              }
+
+              if (
+                shouldDeferInstantHostClaimOnPresenceFlap({
+                  hasClaimedHostSnapshot,
+                  hasMatchProgress: hasOnlineMatchProgress(stateRef.current),
+                  peersConnected,
+                  sawPeerWhileUnclaimed: claimGrace.sawPeerWhileUnclaimed,
+                })
+              ) {
+                if (!claimProbeTimer) {
+                  scheduleClaimIfProbeFails(localConnection);
+                }
+                return;
+              }
+
+              if (synced.becameHost || !hasClaimedHostSnapshot) {
+                void claimHostAuthority(localConnection);
+              }
+              return;
+            }
+
+            if (
+              isRecoveringSnapshotRef.current
+              && players.some((player) => player.id === synced.state.hostId)
+            ) {
+              void requestHostSnapshot(localConnection);
+            }
+            return;
+          }
+
           players.forEach((player, index) => {
             dispatch({
               type: 'player-joined',
               player: {
                 id: player.id,
                 displayName: player.displayName,
-                avatarLabel: player.displayName.trim().charAt(0) || '?',
+                avatarLabel: player.displayName.trim().charAt(0).toUpperCase() || '?',
                 role: 'player',
                 joinedAt: player.joinedAt || Date.now() + index,
                 isConnected: player.isConnected,
@@ -231,6 +462,12 @@ export function useDrawingGuessController(
         });
 
         localConnection.onMessage((message) => {
+          // Online/LiveKit acting clients apply outbound mutations locally. Ignore any
+          // self-originated inbound copies so Mock-style echoes cannot double-apply.
+          if (mode === 'online' && message.senderId === localPlayerId) {
+            return;
+          }
+
           const preview = getStrokePreviewFromMessage(message);
 
           if (preview) {
@@ -250,19 +487,157 @@ export function useDrawingGuessController(
           const chunk = getSnapshotChunkFromMessage(message);
 
           if (chunk) {
+            if (
+              shouldIgnorePeerSnapshotAsHost({
+                hasClaimedHostSnapshot,
+                localPlayerId,
+                senderId: message.senderId,
+                state: stateRef.current,
+              })
+            ) {
+              return;
+            }
+
             try {
               const snapshot = snapshotReassemblerRef.current.pushChunk(chunk, Date.now());
 
               if (snapshot) {
+                if (
+                  mode === 'online'
+                  && stateRef.current.hostId === localPlayerId
+                  && message.senderId !== localPlayerId
+                ) {
+                  if (
+                    !shouldAdoptPeerSnapshot({
+                      localPlayerId,
+                      previous: stateRef.current,
+                      snapshotState: snapshot.state,
+                    })
+                  ) {
+                    return;
+                  }
+                  yieldToPeerHost(
+                    snapshot.state.hostId ?? message.senderId,
+                    snapshot.state.matchId,
+                  );
+                }
+
+                isRecoveringSnapshotRef.current = false;
                 setIsRecoveringSnapshot(false);
+                clearClaimProbeTimer();
                 setRemotePreviewStrokes(clearRemoteStrokePreviews());
-                dispatch({ type: 'apply-snapshot', state: snapshot.state });
+                const securedState = applyOnlineStateForViewer(
+                  {
+                    ...snapshot.state,
+                    connectionStatus: 'connected',
+                  },
+                  localPlayerId,
+                );
+                dispatch({ type: 'apply-snapshot', state: securedState });
+                dispatch({
+                  type: 'player-joined',
+                  player: {
+                    id: localPlayerId,
+                    displayName: localDisplayName,
+                    avatarLabel: localDisplayName.trim().charAt(0).toUpperCase() || 'Y',
+                    role: 'player',
+                    joinedAt: Date.now(),
+                    isConnected: true,
+                  },
+                });
               }
             } catch (error) {
+              isRecoveringSnapshotRef.current = false;
               setIsRecoveringSnapshot(false);
               setLastTransportError(
                 error instanceof Error ? error.message : 'Drawing Guess snapshot failed.',
               );
+            }
+            return;
+          }
+
+          if (mode === 'online') {
+            const resolved = resolveOnlineInboundGameplay({
+              localPlayerId,
+              message,
+              state: stateRef.current,
+            });
+
+            const resolvedEvent = resolved.event;
+            if (resolvedEvent) {
+              if (resolvedEvent.type === 'commit-stroke') {
+                setRemotePreviewStrokes((currentPreviews) =>
+                  removeRemoteStrokePreview(currentPreviews, resolvedEvent.stroke.id),
+                );
+              }
+
+              if (
+                resolvedEvent.type === 'clear-canvas' ||
+                resolvedEvent.type === 'undo-latest-stroke' ||
+                resolvedEvent.type === 'end-round' ||
+                resolvedEvent.type === 'finish-match' ||
+                resolvedEvent.type === 'apply-snapshot'
+              ) {
+                setRemotePreviewStrokes(clearRemoteStrokePreviews());
+              }
+
+              const nextState = applyOnlineStateForViewer(
+                drawingGuessReducer(stateRef.current, resolvedEvent),
+                localPlayerId,
+              );
+              dispatch({ type: 'apply-snapshot', state: nextState });
+            }
+
+            if (resolved.hostFollowUp) {
+              void localConnection.publish(
+                createControlMessage({
+                  matchId: stateRef.current.matchId,
+                  messageId: createDrawingGuessMessageId(),
+                  senderId: localPlayerId,
+                  clientTime: Date.now(),
+                  sequence: nextSequence(),
+                  payload: {
+                    type: 'guess-scored',
+                    ...resolved.hostFollowUp.guessScored,
+                  },
+                }),
+              );
+              if (resolved.hostFollowUp.roundEnded) {
+                setRemotePreviewStrokes(clearRemoteStrokePreviews());
+                void localConnection.publish(
+                  createControlMessage({
+                    matchId: stateRef.current.matchId,
+                    messageId: createDrawingGuessMessageId(),
+                    senderId: localPlayerId,
+                    clientTime: Date.now(),
+                    sequence: nextSequence(),
+                    payload: {
+                      type: 'round-ended',
+                      ...resolved.hostFollowUp.roundEnded,
+                    },
+                  }),
+                );
+              }
+            }
+
+            if (message.topic === 'dg.v1.control') {
+              const payload = message.payload as { type?: string; snapshotId?: string };
+
+              if (
+                payload.type === 'snapshot-request'
+                && stateRef.current.hostId === localPlayerId
+                && hasClaimedHostSnapshot
+              ) {
+                void publishSnapshotChunks(payload.snapshotId ?? createDrawingGuessMessageId());
+              } else if (
+                payload.type === 'snapshot-request'
+                && stateRef.current.hostId === localPlayerId
+                && hasOnlineMatchProgress(stateRef.current)
+              ) {
+                // Sticky survivor mid-match answers even before re-claim flag after presence transfer.
+                hasClaimedHostSnapshot = true;
+                void publishSnapshotChunks(payload.snapshotId ?? createDrawingGuessMessageId());
+              }
             }
             return;
           }
@@ -313,20 +688,7 @@ export function useDrawingGuessController(
         };
 
         if (mode === 'online') {
-          setIsRecoveringSnapshot(true);
-          await localConnection.publish(
-            createControlMessage({
-              matchId: stateRef.current.matchId,
-              messageId: createDrawingGuessMessageId(),
-              senderId: localPlayerId,
-              clientTime: Date.now(),
-              sequence: nextSequence(),
-              payload: {
-                type: 'snapshot-request',
-                snapshotId: createDrawingGuessMessageId(),
-              },
-            }),
-          );
+          await claimOrProbeHostAuthority(localConnection);
         }
       } catch (error) {
         setLastTransportError(
@@ -339,6 +701,7 @@ export function useDrawingGuessController(
 
     return () => {
       isActive = false;
+      clearClaimProbeTimer();
       void Promise.all(connectionsRef.current.map((connection) => connection.disconnect()));
       connectionsRef.current = [];
       localConnectionRef.current = undefined;
@@ -354,6 +717,21 @@ export function useDrawingGuessController(
     roomCode,
   ]);
 
+  const applyLocalReducerEvent = useCallback(
+    (event: Parameters<typeof drawingGuessReducer>[1]) => {
+      const nextState =
+        mode === 'online'
+          ? applyOnlineStateForViewer(
+              drawingGuessReducer(stateRef.current, event),
+              localPlayerId,
+            )
+          : drawingGuessReducer(stateRef.current, event);
+      stateRef.current = nextState;
+      dispatch({ type: 'apply-snapshot', state: nextState });
+    },
+    [localPlayerId, mode],
+  );
+
   const publishControl = useCallback(
     async (payload: Parameters<typeof createControlMessage>[0]['payload']) => {
       const connection = localConnectionRef.current;
@@ -363,23 +741,44 @@ export function useDrawingGuessController(
         return;
       }
 
+      const clientTime = Date.now();
+      const message = createControlMessage({
+        matchId: stateRef.current.matchId,
+        messageId: createDrawingGuessMessageId(),
+        senderId: localPlayerId,
+        clientTime,
+        sequence: nextSequence(),
+        payload,
+      });
+
       try {
         setLastTransportError(undefined);
-        await connection.publish(
-          createControlMessage({
-            matchId: stateRef.current.matchId,
-            messageId: createDrawingGuessMessageId(),
-            senderId: localPlayerId,
-            clientTime: Date.now(),
-            sequence: nextSequence(),
-            payload,
-          }),
-        );
+        await connection.publish(message);
+        // LiveKit does not echo publishData to the sender. Apply locally for online
+        // mode so the acting host/drawer advances without waiting for an inbound copy.
+        if (mode === 'online') {
+          const localEvent = mapInboundMessageToReducerEvent({
+            ...message,
+            receivedAt: clientTime,
+          });
+          if (localEvent) {
+            if (
+              localEvent.type === 'clear-canvas' ||
+              localEvent.type === 'undo-latest-stroke' ||
+              localEvent.type === 'end-round' ||
+              localEvent.type === 'finish-match' ||
+              localEvent.type === 'apply-snapshot'
+            ) {
+              setRemotePreviewStrokes(clearRemoteStrokePreviews());
+            }
+            applyLocalReducerEvent(localEvent);
+          }
+        }
       } catch (error) {
         setLastTransportError(error instanceof Error ? error.message : 'Drawing Guess publish failed.');
       }
     },
-    [nextSequence],
+    [applyLocalReducerEvent, localPlayerId, mode, nextSequence],
   );
 
   const publishControlAs = useCallback(
@@ -432,8 +831,38 @@ export function useDrawingGuessController(
       type: 'round-ended',
       now,
       reason: 'timer',
+      revealedPrompt: state.privatePrompt,
     });
-  }, [now, publishControl, state.hostId, state.phase, state.roundEndsAt]);
+  }, [now, publishControl, state.hostId, state.phase, state.privatePrompt, state.roundEndsAt]);
+
+  useEffect(() => {
+    if (mode !== 'online' || !isRecoveringSnapshot || state.hostId === localPlayerId) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      const connection = localConnectionRef.current;
+      if (!connection || !isRecoveringSnapshotRef.current) {
+        return;
+      }
+
+      void connection.publish(
+        createControlMessage({
+          matchId: stateRef.current.matchId,
+          messageId: createDrawingGuessMessageId(),
+          senderId: localPlayerId,
+          clientTime: Date.now(),
+          sequence: nextSequence(),
+          payload: {
+            type: 'snapshot-request',
+            snapshotId: createDrawingGuessMessageId(),
+          },
+        }),
+      );
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [isRecoveringSnapshot, localPlayerId, mode, nextSequence, state.hostId]);
 
   const resetRoom = useCallback((nextRoomCode: string, nextMode = mode) => {
     setRoomCode(nextRoomCode);
@@ -441,12 +870,18 @@ export function useDrawingGuessController(
     setActiveStroke(undefined);
     setRemotePreviewStrokes(clearRemoteStrokePreviews());
     showcaseAutomationRef.current = undefined;
-    setIsRecoveringSnapshot(nextMode === 'online');
+    const nextRecovering = nextMode === 'online';
+    isRecoveringSnapshotRef.current = nextRecovering;
+    setIsRecoveringSnapshot(nextRecovering);
     dispatch({
       type: 'apply-snapshot',
-      state: createInitialState(nextRoomCode, nextMode, localPlayerId),
+      state: createInitialState(nextRoomCode, nextMode, localPlayerId, {
+        displayName: localDisplayName,
+        hostUid: sessionHostUid,
+        sessionId: gameSessionId,
+      }),
     });
-  }, [mode]);
+  }, [gameSessionId, localDisplayName, localPlayerId, mode, sessionHostUid]);
 
   const viewModel = useMemo(
     () =>
@@ -815,6 +1250,14 @@ export function useDrawingGuessController(
         return;
       }
 
+      if (mode === 'online') {
+        applyLocalReducerEvent({
+          type: 'commit-stroke',
+          actorId: localPlayerId,
+          stroke,
+        });
+      }
+
       void localConnectionRef.current?.publish(
         createStrokeCommitMessage({
           matchId: stateRef.current.matchId,
@@ -829,7 +1272,7 @@ export function useDrawingGuessController(
         }),
       );
     },
-    [nextSequence, toolState],
+    [applyLocalReducerEvent, localPlayerId, mode, nextSequence, toolState],
   );
 
   const commitActiveStroke = useCallback(() => {
@@ -842,6 +1285,15 @@ export function useDrawingGuessController(
       }
 
       previewThrottleRef.current = initialStrokePreviewThrottleState;
+
+      if (mode === 'online') {
+        applyLocalReducerEvent({
+          type: 'commit-stroke',
+          actorId: localPlayerId,
+          stroke: committedStroke,
+        });
+      }
+
       void localConnectionRef.current?.publish(
         createStrokeCommitMessage({
           matchId: stateRef.current.matchId,
@@ -858,7 +1310,7 @@ export function useDrawingGuessController(
 
       return nextActiveStroke;
     });
-  }, [nextSequence]);
+  }, [applyLocalReducerEvent, localPlayerId, mode, nextSequence]);
 
   const cancelActiveStroke = useCallback(() => {
     activePreviewStrokeIdRef.current = undefined;
@@ -918,21 +1370,33 @@ export function useDrawingGuessController(
     viewModel,
     actions: {
       createLocalRoom: () => {
+        if (launchSource === 'voice-room' || gameSessionId) {
+          return;
+        }
         const nextRoomCode = createDrawingGuessRoomCode();
         resetLaunchMetadata(nextRoomCode, 'local-simulated');
         resetRoom(nextRoomCode, 'local-simulated');
       },
       joinLocalRoom: (nextRoomCode) => {
+        if (launchSource === 'voice-room' || gameSessionId) {
+          return;
+        }
         const resolvedRoomCode = nextRoomCode.trim() || createDrawingGuessRoomCode();
         resetLaunchMetadata(resolvedRoomCode, 'local-simulated');
         resetRoom(resolvedRoomCode, 'local-simulated');
       },
       createOnlineRoom: () => {
+        if (launchSource === 'voice-room' || gameSessionId) {
+          return;
+        }
         const nextRoomCode = createDrawingGuessRoomCode();
         resetLaunchMetadata(nextRoomCode, 'online');
         resetRoom(nextRoomCode, 'online');
       },
       joinOnlineRoom: (nextRoomCode) => {
+        if (launchSource === 'voice-room' || gameSessionId) {
+          return;
+        }
         const resolvedRoomCode = nextRoomCode.trim() || createDrawingGuessRoomCode();
         resetLaunchMetadata(resolvedRoomCode, 'online');
         resetRoom(resolvedRoomCode, 'online');
@@ -952,7 +1416,16 @@ export function useDrawingGuessController(
       setBrushColor,
       setBrushWidth,
       setTool,
-      undoLatestStroke: () => dispatch({ type: 'undo-latest-stroke', actorId: state.drawerId ?? localPlayerId }),
+      undoLatestStroke: () => {
+        if (mode === 'online') {
+          if (stateRef.current.drawerId !== localPlayerId || stateRef.current.phase !== 'drawing') {
+            return;
+          }
+          void publishControl({ type: 'stroke-undone' });
+          return;
+        }
+        dispatch({ type: 'undo-latest-stroke', actorId: state.drawerId ?? localPlayerId });
+      },
       clearCanvas: () => {
         setActiveStroke(undefined);
         setRemotePreviewStrokes(clearRemoteStrokePreviews());
@@ -964,13 +1437,19 @@ export function useDrawingGuessController(
           type: 'round-ended',
           now: Date.now(),
           reason: 'manual',
+          revealedPrompt: stateRef.current.privatePrompt,
         });
       },
       advanceRound: () => {
         setRemotePreviewStrokes(clearRemoteStrokePreviews());
+        const nextRoundState = advanceToNextRound(
+          stateRef.current,
+          stateRef.current.hostId ?? localPlayerId,
+          Date.now(),
+        );
         void publishControl({
           type: 'round-advanced',
-          state: advanceToNextRound(state, state.hostId ?? localPlayerId, Date.now()),
+          state: nextRoundState,
         });
       },
       finishMatch: () => {
@@ -986,12 +1465,25 @@ const createInitialState = (
   roomCode: string,
   mode: DrawingGuessRouteParams['mode'],
   localPlayerId: string,
+  options: {
+    displayName?: string;
+    hostUid?: string;
+    sessionId?: string;
+  } = {},
 ) =>
   mode === 'online'
     ? createOnlineDrawingGuessState({
         roomCode,
         localPlayerId,
-        matchId: createDrawingGuessMatchId(),
+        displayName: options.displayName,
+        hostId: options.hostUid?.trim() || localPlayerId,
+        matchId: resolveOnlineBootstrapMatchId({
+          createMatchId: createDrawingGuessMatchId,
+          hostUid: options.hostUid,
+          localPlayerId,
+          roomCode,
+          sessionId: options.sessionId,
+        }),
         now: Date.now(),
       })
     : createLocalSimulatedDrawingGuessState({

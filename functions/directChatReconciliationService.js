@@ -36,10 +36,14 @@ async function reconcileDirectChatConversation({ apply, clock, db, document }) {
   const projectionSnapshots = await db.getAll(...projectionRefs);
   const projections = Object.fromEntries(memberUids.map((uid, index) => [uid, projectionSnapshots[index]?.exists ? projectionSnapshots[index].data() : undefined]));
   const unreadCounts = {};
+  const retentionFloor = Number.isSafeInteger(conversation.retentionPurgedThroughSequence)
+    ? conversation.retentionPurgedThroughSequence
+    : 0;
   for (const uid of memberUids) {
     const floor = Math.max(
       Number.isSafeInteger(projections[uid]?.lastReadSequence) ? projections[uid].lastReadSequence : 0,
       Number.isSafeInteger(projections[uid]?.clearedThroughSequence) ? projections[uid].clearedThroughSequence : 0,
+      retentionFloor,
     );
     const countSnapshot = await document.ref.collection('messages')
       .where('unreadForUids', 'array-contains', uid)

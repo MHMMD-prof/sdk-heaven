@@ -16,16 +16,33 @@ import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
 import { AvatarFrameLayer } from '../components/AvatarPresentation';
 import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import { useAuth } from '../auth/AuthProvider';
+import { usePublicProfile } from '../social/usePublicProfile';
+import {
+  requestCoupleEffects,
+  requestEquipCoupleEffect,
+  requestStoreCatalog,
+  requestUnequipCoupleEffect,
+} from '../social/requestSocialCommand';
+import type { CoupleEffectsResult } from '../cosmetics/coupleEffects';
+import { gateSharedCoupleEffect } from '../cosmetics/coupleEffects';
+import { CoupleEffectPresentation } from '../components/CoupleEffectPresentation';
+import type { CustomerStoreCatalogItem } from '../social/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Couples'>;
 const emptyOverview: CouplesOverview = { incoming: [], outgoing: [] };
 
 export function CouplesScreen({ navigation }: Props) {
+  const { user } = useAuth();
   const cosmeticsFlags = useCosmeticsFeatureFlags();
+  const { profile: selfProfile } = usePublicProfile(user?.uid);
   const [overview, setOverview] = useState<CouplesOverview>(emptyOverview);
+  const [coupleEffects, setCoupleEffects] = useState<CoupleEffectsResult>();
+  const [effectCatalog, setEffectCatalog] = useState<CustomerStoreCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [busyUid, setBusyUid] = useState('');
+  const [busyEffectItem, setBusyEffectItem] = useState('');
   const badgeUids = useMemo(() => [
     ...(overview.current ? [overview.current.profile.uid] : []),
     ...overview.incoming.map((row) => row.profile.uid),
@@ -36,11 +53,19 @@ export function CouplesScreen({ navigation }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     setErrorMessage('');
-    const response = await requestCouplesOverview();
+    const [response, effects, catalog] = await Promise.all([
+      requestCouplesOverview(),
+      cosmeticsFlags.coupleEffects ? requestCoupleEffects() : Promise.resolve(undefined),
+      cosmeticsFlags.coupleEffects ? requestStoreCatalog() : Promise.resolve(undefined),
+    ]);
     if (response.ok) setOverview(response.result);
     else setErrorMessage(response.error.messageAr);
+    setCoupleEffects(effects?.ok ? effects.result : undefined);
+    setEffectCatalog(catalog?.ok
+      ? catalog.result.items.filter((item) => item.category === 'couple-effects')
+      : []);
     setLoading(false);
-  }, []);
+  }, [cosmeticsFlags.coupleEffects]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -60,6 +85,19 @@ export function CouplesScreen({ navigation }: Props) {
       { style: 'cancel', text: 'تراجع' },
       { style: 'destructive', text: 'إنهاء الارتباط', onPress: () => void runAction('dissolve-couple', row.profile.uid) },
     ]);
+  };
+
+  const toggleCoupleEffect = async (itemId?: string) => {
+    setBusyEffectItem(itemId || 'unequip');
+    const response = itemId
+      ? await requestEquipCoupleEffect(itemId)
+      : await requestUnequipCoupleEffect();
+    setBusyEffectItem('');
+    if (!response.ok) {
+      Alert.alert('تعذر تحديث التأثير', response.error.messageAr);
+      return;
+    }
+    await load();
   };
 
   return (
@@ -87,13 +125,22 @@ export function CouplesScreen({ navigation }: Props) {
                 <View style={styles.heartHalo} />
                 <SymbolView name={{ ios: 'heart.fill', android: 'favorite', web: 'favorite' }} size={30} tintColor="#FFE095" />
                 <Text style={styles.currentEyebrow}>شريك الارتباط</Text>
-                <ProfileIdentity
-                  badgeActive={activeBadges[overview.current.profile.uid] ?? overview.current.profile.representativeBadgeActive}
+                <CouplePairIdentity
                   cosmeticsFlags={cosmeticsFlags}
-                  row={overview.current}
-                  onOpen={() => navigation.navigate('UserProfile', { uid: overview.current!.profile.uid })}
-                  large
+                  partner={overview.current}
+                  partnerBadgeActive={activeBadges[overview.current.profile.uid] ?? overview.current.profile.representativeBadgeActive}
+                  selfProfile={selfProfile}
+                  onOpenPartner={() => navigation.navigate('UserProfile', { uid: overview.current!.profile.uid })}
                 />
+                {cosmeticsFlags.coupleEffects ? (
+                  <CoupleEffectControls
+                    busyItem={busyEffectItem}
+                    catalog={effectCatalog}
+                    inventory={coupleEffects}
+                    onEquip={(itemId) => void toggleCoupleEffect(itemId)}
+                    onUnequip={() => void toggleCoupleEffect()}
+                  />
+                ) : null}
                 <View style={styles.currentActions}>
                   <ActionButton label="عرض الملف" onPress={() => navigation.navigate('UserProfile', { uid: overview.current!.profile.uid })} primary />
                   <ActionButton
@@ -109,7 +156,7 @@ export function CouplesScreen({ navigation }: Props) {
                   <SymbolView name={{ ios: 'heart', android: 'favorite_border', web: 'favorite_border' }} size={38} tintColor={colors.gold} />
                 </View>
                 <Text style={styles.emptyTitle}>لا يوجد ارتباط حالي</Text>
-                <Text style={styles.emptyText}>افتح ملف مستخدم وأرسل طلب ارتباط. لا يمكن لكل حساب امتلاك أكثر من شريك واحد.</Text>
+                <Text style={styles.emptyText}>افتح ملف مستخدم وأرسل طلب ارتباط. لكل حساب شريك واحد فقط، دون مستويات أو ترتيب في هذا الإصدار.</Text>
                 <ActionButton label="اكتشاف مستخدمين" onPress={() => navigation.navigate('UsersDiscovery')} primary />
               </View>
             )}
@@ -140,6 +187,98 @@ export function CouplesScreen({ navigation }: Props) {
         )}
       </View>
     </ScreenContainer>
+  );
+}
+
+function CouplePairIdentity({
+  cosmeticsFlags,
+  onOpenPartner,
+  partner,
+  partnerBadgeActive,
+  selfProfile,
+}: {
+  cosmeticsFlags: CosmeticsFeatureFlags;
+  onOpenPartner: () => void;
+  partner: CoupleConnectionSummary;
+  partnerBadgeActive?: boolean;
+  selfProfile?: CoupleConnectionSummary['profile'];
+}) {
+  const sharedEffect = gateSharedCoupleEffect(selfProfile?.coupleEffect, partner.profile.coupleEffect);
+  return (
+    <View style={styles.pairIdentity}>
+      <CoupleEffectPresentation
+        flags={cosmeticsFlags}
+        projection={sharedEffect}
+        style={styles.pairBorderEffect}
+        surface="border"
+      />
+      {selfProfile ? (
+        <ProfileIdentity
+          badgeActive={selfProfile.representativeBadgeActive}
+          cosmeticsFlags={cosmeticsFlags}
+          large
+          onOpen={() => undefined}
+          row={{ profile: selfProfile }}
+        />
+      ) : null}
+      <View style={styles.pairHeart}>
+        <SymbolView name={{ ios: 'heart.fill', android: 'favorite', web: 'favorite' }} size={20} tintColor="#FFE095" />
+      </View>
+      <ProfileIdentity
+        badgeActive={partnerBadgeActive}
+        cosmeticsFlags={cosmeticsFlags}
+        large
+        onOpen={onOpenPartner}
+        row={partner}
+      />
+    </View>
+  );
+}
+
+function CoupleEffectControls({
+  busyItem,
+  catalog,
+  inventory,
+  onEquip,
+  onUnequip,
+}: {
+  busyItem: string;
+  catalog: CustomerStoreCatalogItem[];
+  inventory?: CoupleEffectsResult;
+  onEquip: (itemId: string) => void;
+  onUnequip: () => void;
+}) {
+  if (!inventory || !inventory.items.length) {
+    return <Text style={styles.effectEmpty}>يمكن شراء تأثيرات الارتباط من المتجر عند توفرها.</Text>;
+  }
+  return (
+    <View style={styles.effectControls}>
+      <Text style={styles.effectControlsTitle}>تأثيركما المشترك</Text>
+      {inventory.items.filter((item) => item.state === 'active').map((item) => {
+        const name = catalog.find((entry) => entry.itemId === item.itemId)?.name.ar || item.itemId;
+        const equipped = inventory.equipment?.itemId === item.itemId;
+        return (
+          <View key={item.itemId} style={styles.effectRow}>
+            <Text numberOfLines={1} style={styles.effectName}>{name}</Text>
+            <ActionButton
+              busy={busyItem === item.itemId}
+              label={equipped ? 'مجهّز' : 'تجهيز'}
+              onPress={() => onEquip(item.itemId)}
+              primary={!equipped}
+              small
+            />
+          </View>
+        );
+      })}
+      {inventory.equipment ? (
+        <ActionButton
+          busy={busyItem === 'unequip'}
+          label="إلغاء تجهيز التأثير"
+          onPress={onUnequip}
+          small
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -243,6 +382,14 @@ const styles = StyleSheet.create({
   currentCard: { alignItems: 'center', borderColor: 'rgba(255,218,133,0.58)', borderRadius: radius.xl, borderWidth: 1, gap: spacing.sm, overflow: 'hidden', padding: spacing.xl },
   heartHalo: { backgroundColor: 'rgba(255,195,90,0.1)', borderRadius: 90, height: 180, position: 'absolute', top: -95, width: 180 },
   currentEyebrow: { color: '#F6CB72', fontSize: 12, fontWeight: typography.weights.black, writingDirection: 'rtl' },
+  pairIdentity: { alignItems: 'center', flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'center', minHeight: 156, position: 'relative', width: '100%' },
+  pairBorderEffect: { bottom: 0, left: 0, opacity: 0.9, position: 'absolute', right: 0, top: 0 },
+  pairHeart: { alignItems: 'center', backgroundColor: '#5C0D16', borderColor: '#E8BE61', borderRadius: radius.full, borderWidth: 1, height: 42, justifyContent: 'center', width: 42, zIndex: 2 },
+  effectControls: { alignItems: 'stretch', backgroundColor: 'rgba(8,3,3,0.55)', borderColor: 'rgba(255,218,133,0.28)', borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, marginTop: spacing.sm, padding: spacing.md, width: '100%' },
+  effectControlsTitle: { color: colors.goldSoft, fontSize: 14, fontWeight: typography.weights.black, textAlign: 'right', writingDirection: 'rtl' },
+  effectRow: { alignItems: 'center', flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'space-between' },
+  effectName: { color: colors.text, flex: 1, fontSize: 12, textAlign: 'right', writingDirection: 'rtl' },
+  effectEmpty: { color: colors.textMuted, fontSize: 12, textAlign: 'center', writingDirection: 'rtl' },
   currentActions: { flexDirection: 'row-reverse', gap: spacing.sm, marginTop: spacing.sm },
   emptyHero: { alignItems: 'center', backgroundColor: '#110607', borderColor: 'rgba(232,190,97,0.28)', borderRadius: radius.xl, borderWidth: 1, gap: spacing.md, padding: spacing.xl },
   emptyIcon: { alignItems: 'center', backgroundColor: '#3A0A10', borderColor: 'rgba(232,190,97,0.46)', borderRadius: radius.full, borderWidth: 1, height: 72, justifyContent: 'center', width: 72 },

@@ -2,7 +2,10 @@ import { readCosmeticAssetReference, type CosmeticAssetReference } from './avata
 
 export const EQUIPMENT_COSMETIC_KEYS = ['profileSkin', 'chatBubble', 'nameplate', 'cosmeticBadge', 'seatEffect'] as const;
 export type EquipmentCosmeticKey = typeof EQUIPMENT_COSMETIC_KEYS[number];
-export type EquipmentCosmeticProjection = CosmeticAssetReference & { itemId: string };
+export type EquipmentCosmeticProjection = CosmeticAssetReference & {
+  itemId: string;
+  source?: 'custom';
+};
 export type EquipmentCosmetics = Partial<Record<EquipmentCosmeticKey, EquipmentCosmeticProjection>>;
 
 const ITEM_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{2,79}$/;
@@ -15,7 +18,12 @@ export function readEquipmentCosmetics(profile: unknown): EquipmentCosmetics {
     if (!isRecord(value)) continue;
     const asset = readCosmeticAssetReference(value);
     const itemId = typeof value.itemId === 'string' ? value.itemId.trim() : '';
-    if (asset && ITEM_ID_PATTERN.test(itemId)) result[key] = { ...asset, itemId };
+    if (!asset || !ITEM_ID_PATTERN.test(itemId)) continue;
+    result[key] = {
+      ...asset,
+      itemId,
+      ...(value.source === 'custom' ? { source: 'custom' as const } : {}),
+    };
   }
   return result;
 }

@@ -44,6 +44,7 @@ describe('roomGiftService', () => {
     const eventId = createRoomGiftEventId(body.requestId, body.roomId);
     expect(db.read(`rooms/room-1/giftEvents/${eventId}`)).toMatchObject({
       comboCount: 2,
+      comboWindowId: expect.stringMatching(/^gcw_[a-f0-9]{24}$/),
       platformShare: 20,
       price: 200,
       recipientCredit: 180,
@@ -61,9 +62,12 @@ describe('roomGiftService', () => {
     expect(db.read(`rooms/room-1/events/${eventId}`).payload).toMatchObject({
       animationEnabled: false,
       comboCount: 2,
+      comboWindowExpiresAtMs: nowMs,
       presentationTier: 'inline',
       quantity: 2,
     });
+    expect(db.read(`rooms/room-1/events/${eventId}`).payload.comboWindowId)
+      .toMatch(/^gcw_[a-f0-9]{24}$/);
     expect(db.read(`roomGiftReceipts/sender-1/items/${eventId}`)).toMatchObject({
       eventId,
       presentationTier: 'inline',
@@ -125,6 +129,58 @@ describe('roomGiftService', () => {
     expect(db.read('platformEconomyAccounts/room-gifts').balanceCoins).toBe(20);
   });
 
+  it('keeps compatible sends in one authoritative combo window and charges each send once', async () => {
+    const db = seededDb();
+    db.documents.set('appConfig/growthFeatures', { giftCombos: true });
+
+    const firstQuote = await quoteGift(db, 'quote_request_combo_0001');
+    const firstBody = sendBody(firstQuote.result.quote.quoteId, 'send_request_combo_00001');
+    const first = await executeRoomGiftCommand({
+      body: firstBody,
+      clock,
+      db,
+      decodedToken: { uid: 'sender-1' },
+      fieldValue,
+    });
+
+    const secondQuote = await quoteGift(db, 'quote_request_combo_0002');
+    const secondBody = sendBody(secondQuote.result.quote.quoteId, 'send_request_combo_00002');
+    const second = await executeRoomGiftCommand({
+      body: secondBody,
+      clock,
+      db,
+      decodedToken: { uid: 'sender-1' },
+      fieldValue,
+    });
+
+    expect(first).toMatchObject({
+      ok: true,
+      result: { effect: { comboCount: 2, comboSequence: 1 } },
+    });
+    expect(second).toMatchObject({
+      ok: true,
+      result: { effect: { comboCount: 4, comboSequence: 2 } },
+    });
+    expect(first.result.effect.comboWindowId).toMatch(/^gcw_[a-f0-9]{24}$/);
+    expect(second.result.effect.comboWindowId).toBe(first.result.effect.comboWindowId);
+    expect(second.result.effect.comboWindowExpiresAtMs).toBe(nowMs + 4_000);
+
+    const firstEvent = db.read(`rooms/room-1/events/${first.result.eventId}`);
+    const secondEvent = db.read(`rooms/room-1/events/${second.result.eventId}`);
+    expect(firstEvent.payload.comboWindowId).toBe(first.result.effect.comboWindowId);
+    expect(secondEvent.payload).toMatchObject({
+      comboCount: 4,
+      comboSequence: 2,
+      comboWindowId: first.result.effect.comboWindowId,
+    });
+
+    expect(db.read('walletSummaries/sender-1').balances.coins).toBe(600);
+    expect(db.read('walletSummaries/target-1').economyBalances.giftEarnings).toBe(360);
+    expect(db.read('platformEconomyAccounts/room-gifts').balanceCoins).toBe(40);
+    expect([...db.documents.keys()].filter((path) => path.startsWith('walletTransactions/'))).toHaveLength(4);
+    expect([...db.documents.keys()].filter((path) => path.startsWith('platformEconomyTransactions/'))).toHaveLength(2);
+  });
+
   it('honors an unexpired quote after policy and catalog changes', async () => {
     const db = seededDb();
     const quote = await quoteGift(db, 'quote_request_00000004');
@@ -183,7 +239,16 @@ describe('roomGiftService', () => {
         effect: {
           animationEnabled: true,
           audioEnabled: true,
+          copy: {
+            itemName: { ar: 'وردة' },
+            kind: 'gift',
+            quantity: 2,
+            recipientDisplayName: 'Target',
+            schemaVersion: 1,
+            senderDisplayName: 'Sender',
+          },
           presentationTier: 'global',
+          presentationSurface: 'bottom-stage',
         },
       },
     });
@@ -241,6 +306,7 @@ function seedAnimatedGift(db, tier) {
     audioAssetId: audio.assetId,
     audioAssetVersionId: audio.assetVersionId,
     audioChecksum: 'c'.repeat(64),
+    controlsSafeZonePassed: true,
     durationMs: 3_000,
     fallbackAssetId: fallback.assetId,
     fallbackAssetVersionId: fallback.assetVersionId,
@@ -262,6 +328,8 @@ function seedAnimatedGift(db, tier) {
 }
 
 function seedAsset(db, reference, category, format, sha256, linked = {}) {
+  const animated = format === 'lottie-json' || format === 'mp4';
+  const audio = format === 'm4a-aac';
   db.documents.set(`cosmeticAssets/${reference.assetId}`, {
     approvalId: `${reference.assetId}__${reference.assetVersionId}`,
     approvedVersionId: reference.assetVersionId,
@@ -276,6 +344,12 @@ function seedAsset(db, reference, category, format, sha256, linked = {}) {
     assetVersionId: reference.assetVersionId,
     category,
     format,
+    audioCodec: audio ? 'aac' : '',
+    byteSize: audio ? 100_000 : animated ? 500_000 : 100_000,
+    durationMs: audio || animated ? 3_000 : 0,
+    frameRate: animated ? 30 : 0,
+    height: audio ? 0 : 720,
+    loop: false,
     ...(linked.fallback ? {
       fallbackAssetId: linked.fallback.assetId,
       fallbackAssetVersionId: linked.fallback.assetVersionId,
@@ -285,6 +359,10 @@ function seedAsset(db, reference, category, format, sha256, linked = {}) {
       audioAssetVersionId: linked.audio.assetVersionId,
     } : {}),
     sha256,
+    transparent: format === 'lottie-json' || format === 'png',
+    usage: animated || audio ? 'one-shot' : 'static',
+    videoCodec: format === 'mp4' ? 'h264' : '',
+    width: audio ? 0 : 1280,
   });
   db.documents.set(`cosmeticAssetApprovals/${reference.assetId}__${reference.assetVersionId}`, {
     assetId: reference.assetId,

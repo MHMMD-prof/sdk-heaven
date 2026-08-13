@@ -1,4 +1,6 @@
 const admin = require('firebase-admin');
+const { parseCosmeticsRendererOffArguments } = require('../cosmeticsRendererFlagsCore');
+const { buildPreviousConfigSnapshot } = require('../bottomEffectStageRolloutCore');
 
 admin.initializeApp();
 void main().catch((error) => {
@@ -7,51 +9,40 @@ void main().catch((error) => {
 });
 
 async function main() {
-  const args = new Set(process.argv.slice(2));
-  const allowedArguments = new Set(['--apply', '--actor-uid']);
-  for (const argument of args) {
-    if (argument.startsWith('--') && !allowedArguments.has(argument)) {
-      throw new Error(
-        'Cosmetics renderers are dark-only. This command cannot enable them.',
-      );
-    }
-  }
-  const apply = args.has('--apply');
-  const actorUid = readArgument('--actor-uid');
-  if (apply && !actorUid) throw new Error('--actor-uid is required with --apply.');
-
-  const patch = {
-    cosmetics_animated_avatar_frames: false,
-    cosmetics_asset_registry: false,
-    cosmetics_effect_audio: false,
-    cosmetics_profile_skins: false,
-    cosmetics_chat_bubbles: false,
-    cosmetics_nameplates: false,
-    cosmetics_badges: false,
-    cosmetics_seat_effects: false,
-    cosmetics_lottie: false,
-    room_entry_animations: false,
-    room_entry_audio: false,
-    room_entry_video: false,
-    room_gift_animations: false,
-    room_gift_audio: false,
-    room_gift_global_effects: false,
-    room_gift_video: false,
-    cosmetics_shared_renderer: false,
-    cosmetics_unified_avatar_frames: false,
-    cosmetics_video: false,
-  };
-  console.info(JSON.stringify({ actorUid: actorUid || '', apply, patch }));
+  const parsed = parseCosmeticsRendererOffArguments(process.argv.slice(2));
+  if (!parsed.ok) throw new Error(parsed.error);
+  const { actorUid, apply, patch, rolloutPatch } = parsed.value;
+  console.info(JSON.stringify({ actorUid: actorUid || '', apply, patch, rolloutPatch }));
   if (!apply) return;
 
   const db = admin.firestore();
   await requirePlatformOwner(db, actorUid);
-  await db.doc('appConfig/cosmeticsFeatures').set({
-    ...patch,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedBy: actorUid,
-  }, { merge: true });
-  console.info(JSON.stringify({ applied: true }));
+  const configRef = db.doc('appConfig/cosmeticsFeatures');
+  const auditRef = db.collection('adminAuditEvents').doc();
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  const combinedPatch = { ...patch, ...rolloutPatch };
+  await db.runTransaction(async (transaction) => {
+    const beforeSnapshot = await transaction.get(configRef);
+    const before = beforeSnapshot.exists ? beforeSnapshot.data() : {};
+    transaction.set(configRef, {
+      ...combinedPatch,
+      updatedAt: timestamp,
+      updatedBy: actorUid,
+    }, { merge: true });
+    transaction.create(auditRef, {
+      action: 'cosmetics-renderer-disable',
+      actorUid,
+      after: combinedPatch,
+      before: buildPreviousConfigSnapshot(before, combinedPatch),
+      createdAt: timestamp,
+      entityId: 'cosmeticsFeatures',
+      entityType: 'system',
+      kind: 'cosmetics-config',
+      note: 'Emergency renderer and bottom-stage rollback',
+      status: 'completed',
+    });
+  });
+  console.info(JSON.stringify({ applied: true, auditEventId: auditRef.id, path: configRef.path }));
 }
 
 async function requirePlatformOwner(db, actorUid) {
@@ -60,9 +51,4 @@ async function requirePlatformOwner(db, actorUid) {
   if (!profile || profile.uid !== actorUid || profile.role !== 'owner' || profile.status !== 'active') {
     throw new Error('The actor must be an active Platform Owner.');
   }
-}
-
-function readArgument(name) {
-  const index = process.argv.indexOf(name);
-  return index >= 0 ? String(process.argv[index + 1] || '').trim() : '';
 }

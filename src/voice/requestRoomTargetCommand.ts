@@ -2,6 +2,7 @@ import { getCurrentFirebaseIdToken } from '../auth/getCurrentFirebaseIdToken';
 import type { PublicUserProfile } from '../social/types';
 import type { VoiceProviderConfig } from './types';
 import { createRoomCommandRequestId } from './requestRoomCommand';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export class RoomTargetCommandError extends Error {
   readonly code: string;
@@ -24,6 +25,7 @@ export async function requestRoomTargetRosterUpdate(
     headers: {
       Authorization: `Bearer ${await getCurrentFirebaseIdToken()}`,
       'Content-Type': 'application/json',
+      ...(await getVoiceAppCheckHeader()),
     },
     body: JSON.stringify({
       requestId: createRoomCommandRequestId(),
@@ -58,6 +60,7 @@ export async function requestRoomTargetUserSearch(
     headers: {
       Authorization: `Bearer ${await getCurrentFirebaseIdToken()}`,
       'Content-Type': 'application/json',
+      ...(await getVoiceAppCheckHeader()),
     },
     body: JSON.stringify({ action: 'search-roster-users', query, roomId }),
   });

@@ -1,7 +1,8 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Image as ExpoImage } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useRepresentativeBadgeProjection } from '../social/useRepresentativeBadgeProjection';
@@ -15,9 +16,11 @@ import {
   RoomPeopleManagementSheet,
   RoomSafetySheet,
   RoomSeatOffersSheet,
-  RoomSettingsSheet,
 } from '../components/voice-room/RoomCommandCenterPanels';
+import { RoomSettingsSheet } from '../components/voice-room/RoyalRoomSettingsScreen';
 import { VoiceRoomBottomBar } from '../components/voice-room/VoiceRoomBottomBar';
+import { VoiceRoomActivityDock } from '../components/voice-room/VoiceRoomActivityDock';
+import { VoiceRoomAnnouncementBar } from '../components/voice-room/VoiceRoomAnnouncementBar';
 import { VoiceRoomHeader } from '../components/voice-room/VoiceRoomHeader';
 import {
   RoomCommandCenterSheet,
@@ -25,14 +28,20 @@ import {
 } from '../components/voice-room/VoiceRoomSheets';
 import { RoomChatSheet } from '../components/voice-room/RoomChatSheet';
 import { RoomGameInviteCard } from '../components/voice-room/RoomGameInviteCard';
+import { RoomPkScoreboardCard } from '../components/voice-room/RoomPkScoreboardCard';
+import { resolveMiniGameRoomLaunch } from '../battleship/resolveMiniGameRoomLaunch';
 import { RoomGiftSheet } from '../components/voice-room/RoomGiftSheet';
 import { RoomEffectOverlay } from '../components/voice-room/RoomEffectOverlay';
+import { RoomAmbientReactions } from '../components/voice-room/RoomAmbientReactions';
+import { AnimatedRoomTheme } from '../components/voice-room/AnimatedRoomTheme';
 import { useCosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import { useGrowthFeatureFlags } from '../growth/featureFlags';
 import { RoomMusicSheet } from '../components/voice-room/RoomMusicSheet';
-import { RoomRocketButton, RoomRocketSheet } from '../components/voice-room/RoomRocketSheet';
-import { RoomTargetButton, RoomTargetSheet } from '../components/voice-room/RoomTargetSheet';
+import { RoomWatchSheet } from '../components/voice-room/RoomWatchSheet';
+import { RoomRocketSheet } from '../components/voice-room/RoomRocketSheet';
+import { RoomTargetSheet } from '../components/voice-room/RoomTargetSheet';
 import { VoiceRoomStage } from '../components/voice-room/VoiceRoomStage';
-import { colors, radius, spacing, typography } from '../theme';
+import { colors, layers, radius, spacing, typography } from '../theme';
 import { RootStackParamList } from '../types/navigation';
 import { VoiceRoom } from '../types/voice';
 import { debugError, debugLog, isDebugLogEnabled, useDebugEvents } from '../utils/debugLog';
@@ -45,7 +54,7 @@ import {
 import { VoiceParticipant } from '../voice/types';
 import { useRoomCommandCenterData } from '../voice/roomCommandCenterData';
 import { RoomCommandAction } from '../voice/requestRoomCommand';
-import { RoomReportCategory } from '../voice/requestRoomChatCommand';
+import { RoomChatCommandRequest, RoomReportCategory } from '../voice/requestRoomChatCommand';
 import { RoomChatMessage, useRoomChat } from '../voice/roomChat';
 import { useRoomImageUrl, useRoomMediaControls } from '../voice/roomMedia';
 import { activeVoiceProviderConfig } from '../voice/activeVoiceProviderConfig';
@@ -54,6 +63,7 @@ import {
   createRoomEntryEffectRequestId,
   requestRoomEntryEffectCommand,
 } from '../voice/requestRoomEntryEffectCommand';
+import { requestRoomReactionCommand } from '../voice/requestRoomReactionCommand';
 import {
   RoomGameId,
   RoomGameRequestError,
@@ -61,9 +71,17 @@ import {
   requestRoomGameCommand,
   roomGameErrorMessage,
 } from '../voice/requestRoomGameCommand';
+import {
+  RoomPkRequestError,
+  requestRoomPkCommand,
+  type RoomPkTeam,
+} from '../voice/requestRoomPkCommand';
 import { useRoomEffectsQueue } from '../voice/useRoomEffectsQueue';
+import { useBottomEffectStageRollout } from '../voice/useBottomEffectStageRollout';
 import { useRoomGameSession } from '../voice/useRoomGameSession';
+import { useRoomPkSession } from '../voice/useRoomPkSession';
 import { useRoomMusicSession } from '../voice/useRoomMusicSession';
+import { useRoomWatchSession } from '../voice/useRoomWatchSession';
 import { useRoomRocketData } from '../voice/useRoomRocketData';
 import { useRoomTargetData } from '../voice/useRoomTargetData';
 import { useRoomRecordingSafety } from '../voice/useRoomRecordingSafety';
@@ -72,10 +90,11 @@ import { useVoiceRooms } from '../voice/useVoiceRooms';
 import { useVoiceRoomFeatureFlags } from '../voice/voiceRoomFeatureFlags';
 import { useRoomOwnershipTransfer } from '../voice/useRoomOwnershipTransfer';
 import { useResolvedRoomTheme } from '../voice/roomThemeRuntime';
+import { resolveRoomActivityPages, resolveRoomLiveActivity } from '../voice/roomSceneShellModel';
+import { classifyRoomSceneViewport } from '../voice/roomSceneVisualContract';
+import { resolveRoomThemeScene } from '../voice/roomThemeContract';
 
 type VoiceRoomScreenProps = NativeStackScreenProps<RootStackParamList, 'VoiceRoom'>;
-
-const REACTIONS = ['👏', '❤️', '🔥', '✨'];
 
 export function VoiceRoomScreen({ navigation, route }: VoiceRoomScreenProps) {
   const { getRoomById, roomsStatus } = useVoiceRooms();
@@ -116,13 +135,20 @@ function ResolvedVoiceRoomScreen({
   const voiceRoomFeatureFlags = useVoiceRoomFeatureFlags();
   const socialFeatureFlags = useSocialFeatureFlags();
   const cosmeticsFeatureFlags = useCosmeticsFeatureFlags();
+  const growthFeatureFlags = useGrowthFeatureFlags();
   const roomMediaControls = useRoomMediaControls(sourceRoom);
   const roomImageUrl = useRoomImageUrl(sourceRoom.activeRoomImagePath);
+  const windowSize = useWindowDimensions();
   const resolvedTheme = useResolvedRoomTheme({
     enabled: voiceRoomFeatureFlags.themes,
     roomCustomizationSuspended: sourceRoom.roomCustomizationSuspended,
     themeId: sourceRoom.themeId,
   });
+  const viewportProfile = classifyRoomSceneViewport(windowSize.width, windowSize.height);
+  const themeScene = useMemo(
+    () => resolveRoomThemeScene(resolvedTheme.manifest, viewportProfile),
+    [resolvedTheme.manifest, viewportProfile],
+  );
   const debugEvents = useDebugEvents();
   const shouldShowDebugPanel = isDebugLogEnabled();
   const [toolsVisible, setToolsVisible] = useState(false);
@@ -130,7 +156,9 @@ function ResolvedVoiceRoomScreen({
   const [chatVisible, setChatVisible] = useState(false);
   const [giftVisible, setGiftVisible] = useState(false);
   const [musicVisible, setMusicVisible] = useState(false);
+  const [watchVisible, setWatchVisible] = useState(false);
   const [rocketVisible, setRocketVisible] = useState(false);
+  const [rocketFocus, setRocketFocus] = useState<'rocket' | 'supporters'>('rocket');
   const [targetVisible, setTargetVisible] = useState(false);
   const [commandPanel, setCommandPanel] = useState<
     'microphones' | 'people' | 'safety' | 'seat-offers' | 'settings' | 'ownership'
@@ -139,11 +167,18 @@ function ResolvedVoiceRoomScreen({
     enabled: voiceRoomFeatureFlags.supporterRankings,
     roomId: sourceRoom.id,
   });
+  const bottomEffectStageEnabled = useBottomEffectStageRollout(
+    cosmeticsFeatureFlags,
+    sourceRoom.id,
+    sourceRoom.localMember?.id,
+  );
   const roomEffects = useRoomEffectsQueue({
+    bottomEffectStageEnabled,
+    coupleEntrancesEnabled: cosmeticsFeatureFlags.coupleEntrances,
     entryEffectsEnabled: voiceRoomFeatureFlags.entryEffects,
     giftGlobalEffectsEnabled: cosmeticsFeatureFlags.roomGiftGlobalEffects,
     giftsEnabled: voiceRoomFeatureFlags.gifts,
-    rocketEnabled: voiceRoomFeatureFlags.supporterRankings && roomRocket.renderingEnabled,
+    rocketEnabled: voiceRoomFeatureFlags.supporterRankings && roomRocket.campaignAvailable,
     roomEffectsPolicy: sourceRoom.effectsPolicy,
     roomId: sourceRoom.id,
     suspended: sourceRoom.audioLockdown === true
@@ -154,8 +189,9 @@ function ResolvedVoiceRoomScreen({
     viewerRoomVisibility: sourceRoom.visibility,
   });
   const [pendingSeatId, setPendingSeatId] = useState<string>();
-  const [reactionIndex, setReactionIndex] = useState(-1);
+  const [reactionCursor, setReactionCursor] = useState(0);
   const [gameCommandPending, setGameCommandPending] = useState(false);
+  const [pkCommandPending, setPkCommandPending] = useState(false);
   const {
     canPublishAudio,
     connectionState,
@@ -163,6 +199,7 @@ function ResolvedVoiceRoomScreen({
     isConnected,
     isMicMuted,
     isSpeakerEnabled,
+    latestRoomReaction,
     leaveRoom,
     hostControls,
     listeners: sourceListeners,
@@ -171,6 +208,7 @@ function ResolvedVoiceRoomScreen({
     muteMic,
     reconnectToRoom,
     seatControls,
+    setBlockedParticipantIds,
     setSpeakerEnabled,
     speakers: sourceSpeakers,
     speakingParticipantIds,
@@ -259,9 +297,10 @@ function ResolvedVoiceRoomScreen({
     seatErrorMessage: seatControls.errorMessage,
   });
   const ownerUid = room.ownerUid || room.hostId;
-  const ownerName = [...room.speakers, ...room.listeners].find((member) => member.id === ownerUid)?.displayName
-    || speakers.find((participant) => participant.id === ownerUid)?.displayName
-    || 'مالك الغرفة';
+  const ownerMember = [...room.speakers, ...room.listeners, ...speakers]
+    .find((member) => member.id === ownerUid);
+  const ownerName = ownerMember?.displayName || 'مالك الغرفة';
+  const ownerAvatarLabel = ownerMember?.avatarLabel || ownerName;
   const localIsSeated = !!room.localMember?.seatId;
   const canManageRoom = voiceRoomFeatureFlags.commandCenter
     && (room.localMember?.authorityRole === 'owner' || room.localMember?.authorityRole === 'moderator');
@@ -280,9 +319,22 @@ function ResolvedVoiceRoomScreen({
       || room.localMember?.privileges?.canManageMusic === true
     ),
   );
+  const canControlWatch = Boolean(
+    growthFeatureFlags.watchTogether
+    && (
+      authorityRole === 'owner'
+      || authorityRole === 'moderator'
+      || room.localMember?.privileges?.canManageMusic === true
+    ),
+  );
   const roomMusic = useRoomMusicSession({
     canControlMusic,
     enabled: voiceRoomFeatureFlags.sharedMusic,
+    roomId: room.id,
+  });
+  const roomWatch = useRoomWatchSession({
+    canControlWatch,
+    enabled: growthFeatureFlags.watchTogether,
     roomId: room.id,
   });
   const roomRecording = useRoomRecordingSafety({
@@ -293,6 +345,7 @@ function ResolvedVoiceRoomScreen({
   const commandCenterAuthorityRole = voiceRoomFeatureFlags.commandCenter ? authorityRole : undefined;
   const commandCenterData = useRoomCommandCenterData(room.id, room.localMember?.id, canManageRoom);
   const { session: roomGameSession } = useRoomGameSession(room.id, voiceRoomFeatureFlags.games);
+  const { session: roomPkSession } = useRoomPkSession(room.id, growthFeatureFlags.roomPk);
   const roomChat = useRoomChat({
     avatarLabel: room.localMember?.avatarLabel || '',
     avatarFrame: room.localMember?.id ? avatarFrames[room.localMember.id] : undefined,
@@ -303,6 +356,9 @@ function ResolvedVoiceRoomScreen({
     roomId: room.id,
     uid: room.localMember?.id,
   });
+  useEffect(() => {
+    setBlockedParticipantIds(roomChat.blockedUids);
+  }, [roomChat.blockedUids, setBlockedParticipantIds]);
   const canSendChat = voiceRoomFeatureFlags.chat
     && room.localMember?.status !== 'removed'
     && (room.chatMode !== 'off' || canModerateChat);
@@ -454,12 +510,6 @@ function ResolvedVoiceRoomScreen({
     }
   }, [handleLeave, room.localMember?.status, room.status]);
 
-  useEffect(() => {
-    if (reactionIndex < 0) return undefined;
-    const timeout = setTimeout(() => setReactionIndex(-1), 1_800);
-    return () => clearTimeout(timeout);
-  }, [reactionIndex]);
-
   const handleSeatPress = useCallback(async (seat: RoomSeatViewModel) => {
     if (!seat.action) return;
     setPendingSeatId(seat.id);
@@ -503,13 +553,18 @@ function ResolvedVoiceRoomScreen({
   }, []);
 
   const openRoomGame = useCallback((session: RoomGameSession) => {
-    if (session.clientRoute === 'MiniGame' || session.gameId === 'royal-majlis') {
-      navigation.navigate('MiniGame', {
-        initialMode: 'naval',
+    if (session.clientRoute === 'MiniGame' || session.gameId === 'royal-majlis' || session.gameId === 'naval-duel') {
+      const launch = resolveMiniGameRoomLaunch({
+        localDisplayName: room.localMember?.displayName,
+        localPlayerId: room.localMember?.id,
         roomId: room.id,
-        sessionId: session.sessionId,
-        source: 'voice-room',
+        session,
       });
+      if ('error' in launch) {
+        Alert.alert('الألعاب', 'تعذر التحقق من عضوية اللاعب في الغرفة.');
+        return;
+      }
+      navigation.navigate('MiniGame', launch);
       return;
     }
     if (session.clientRoute === 'Carrom' || session.gameId === 'carrom-royal') {
@@ -526,6 +581,7 @@ function ResolvedVoiceRoomScreen({
     }
     navigation.navigate('DrawingGuess', {
       displayName: room.localMember?.displayName,
+      hostUid: session.hostUid,
       mode: 'online',
       playerId: room.localMember?.id,
       roomId: room.id,
@@ -534,12 +590,13 @@ function ResolvedVoiceRoomScreen({
     });
   }, [navigation, room.id, room.localMember?.displayName, room.localMember?.id]);
 
-  const createRoomGameInvite = useCallback(async (gameId: RoomGameId) => {
+  const createRoomGameInvite = useCallback(async (gameId: RoomGameId, amount = 0) => {
     if (gameCommandPending) return;
     setGameCommandPending(true);
     try {
       const result = await requestRoomGameCommand({
         action: 'create-room-game-invite',
+        ...(amount > 0 ? { amount } : {}),
         gameId,
         roomId: room.id,
       }, activeVoiceProviderConfig.liveKit);
@@ -556,6 +613,33 @@ function ResolvedVoiceRoomScreen({
     }
   }, [gameCommandPending, openRoomGame, room.id]);
 
+  const promptCreateRoomGame = useCallback((game: {
+    displayName: { ar: string };
+    entryFeeOptions?: number[];
+    gameId: RoomGameId;
+    supportsCoinEntry?: boolean;
+  }) => {
+    const canCharge = growthFeatureFlags.roomGameEconomy
+      && game.supportsCoinEntry === true
+      && Array.isArray(game.entryFeeOptions)
+      && game.entryFeeOptions.some((fee) => fee > 0);
+    if (!canCharge) {
+      void createRoomGameInvite(game.gameId, 0);
+      return;
+    }
+    Alert.alert(
+      game.displayName.ar,
+      'اختر رسوم الدخول بالعملات. الجائزة ترفيهية (قرعة بين اللاعبين المتبقين) وليست مراهنة مهارة.',
+      [
+        ...(game.entryFeeOptions || [0]).map((fee) => ({
+          text: fee > 0 ? `${fee} عملة` : 'مجاناً',
+          onPress: () => { void createRoomGameInvite(game.gameId, fee); },
+        })),
+        { text: 'إلغاء', style: 'cancel' as const },
+      ],
+    );
+  }, [createRoomGameInvite, growthFeatureFlags.roomGameEconomy]);
+
   const showGame = useCallback(async () => {
     setToolsVisible(false);
     if (!voiceRoomFeatureFlags.games) {
@@ -563,7 +647,7 @@ function ResolvedVoiceRoomScreen({
       return;
     }
     if (roomGameSession) {
-      Alert.alert('الألعاب', 'توجد جلسة لعبة نشطة بالفعل. استخدم بطاقة اللعبة في نشاط الغرفة.');
+      Alert.alert('الألعاب', 'توجد جلسة لعبة نشطة بالفعل. استخدم بطاقة اللعبة أسفل المنصة.');
       return;
     }
     if (gameCommandPending) return;
@@ -584,7 +668,7 @@ function ResolvedVoiceRoomScreen({
         [
           ...games.map((game) => ({
             text: game.displayName.ar,
-            onPress: () => { void createRoomGameInvite(game.gameId); },
+            onPress: () => { promptCreateRoomGame(game); },
           })),
           { text: 'إلغاء', style: 'cancel' as const },
         ],
@@ -600,8 +684,8 @@ function ResolvedVoiceRoomScreen({
       setGameCommandPending(false);
     }
   }, [
-    createRoomGameInvite,
     gameCommandPending,
+    promptCreateRoomGame,
     room.id,
     roomGameSession,
     voiceRoomFeatureFlags.games,
@@ -636,6 +720,28 @@ function ResolvedVoiceRoomScreen({
     }
   }, [gameCommandPending, openJoinedRoomGame, room.id, roomGameSession]);
 
+  const spectateRoomGame = useCallback(() => {
+    if (!roomGameSession) return;
+    const fee = roomGameSession.economy?.entryFeeCoins || 0;
+    const pool = roomGameSession.economy?.poolCoins || 0;
+    Alert.alert(
+      'مشاهدة اللعبة',
+      [
+        'يمكنك متابعة اللعب من الغرفة صوتياً دون الانضمام كلاعب.',
+        `${roomGameSession.playerCount} لاعبين حالياً.`,
+        fee > 0
+          ? `دخول ${fee} عملة · الجائزة الحالية ${pool} عملة (ترفيه، قرعة عند الإنهاء).`
+          : 'هذه الطاولة بدون رسوم دخول.',
+      ].join('\n'),
+      roomGameSession.sessionMode === 'multiplayer'
+        ? [
+            { text: 'انضم للاعبين', onPress: () => { void joinRoomGameInvite(); } },
+            { text: 'حسناً', style: 'cancel' as const },
+          ]
+        : [{ text: 'حسناً', style: 'cancel' as const }],
+    );
+  }, [joinRoomGameInvite, roomGameSession]);
+
   const endRoomGameSession = useCallback(async () => {
     if (!roomGameSession) return;
     if (gameCommandPending) return;
@@ -658,6 +764,73 @@ function ResolvedVoiceRoomScreen({
     }
   }, [gameCommandPending, room.id, roomGameSession]);
 
+  const startRoomPk = useCallback(async () => {
+    setToolsVisible(false);
+    if (!growthFeatureFlags.roomPk) {
+      Alert.alert('تحدي PK', 'تحدي الهدايا غير مفعّل حالياً.');
+      return;
+    }
+    if (pkCommandPending) return;
+    if (roomPkSession && (roomPkSession.status === 'active' || roomPkSession.status === 'lobby')) {
+      Alert.alert('تحدي PK', 'يوجد تحدٍ نشط بالفعل في هذه الغرفة.');
+      return;
+    }
+    setPkCommandPending(true);
+    try {
+      await requestRoomPkCommand({
+        action: 'start-room-pk',
+        durationMs: 3 * 60 * 1000,
+        roomId: room.id,
+      }, activeVoiceProviderConfig.liveKit);
+    } catch (error) {
+      Alert.alert(
+        'تحدي PK',
+        error instanceof RoomPkRequestError ? error.message : 'تعذر بدء تحدي الهدايا.',
+      );
+    } finally {
+      setPkCommandPending(false);
+    }
+  }, [growthFeatureFlags.roomPk, pkCommandPending, room.id, roomPkSession]);
+
+  const joinRoomPkTeam = useCallback(async (team: RoomPkTeam) => {
+    if (!roomPkSession || pkCommandPending) return;
+    setPkCommandPending(true);
+    try {
+      await requestRoomPkCommand({
+        action: 'join-room-pk-team',
+        pkId: roomPkSession.pkId,
+        roomId: room.id,
+        team,
+      }, activeVoiceProviderConfig.liveKit);
+    } catch (error) {
+      Alert.alert(
+        'تحدي PK',
+        error instanceof RoomPkRequestError ? error.message : 'تعذر الانضمام للفريق.',
+      );
+    } finally {
+      setPkCommandPending(false);
+    }
+  }, [pkCommandPending, room.id, roomPkSession]);
+
+  const endRoomPk = useCallback(async () => {
+    if (!roomPkSession || pkCommandPending) return;
+    setPkCommandPending(true);
+    try {
+      await requestRoomPkCommand({
+        action: 'end-room-pk',
+        pkId: roomPkSession.pkId,
+        roomId: room.id,
+      }, activeVoiceProviderConfig.liveKit);
+    } catch (error) {
+      Alert.alert(
+        'تحدي PK',
+        error instanceof RoomPkRequestError ? error.message : 'تعذر إنهاء التحدي.',
+      );
+    } finally {
+      setPkCommandPending(false);
+    }
+  }, [pkCommandPending, room.id, roomPkSession]);
+
   const showGift = useCallback(() => {
     setToolsVisible(false);
     if (!voiceRoomFeatureFlags.gifts) {
@@ -671,6 +844,23 @@ function ResolvedVoiceRoomScreen({
     setGiftVisible(true);
   }, [giftRecipients.length, voiceRoomFeatureFlags.gifts]);
 
+  const submitRoomReport = useCallback(async (
+    request: Omit<RoomChatCommandRequest, 'action' | 'roomId'>,
+  ) => {
+    try {
+      const result = await roomChat.execute({ action: 'report-content', ...request });
+      Alert.alert(
+        'تم إرسال البلاغ',
+        result.reportId ? `رقم البلاغ: ${result.reportId}` : 'تم استلام البلاغ للمراجعة.',
+      );
+      return result;
+    } catch (error) {
+      debugError('voice.safety', 'report:error', error, { roomId: room.id });
+      Alert.alert('تعذر إرسال البلاغ', 'تحقق من الاتصال وحاول مرة أخرى.');
+      throw error;
+    }
+  }, [room.id, roomChat]);
+
   const showReport = useCallback(() => {
     setToolsVisible(false);
     if (!voiceRoomFeatureFlags.safety) {
@@ -681,22 +871,20 @@ function ResolvedVoiceRoomScreen({
       { text: 'إلغاء', style: 'cancel' },
       {
         text: 'محتوى غير آمن',
-        onPress: () => void roomChat.execute({
-          action: 'report-content',
+        onPress: () => void submitRoomReport({
           category: 'unsafe-room',
           subjectType: 'room',
         }).catch(() => undefined),
       },
       {
         text: 'مضايقة',
-        onPress: () => void roomChat.execute({
-          action: 'report-content',
+        onPress: () => void submitRoomReport({
           category: 'harassment',
           subjectType: 'room',
         }).catch(() => undefined),
       },
     ]);
-  }, [roomChat, voiceRoomFeatureFlags.safety]);
+  }, [submitRoomReport, voiceRoomFeatureFlags.safety]);
 
   const openCommandPanel = useCallback((panel: NonNullable<typeof commandPanel>) => {
     setToolsVisible(false);
@@ -714,14 +902,16 @@ function ResolvedVoiceRoomScreen({
       {
         text: 'تأكيد',
         style: destructive ? 'destructive' : 'default',
-        onPress: () => void action().catch(() => undefined),
+        onPress: () => void action().catch((error) => {
+          debugError('voice.safety', 'action:error', error, { roomId: room.id });
+          Alert.alert('تعذر تنفيذ الإجراء', 'تحقق من الاتصال وحاول مرة أخرى.');
+        }),
       },
     ]);
-  }, []);
+  }, [room.id]);
 
   const reportChatMessage = useCallback((message: RoomChatMessage) => {
-    const submit = (category: RoomReportCategory) => roomChat.execute({
-      action: 'report-content',
+    const submit = (category: RoomReportCategory) => submitRoomReport({
       category,
       messageId: message.id,
       subjectType: 'message',
@@ -732,7 +922,7 @@ function ResolvedVoiceRoomScreen({
       { text: 'مضايقة', onPress: () => void submit('harassment').catch(() => undefined) },
       { text: 'محتوى جنسي', onPress: () => void submit('sexual-content').catch(() => undefined) },
     ]);
-  }, [roomChat]);
+  }, [submitRoomReport]);
 
   const blockChatSender = useCallback((message: RoomChatMessage) => {
     confirmMemberAction(
@@ -765,72 +955,134 @@ function ResolvedVoiceRoomScreen({
     }).catch(() => undefined);
   }, [roomChat]);
 
+  const sendRoomReaction = useCallback(() => {
+    const catalog = cosmeticsFeatureFlags.roomReactionCatalog;
+    const sessionId = getPresenceSessionId(sourceRoom.id);
+    if (
+      !cosmeticsFeatureFlags.roomReactions
+      || !isConnected
+      || !sessionId
+      || catalog.length === 0
+    ) return;
+    const reaction = catalog[reactionCursor % catalog.length];
+    setReactionCursor((current) => (current + 1) % catalog.length);
+    void requestRoomReactionCommand({
+      assetId: reaction.assetId,
+      assetVersionId: reaction.assetVersionId,
+      roomId: sourceRoom.id,
+      sessionId,
+    }, activeVoiceProviderConfig.liveKit).catch((error) => {
+      debugError('voice.reactions', 'send:error', error, { roomId: sourceRoom.id });
+    });
+  }, [
+    cosmeticsFeatureFlags.roomReactionCatalog,
+    cosmeticsFeatureFlags.roomReactions,
+    getPresenceSessionId,
+    isConnected,
+    reactionCursor,
+    sourceRoom.id,
+  ]);
+
   const bottomBar = (
     <VoiceRoomBottomBar
       isConnected={isConnected && (!localIsSeated || canPublishAudio)}
       isMicMuted={isMicMuted}
       isSeated={localIsSeated}
-      isSpeakerEnabled={isSpeakerEnabled}
+      manifest={resolvedTheme.manifest}
       onChat={() => setChatVisible(true)}
+      onGames={() => { void showGame(); }}
       onGift={showGift}
       onMic={handlePrimaryMic}
-      onReaction={() => setReactionIndex((current) => (current + 1) % REACTIONS.length)}
-      onSpeaker={() => setSpeakerEnabled(!isSpeakerEnabled)}
       onTools={() => setToolsVisible(true)}
     />
   );
 
+  const tickerText = room.announcement?.trim()
+    || room.welcomeMessage?.trim()
+    || `مرحباً بك في ${room.title}. احترم الآخرين واستمتع بالحديث.`;
+  const activityPages = resolveRoomActivityPages({
+    rocketEnabled: roomRocket.campaignAvailable,
+    supportersEnabled: roomRocket.renderingEnabled,
+    targetEnabled: roomTarget.renderingEnabled,
+  });
+  const pkActivityVisible = Boolean(
+    growthFeatureFlags.roomPk
+    && roomPkSession
+    && ['active', 'lobby', 'ended', 'void', 'forfeited'].includes(roomPkSession.status),
+  );
+  const gameActivityVisible = Boolean(
+    voiceRoomFeatureFlags.games
+    && roomGameSession
+    && (roomGameSession.status === 'lobby' || roomGameSession.status === 'active'),
+  );
+  const liveActivity = resolveRoomLiveActivity({
+    gameActive: gameActivityVisible,
+    pkActive: pkActivityVisible,
+  });
+
   return (
     <>
       <ScreenContainer
+        backdrop={(
+          <>
+            <ExpoImage
+              accessibilityIgnoresInvertColors
+              contentFit={themeScene.background.fit}
+              contentPosition={{
+                left: `${Math.round(themeScene.background.focalX * 100)}%`,
+                top: `${Math.round(themeScene.background.focalY * 100)}%`,
+              }}
+              source={resolvedTheme.backgroundSource}
+              style={styles.roomBackground}
+            />
+            <AnimatedRoomTheme
+              flags={cosmeticsFeatureFlags}
+              manifest={resolvedTheme.manifest}
+              viewerMode={roomEffects.viewerMode}
+            />
+            {roomImageUrl && room.roomImageReviewStatus === 'approved' && room.roomCustomizationSuspended !== true ? (
+              <ExpoImage
+                accessibilityIgnoresInvertColors
+                contentFit="cover"
+                source={{ uri: roomImageUrl }}
+                style={styles.roomBackground}
+              />
+            ) : null}
+            <View pointerEvents="none" style={styles.sceneVeilTop} />
+            <View pointerEvents="none" style={styles.sceneVeilBottom} />
+          </>
+        )}
         bottomInset
-        decorativeGlows
+        decorativeGlows={false}
         fixedBottom={bottomBar}
         horizontalPadding={spacing.md}
         scroll={false}
         topPadding={spacing.xs}
+        variant="ruby"
       >
-        <Image
-          accessibilityIgnoresInvertColors
-          resizeMode="cover"
-          source={resolvedTheme.backgroundSource}
-          style={styles.roomBackground}
-        />
-        {roomImageUrl && room.roomImageReviewStatus === 'approved' && room.roomCustomizationSuspended !== true ? (
-          <Image
-            accessibilityIgnoresInvertColors
-            resizeMode="cover"
-            source={{ uri: roomImageUrl }}
-            style={styles.roomBackground}
-          />
-        ) : null}
-        <View style={styles.ambientOrb} />
         <VoiceRoomHeader
           audienceCount={Math.max(room.participantCount, speakers.length + listeners.length)}
+          cosmeticsFlags={cosmeticsFeatureFlags}
           onAudiencePress={showParticipants}
           onLeave={() => void handleLeave()}
           onShare={handleShare}
+          ownerAvatarFrame={avatarFrames[ownerUid]}
+          ownerAvatarLabel={ownerAvatarLabel}
           ownerName={ownerName}
           recordingActive={roomRecording.indicatorActive}
           roomId={room.id}
           title={room.title}
         />
-        <View pointerEvents="box-none" style={styles.incentiveLaunchers}>
-          <RoomRocketButton data={roomRocket} onPress={() => setRocketVisible(true)} />
-          <RoomTargetButton data={roomTarget} onPress={() => setTargetVisible(true)} />
-        </View>
-
         {roomRecording.noticeVisible ? (
           <View style={[styles.notice, styles.noticeWarning]}>
             <Pressable onPress={() => { void roomRecording.acknowledgeNotice(); }} style={styles.retry}>
               <Text style={styles.retryText}>موافق</Text>
             </Pressable>
-            <Text style={styles.noticeText}>
+            <Text numberOfLines={1} style={styles.noticeText}>
               هذه غرفة ناضجة قد تُسجَّل صوتياً لأغراض الأمان عند التفعيل. التسجيل للطاقم فقط.
             </Text>
           </View>
-        ) : null}
-        {notice ? (
+        ) : notice ? (
           <View
             accessibilityLiveRegion="polite"
             style={[
@@ -850,68 +1102,77 @@ function ResolvedVoiceRoomScreen({
               size={15}
               tintColor={notice.kind === 'critical' ? '#FFB4C2' : colors.goldSoft}
             />
-            <Text numberOfLines={2} style={styles.noticeText}>{notice.message}</Text>
+            <Text numberOfLines={1} style={styles.noticeText}>{notice.message}</Text>
             {connectionState === 'disconnected' || connectionState === 'error' ? (
               <Pressable accessibilityRole="button" onPress={() => void reconnectToRoom()} style={styles.retry}>
                 <Text style={styles.retryText}>إعادة</Text>
               </Pressable>
             ) : null}
           </View>
-        ) : null}
+        ) : (
+          <VoiceRoomAnnouncementBar
+            connected={isConnected}
+            statusLabel={statusLabel}
+            text={tickerText}
+          />
+        )}
 
-        <VoiceRoomStage
+        <View style={[styles.stageShell, viewportProfile === 'compact' && styles.stageShellCompact]}>
+          <View style={styles.stageContent}>
+            <VoiceRoomStage
+              cosmeticsFlags={cosmeticsFeatureFlags}
+              manifest={resolvedTheme.manifest}
+              modeLabel={seatModeLabel(room.seatMode)}
+              onSeatPress={(seat) => void handleSeatPress(seat)}
+              pendingSeatId={pendingSeatId}
+              seats={seats}
+              targetedGiftEffect={roomEffects.activeEffect?.kind === 'room-gift'
+                && roomEffects.activeEffect.giftPresentationTier === 'targeted'
+                && roomEffects.activeEffect.presentation === 'visual'
+                ? roomEffects.activeEffect
+                : undefined}
+              viewportProfile={viewportProfile}
+            />
+          </View>
+        </View>
+
+        <VoiceRoomActivityDock
+          chatEnabled={voiceRoomFeatureFlags.chat}
+          compact={viewportProfile === 'compact'}
           cosmeticsFlags={cosmeticsFeatureFlags}
-          manifest={resolvedTheme.manifest}
-          modeLabel={seatModeLabel(room.seatMode)}
-          onSeatPress={(seat) => void handleSeatPress(seat)}
-          pendingSeatId={pendingSeatId}
-          seats={seats}
-          targetedGiftEffect={roomEffects.activeEffect?.kind === 'room-gift'
-            && roomEffects.activeEffect.giftPresentationTier === 'targeted'
-            && roomEffects.activeEffect.presentation === 'visual'
-            ? roomEffects.activeEffect
-            : undefined}
-        />
-
-        <View style={styles.activity}>
-          <View style={styles.activityHeader}>
-            <View style={styles.connectionPill}>
-              <View style={[styles.connectionDot, !isConnected && styles.connectionDotOffline]} />
-              <Text style={styles.connectionText}>{statusLabel}</Text>
-            </View>
-            <Text style={styles.activityTitle}>نشاط الغرفة</Text>
-          </View>
-          <View style={styles.eventRow}>
-            <View style={styles.eventIcon}>
-              <SymbolView
-                name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-                size={14}
-                tintColor={colors.goldSoft}
-              />
-            </View>
-            <Text numberOfLines={2} style={styles.eventText}>
-              مرحباً بك في {room.title}. احترم الآخرين واستمتع بالحديث.
-            </Text>
-          </View>
-          {room.currentGameId ? (
-            <View style={styles.eventRow}>
-              <View style={styles.eventIcon}>
-                <SymbolView
-                  name={{ ios: 'gamecontroller.fill', android: 'sports_esports', web: 'sports_esports' }}
-                  size={14}
-                  tintColor={colors.goldSoft}
-                />
-              </View>
-              <Text numberOfLines={1} style={styles.eventText}>توجد لعبة مرتبطة بالغرفة الآن.</Text>
-            </View>
-          ) : null}
-          {voiceRoomFeatureFlags.games
-            && roomGameSession
-            && (roomGameSession.status === 'lobby' || roomGameSession.status === 'active') ? (
+          detailSheetOpen={chatVisible || rocketVisible || targetVisible}
+          liveActivity={liveActivity}
+          liveContent={liveActivity === 'pk' && roomPkSession ? (
+            <RoomPkScoreboardCard
+              canManage={Boolean(
+                room.localMember?.id
+                && (
+                  roomPkSession.hostUid === room.localMember.id
+                  || authorityRole === 'owner'
+                  || authorityRole === 'moderator'
+                )
+              )}
+              compact
+              isBusy={pkCommandPending}
+              onEnd={
+                roomPkSession.status === 'active' || roomPkSession.status === 'lobby'
+                  ? () => { void endRoomPk(); }
+                  : undefined
+              }
+              onJoinTeam={
+                roomPkSession.status === 'active' || roomPkSession.status === 'lobby'
+                  ? (team) => { void joinRoomPkTeam(team); }
+                  : undefined
+              }
+              session={roomPkSession}
+              uid={room.localMember?.id}
+            />
+          ) : liveActivity === 'game' && roomGameSession ? (
             <RoomGameInviteCard
+              compact
               isPlayer={Boolean(
                 room.localMember?.id
-                && roomGameSession.playerUids.includes(room.localMember.id),
+                && roomGameSession.playerUids.includes(room.localMember.id)
               )}
               onEnd={
                 room.localMember?.id
@@ -923,41 +1184,63 @@ function ResolvedVoiceRoomScreen({
                   ? () => { void endRoomGameSession(); }
                   : undefined
               }
-              onJoin={
-                roomGameSession.sessionMode === 'multiplayer'
-                  ? () => { void joinRoomGameInvite(); }
-                  : undefined
-              }
+              onJoin={roomGameSession.sessionMode === 'multiplayer' ? () => { void joinRoomGameInvite(); } : undefined}
               onOpenGame={openJoinedRoomGame}
+              onSpectate={roomGameSession.sessionMode === 'multiplayer' ? spectateRoomGame : undefined}
               session={roomGameSession}
             />
-          ) : null}
-          {voiceRoomFeatureFlags.chat ? roomChat.messages.slice(-2).map((message) => (
-            <View key={message.id} style={styles.chatPreview}>
-              <Text numberOfLines={1} style={styles.chatPreviewSender}>
-                {message.kind === 'moderation' ? 'إشعار' : message.senderDisplayName || 'عضو'}
-              </Text>
-              <Text numberOfLines={1} style={styles.chatPreviewText}>
-                {message.status === 'deleted' ? 'تم حذف الرسالة.' : message.text}
-              </Text>
-            </View>
-          )) : null}
-        </View>
+          ) : undefined}
+          manifest={resolvedTheme.manifest}
+          messages={roomChat.messages}
+          onOpenChat={() => setChatVisible(true)}
+          onOpenRocket={() => {
+            setRocketFocus('rocket');
+            setRocketVisible(true);
+          }}
+          onOpenSupporters={() => {
+            setRocketFocus('supporters');
+            setRocketVisible(true);
+          }}
+          onOpenTarget={() => setTargetVisible(true)}
+          pages={activityPages}
+          rocket={roomRocket}
+          target={roomTarget}
+        />
 
-        {reactionIndex >= 0 ? (
-          <View accessibilityLiveRegion="polite" style={styles.reactionBubble}>
-            <Text style={styles.reactionText}>{REACTIONS[reactionIndex]}</Text>
-          </View>
-        ) : null}
+        <RoomAmbientReactions
+          enabled={cosmeticsFeatureFlags.roomReactions}
+          flags={cosmeticsFeatureFlags}
+          latest={latestRoomReaction}
+          roomId={room.id}
+          suppressed={Boolean(
+            notice
+            || roomRecording.noticeVisible
+            || roomEffects.activeEffect
+            || !isConnected
+            || room.status === 'closed'
+            || room.audioLockdown === true
+            || room.roomCustomizationSuspended === true
+            || room.effectsPolicy === 'off'
+          )}
+          viewerMode={roomEffects.viewerMode}
+        />
         {roomEffects.activeEffect
           && !(roomEffects.activeEffect.kind === 'room-gift'
             && roomEffects.activeEffect.giftPresentationTier === 'targeted'
             && roomEffects.activeEffect.presentation === 'visual') ? (
           <RoomEffectOverlay
+            bottomStageEnabled={bottomEffectStageEnabled}
             effect={roomEffects.activeEffect}
             flags={cosmeticsFeatureFlags}
-            onComplete={() => roomEffects.completeActiveEffect('completed')}
-            onError={() => roomEffects.completeActiveEffect('renderer-error')}
+            key={roomEffects.activeEffect.eventId}
+            onComplete={() => roomEffects.completeActiveEffect(
+              roomEffects.activeEffect!.eventId,
+              'completed',
+            )}
+            onError={() => roomEffects.completeActiveEffect(
+              roomEffects.activeEffect!.eventId,
+              'renderer-error',
+            )}
             viewerMode={roomEffects.viewerMode}
           />
         ) : null}
@@ -975,7 +1258,9 @@ function ResolvedVoiceRoomScreen({
         authorityRole={commandCenterAuthorityRole}
         hasPendingSeatOffer={!canManageRoom
           && (commandCenterData.seatInvites.length > 0 || commandCenterData.seatRequests.length > 0)}
+        isSpeakerEnabled={isSpeakerEnabled}
         musicEnabled={voiceRoomFeatureFlags.sharedMusic}
+        watchEnabled={growthFeatureFlags.watchTogether}
         onClose={() => setToolsVisible(false)}
         onGame={showGame}
         onGift={showGift}
@@ -985,12 +1270,23 @@ function ResolvedVoiceRoomScreen({
           setMusicVisible(true);
           void roomMusic.loadCatalog();
         }}
+        onWatch={() => {
+          setToolsVisible(false);
+          setWatchVisible(true);
+          void roomWatch.loadCatalog();
+        }}
         onOwnership={() => openCommandPanel('ownership')}
         onParticipants={showParticipants}
         onPeople={() => openCommandPanel('people')}
+        onPk={
+          growthFeatureFlags.roomPk
+          && (authorityRole === 'owner' || room.localMember?.id === room.hostId)
+            ? () => { void startRoomPk(); }
+            : undefined
+        }
         onReaction={() => {
           setToolsVisible(false);
-          setReactionIndex((current) => (current + 1) % REACTIONS.length);
+          sendRoomReaction();
         }}
         onReport={showReport}
         onRoomSettings={() => openCommandPanel('settings')}
@@ -1000,6 +1296,7 @@ function ResolvedVoiceRoomScreen({
           setToolsVisible(false);
           handleShare();
         }}
+        onSpeaker={() => setSpeakerEnabled(!isSpeakerEnabled)}
         visible={toolsVisible}
       />
       <RoomMusicSheet
@@ -1018,9 +1315,25 @@ function ResolvedVoiceRoomScreen({
         onStop={() => { void roomMusic.stopMusic(); }}
         visible={musicVisible}
       />
+      <RoomWatchSheet
+        canControl={canControlWatch}
+        catalog={roomWatch.catalog}
+        errorMessage={roomWatch.errorMessage}
+        lease={roomWatch.lease}
+        onClaimItem={(itemId) => { void roomWatch.claimItem(itemId); }}
+        onClose={() => setWatchVisible(false)}
+        onLoadCatalog={() => { void roomWatch.loadCatalog(); }}
+        onSetMuted={roomWatch.setWatchMuted}
+        onSetPlaybackState={(state) => { void roomWatch.setPlaybackState(state); }}
+        onStop={() => { void roomWatch.stopWatch(); }}
+        player={roomWatch.player}
+        visible={watchVisible}
+        watchMuted={roomWatch.watchMuted}
+      />
       <RoomRocketSheet
         cosmeticsFlags={cosmeticsFeatureFlags}
         data={roomRocket}
+        initialFocus={rocketFocus}
         onClose={() => setRocketVisible(false)}
         payoutsEnabled={voiceRoomFeatureFlags.rocketRewards}
         visible={rocketVisible}
@@ -1031,6 +1344,7 @@ function ResolvedVoiceRoomScreen({
         isOwner={authorityRole === 'owner'}
         onClose={() => setTargetVisible(false)}
         ownerUid={ownerUid}
+        payoutsEnabled={voiceRoomFeatureFlags.ownerTargetPayouts}
         roomId={room.id}
         visible={targetVisible}
       />
@@ -1158,14 +1472,16 @@ function ResolvedVoiceRoomScreen({
           mediaPending={roomMediaControls.pending}
           mediaStatus={room.roomImageReviewStatus ?? 'none'}
           onClose={() => setCommandPanel(undefined)}
+          onOpenMicrophones={() => setCommandPanel('microphones')}
           onSelectRoomImage={roomMediaControls.selectAndSubmitImage}
-          onSave={async (settings) => {
+          onSaveSection={async (settings) => {
             await hostControls.updateRoomSettings(settings);
-            setCommandPanel(undefined);
           }}
           purchasesEnabled={voiceRoomFeatureFlags.themePurchases}
           roomId={room.id}
+          roomTitle={room.title}
           saving={hostControls.isCommandPending('update-room-settings')}
+          seatTargetCount={room.seatTargetCount ?? 10}
           themesEnabled={voiceRoomFeatureFlags.themes}
           visible={commandPanel === 'settings'}
         />
@@ -1265,12 +1581,15 @@ function ResolvedVoiceRoomScreen({
             hapticPolicy: effect.hapticPolicy,
             kind: 'room-gift',
             label: `${effect.senderDisplayName} أرسل ${effect.nameAr}${effect.quantity > 1 ? ` ×${effect.quantity}` : ''} إلى ${effect.recipientDisplayName}`,
+            ...(effect.luckyOutcome ? { luckyOutcome: effect.luckyOutcome } : {}),
+            ...(effect.magicFrame ? { magicFrame: effect.magicFrame } : {}),
             priority: effect.priority,
             quantity: effect.quantity,
             recipientDisplayName: effect.recipientDisplayName,
             recipientUid: effect.recipientUid,
             senderDisplayName: effect.senderDisplayName,
             senderUid: effect.senderUid,
+            ...(effect.theaterKind ? { theaterKind: effect.theaterKind } : {}),
           });
         }}
         recipients={giftRecipients}
@@ -1328,29 +1647,36 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.black,
   },
   roomBackground: {
-    bottom: 0,
+    ...StyleSheet.absoluteFill,
+  },
+  sceneVeilTop: {
+    backgroundColor: 'rgba(8, 4, 5, 0.28)',
+    height: '22%',
     left: 0,
-    opacity: 0.24,
     position: 'absolute',
     right: 0,
     top: 0,
   },
-  ambientOrb: {
-    backgroundColor: 'rgba(184, 41, 75, 0.13)',
-    borderRadius: radius.full,
-    height: 260,
+  sceneVeilBottom: {
+    backgroundColor: 'rgba(8, 4, 5, 0.34)',
+    bottom: 0,
+    height: '18%',
+    left: 0,
     position: 'absolute',
-    right: -110,
-    top: 80,
-    width: 260,
+    right: 0,
   },
-  incentiveLaunchers: {
-    alignItems: 'flex-start',
-    gap: 7,
-    left: spacing.md,
-    position: 'absolute',
-    top: 82,
-    zIndex: 20,
+  stageShell: {
+    flex: 1,
+    marginTop: 6,
+    minHeight: 240,
+    width: '100%',
+  },
+  stageShellCompact: {
+    minHeight: 190,
+  },
+  stageContent: {
+    flex: 1,
+    minWidth: 0,
   },
   notice: {
     alignItems: 'center',
@@ -1364,6 +1690,7 @@ const styles = StyleSheet.create({
     minHeight: 38,
     paddingHorizontal: spacing.md,
     paddingVertical: 7,
+    zIndex: layers.roomSafety,
   },
   noticeCritical: {
     backgroundColor: 'rgba(184, 41, 75, 0.18)',
@@ -1392,94 +1719,6 @@ const styles = StyleSheet.create({
     color: colors.goldSoft,
     fontSize: 9,
     fontWeight: typography.weights.black,
-  },
-  activity: {
-    backgroundColor: 'rgba(5, 3, 9, 0.64)',
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    flex: 1,
-    marginTop: spacing.xs,
-    maxHeight: 132,
-    minHeight: 76,
-    padding: spacing.sm,
-  },
-  activityHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 5,
-  },
-  activityTitle: {
-    color: colors.goldSoft,
-    fontSize: 10,
-    fontWeight: typography.weights.black,
-    writingDirection: 'rtl',
-  },
-  connectionPill: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 4,
-  },
-  connectionDot: {
-    backgroundColor: colors.emerald,
-    borderRadius: radius.full,
-    height: 5,
-    width: 5,
-  },
-  connectionDotOffline: {
-    backgroundColor: colors.ruby,
-  },
-  connectionText: {
-    color: colors.textSubtle,
-    fontSize: 8,
-    writingDirection: 'rtl',
-  },
-  eventRow: {
-    alignItems: 'center',
-    flexDirection: 'row-reverse',
-    gap: spacing.sm,
-    minHeight: 28,
-  },
-  eventIcon: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(232,190,97,0.10)',
-    borderRadius: radius.full,
-    height: 24,
-    justifyContent: 'center',
-    width: 24,
-  },
-  eventText: {
-    color: colors.textMuted,
-    flex: 1,
-    fontSize: 10,
-    lineHeight: 15,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  chatPreview: {
-    alignItems: 'center',
-    borderColor: colors.border,
-    borderTopWidth: 1,
-    flexDirection: 'row-reverse',
-    gap: spacing.sm,
-    marginTop: 4,
-    paddingTop: 6,
-  },
-  chatPreviewSender: {
-    color: colors.goldSoft,
-    fontSize: 9,
-    fontWeight: typography.weights.bold,
-    maxWidth: 84,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  chatPreviewText: {
-    color: colors.textSubtle,
-    flex: 1,
-    fontSize: 9,
-    textAlign: 'right',
-    writingDirection: 'rtl',
   },
   reactionBubble: {
     alignItems: 'center',
@@ -1538,6 +1777,7 @@ const styles = StyleSheet.create({
     maxWidth: '70%',
     padding: spacing.xs,
     position: 'absolute',
+    zIndex: layers.roomSafety,
   },
   debugText: {
     color: colors.textSubtle,

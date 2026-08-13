@@ -1,8 +1,31 @@
 import type { RoomCountryCode } from '../types/voice';
 import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
+import type { CoupleEffectProjection } from '../cosmetics/coupleEffects';
 import type { EquipmentCosmetics } from '../cosmetics/equipmentCosmetics';
 
 export type ProfileGender = 'male' | 'female';
+export type ProfilePresentationUpdateInput = {
+  avatarLabel: string;
+  bio: string;
+  countryCode: RoomCountryCode;
+  displayName: string;
+  gender?: ProfileGender;
+};
+export type ProfilePresentationUpdateResult = ProfilePresentationUpdateInput & { uid: string };
+export type AvatarUploadAuthorization = {
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  expiresAtMillis: number;
+  sha256: string;
+  sizeBytes: number;
+  sourcePath: string;
+  uploadId: string;
+};
+export type AvatarFinalizeResult = { avatarUrl?: string; status: 'approved' | 'pending' | 'rejected'; uploadId: string };
+export type EconomyLoadState =
+  | { status: 'disabled' }
+  | { status: 'loading'; previous?: StoreCurrencyAmounts }
+  | { message: string; previous?: StoreCurrencyAmounts; status: 'error' }
+  | { balances: StoreCurrencyAmounts; message?: string; stale?: boolean; status: 'ready' };
 export type PublicProfileModerationStatus = 'active' | 'suspended' | 'removed';
 
 export type PublicUserProfile = {
@@ -10,12 +33,21 @@ export type PublicUserProfile = {
   avatarUrl: string;
   bio: string;
   countryCode: RoomCountryCode;
+  coupleEffect?: CoupleEffectProjection;
   coupleLevel: number;
   createdAt?: unknown;
   displayName: string;
   equippedAvatarFrame?: AvatarFrameProjection;
   equippedCosmetics?: EquipmentCosmetics;
+  family?: {
+    badgeColor: string;
+    familyId: string;
+    nameAr: string;
+    role: 'owner' | 'elder' | 'member';
+  };
   friendCount: number;
+  followerCount: number;
+  followingCount: number;
   gender?: ProfileGender;
   giftScore: number;
   moderationStatus: PublicProfileModerationStatus;
@@ -25,6 +57,12 @@ export type PublicUserProfile = {
   specialId?: string;
   uid: string;
   updatedAt?: unknown;
+  vipTier?: {
+    accentColor: string;
+    id: string;
+    nameAr: string;
+    rank: number;
+  };
 };
 
 export type ProfileBootstrapResult = {
@@ -84,6 +122,37 @@ export type FriendshipStatusResult = {
   status: FriendRelationshipStatus;
 };
 
+export type FollowRelationshipStatus = 'none' | 'following';
+
+export type FollowConnectionSummary = {
+  createdAt?: unknown;
+  profile: PublicUserProfile;
+};
+
+export type FollowListResult = {
+  items: FollowConnectionSummary[];
+};
+
+export type FollowListInput = {
+  targetUid?: string;
+};
+
+export type FollowMutationAction = 'follow-user' | 'unfollow-user';
+
+export type FollowMutationResult = {
+  followedBy: boolean;
+  status: FollowRelationshipStatus;
+};
+
+export type FollowStatusResult = {
+  followedBy: boolean;
+  status: FollowRelationshipStatus;
+};
+
+export type BlockedUsersResult = {
+  items: FollowConnectionSummary[];
+};
+
 export type CoupleRelationshipStatus = 'none' | 'incoming' | 'outgoing' | 'coupled';
 
 export type CoupleConnectionSummary = {
@@ -107,10 +176,66 @@ export type CoupleMutationAction =
 export type CoupleMutationResult = { status: CoupleRelationshipStatus };
 export type CoupleStatusResult = { status: CoupleRelationshipStatus; unavailable: boolean };
 
+export type FamilyRole = 'owner' | 'elder' | 'member';
+
+export type FamilySummary = {
+  badgeColor: string;
+  familyId: string;
+  homeRoomId?: string;
+  inviteCode: string;
+  memberCount: number;
+  nameAr: string;
+  ownerUid: string;
+};
+
+export type FamilyMember = {
+  displayName: string;
+  publicId: string;
+  role: FamilyRole;
+  uid: string;
+};
+
+export type FamilyInviteSummary = {
+  createdAt?: unknown;
+  family: FamilySummary;
+  profile: PublicUserProfile;
+};
+
+export type MyFamilyResult = {
+  family: FamilySummary | null;
+  incoming: FamilyInviteSummary[];
+  members: FamilyMember[];
+  role: FamilyRole | null;
+};
+
+export type FamilyMutationAction =
+  | 'create-family'
+  | 'invite-to-family'
+  | 'accept-family-invite'
+  | 'decline-family-invite'
+  | 'cancel-family-invite'
+  | 'join-family'
+  | 'leave-family'
+  | 'kick-family-member'
+  | 'dissolve-family';
+
+export type FamilyMutationResult = {
+  family?: FamilySummary;
+  role?: FamilyRole;
+  status: 'joined' | 'outgoing' | 'none' | 'kicked';
+  targetUid?: string;
+};
+
 export type NotificationPreferences = {
   coupleRequests: boolean;
+  directMessageRequests: boolean;
+  directMessages: boolean;
+  follows: boolean;
   friendRequests: boolean;
   gifts: boolean;
+  readReceipts: boolean;
+  showMessagePreview: boolean;
+  showOnlineStatus: boolean;
   walletTransfers: boolean;
 };
 
@@ -253,9 +378,19 @@ export type BlockMutationResult = { blocked: boolean; targetUid: string };
 export type SocialCommandAction =
   | 'bootstrap-profile'
   | 'get-readiness'
+  | 'update-profile-presentation'
+  | 'create-avatar-upload'
+  | 'finalize-avatar-upload'
+  | 'remove-avatar'
   | 'search-users'
   | 'get-friends'
   | 'get-friendship-status'
+  | 'follow-user'
+  | 'unfollow-user'
+  | 'get-follow-status'
+  | 'get-following'
+  | 'get-followers'
+  | 'get-blocked-users'
   | 'get-wallet-store'
   | 'purchase-special-id'
   | 'get-store-catalog'
@@ -263,6 +398,16 @@ export type SocialCommandAction =
   | 'get-my-store-items'
   | 'equip-store-item'
   | 'gift-store-item'
+  | 'get-couple-effects'
+  | 'purchase-couple-effect'
+  | 'equip-couple-effect'
+  | 'unequip-couple-effect'
+  | 'create-cosmetic-custom-upload'
+  | 'finalize-cosmetic-custom-upload'
+  | 'attest-cosmetic-custom-submission'
+  | 'list-cosmetic-custom-submissions'
+  | 'equip-cosmetic-custom-asset'
+  | 'unequip-cosmetic-custom-asset'
   | 'get-representative-status'
   | 'create-representative-portal-ticket'
   | 'representative-transfer'
@@ -271,10 +416,137 @@ export type SocialCommandAction =
   | BlockMutationAction
   | 'get-couples'
   | 'get-couple-status'
+  | 'get-my-family'
   | 'get-notification-settings'
   | NotificationMutationAction
   | CoupleMutationAction
-  | FriendMutationAction;
+  | FamilyMutationAction
+  | FriendMutationAction
+  | FollowMutationAction
+  | 'quick-match'
+  | 'claim-lucky-bag'
+  | 'get-leaderboard'
+  | 'get-vip-status'
+  | 'get-ops-missions'
+  | 'claim-ops-mission'
+  | 'soft-match-enqueue'
+  | 'soft-match-cancel'
+  | 'soft-match-status';
+
+export type SoftMatchResult =
+  | { status: 'idle' }
+  | { status: 'waiting'; expiresAtMs: number; preferGender: '' | 'male' | 'female' }
+  | {
+      status: 'matched';
+      inviteCode: string;
+      peerLabelAr: string;
+      roomId: string;
+      sessionExpiresAtMs: number;
+      sessionId: string;
+    };
+
+export type QuickMatchResult = {
+  countryCode: string;
+  masked: boolean;
+  mask: { expiresAtMs: number; labelAr: string } | null;
+  participantCount: number;
+  roomId: string;
+  title: string;
+};
+
+export type LuckyBagClaimResult = {
+  alreadyClaimed: boolean;
+  amount: number;
+  balances?: { coins?: number; diamonds?: number };
+  currency: 'coins' | 'diamonds';
+  dayId: string;
+  nextResetAtMillis: number;
+  settlementId: string;
+};
+
+export type LeaderboardKind = 'wealth' | 'charm' | 'family_wealth' | 'family_charm';
+export type LeaderboardWindow = 'daily' | 'weekly' | 'all';
+
+export type LeaderboardEntry = {
+  countryCode: string;
+  displayName: string;
+  firstContributionAtMs?: number;
+  publicId: string;
+  rank: number | null;
+  score: number;
+  uid: string;
+};
+
+export type LeaderboardBoard = {
+  boardId: string;
+  entries: LeaderboardEntry[];
+  frozen: boolean;
+  kind: LeaderboardKind;
+  periodId: string;
+  scope: string;
+  updatedAtMs: number;
+  window: LeaderboardWindow;
+};
+
+export type LeaderboardResult = {
+  board: LeaderboardBoard;
+  viewer: LeaderboardEntry | null;
+};
+
+export type VipTier = {
+  accentColor: string;
+  id: string;
+  minLifetimeCreditCoins: number;
+  nameAr: string;
+  rank: number;
+};
+
+export type VipStatusResult = {
+  catalog: VipTier[];
+  lifetimeCreditCoins: number;
+  nextTier: VipTier | null;
+  tier: VipTier | null;
+};
+
+export type OpsMissionRow = {
+  claimable: boolean;
+  claimed: boolean;
+  complete: boolean;
+  kind: string;
+  missionId: string;
+  progress: number;
+  rewardCoins: number;
+  target: number;
+  titleAr: string;
+};
+
+export type OpsEventSummary = {
+  audience: string;
+  endsAtMs: number;
+  eventId: string;
+  startsAtMs: number;
+  status: string;
+  themeAr: string;
+  titleAr: string;
+};
+
+export type OpsMissionsOverview = {
+  dayId: string;
+  event: OpsEventSummary | null;
+  missions: OpsMissionRow[];
+  nextResetAtMillis: number;
+};
+
+export type OpsMissionClaimResult = {
+  alreadyClaimed: boolean;
+  amount: number;
+  balances?: StoreCurrencyAmounts;
+  currency: 'coins' | 'diamonds';
+  dayId: string;
+  missionId: string;
+  nextResetAtMillis: number;
+  settlementId: string;
+};
 
 export type SocialCommandRequest<
   TAction extends SocialCommandAction = SocialCommandAction,
@@ -299,6 +571,8 @@ export type SocialCommandErrorCode =
   | 'INVALID_RECIPIENT'
   | 'REPRESENTATIVE_REQUIRED'
   | 'INVALID_REQUEST'
+  | 'UPLOAD_INVALID'
+  | 'MEDIA_REJECTED'
   | 'PROFILE_INCOMPLETE'
   | 'PUBLIC_ID_EXHAUSTED'
   | 'PERMISSION_DENIED'
@@ -310,12 +584,15 @@ export type SocialCommandResult<T> =
   | { ok: false; error: { code: SocialCommandErrorCode; messageAr: string } };
 
 export type SocialFeatureFlags = {
+  avatarUploads: boolean;
   couples: boolean;
   directMessageMedia: boolean;
   directMessageRequests: boolean;
   directMessages: boolean;
+  following: boolean;
   friends: boolean;
   gifts: boolean;
+  personalChatsFrontendV2: boolean;
   pushNotifications: boolean;
   representativeTransfers: boolean;
   usersDiscovery: boolean;

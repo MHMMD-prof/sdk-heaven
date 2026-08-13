@@ -48,6 +48,26 @@ describe('avatar frame public projection', () => {
     });
   });
 
+  it('maps custom-only avatar frames without requiring a legacy assetUrl', () => {
+    expect(readAvatarFrameProjection({
+      equippedCosmetics: {
+        avatarFrame: {
+          assetId: 'cu-av-aaaaaaaaaaaaaaaaaaaa',
+          assetVersionId: 'v1-123456789abc',
+          itemId: 'cu-av-aaaaaaaaaaaaaaaaaaaa',
+          source: 'custom',
+        },
+      },
+    })).toEqual({
+      canonicalAsset: {
+        assetId: 'cu-av-aaaaaaaaaaaaaaaaaaaa',
+        assetVersionId: 'v1-123456789abc',
+      },
+      itemId: 'cu-av-aaaaaaaaaaaaaaaaaaaa',
+      source: 'custom',
+    });
+  });
+
   it('maps immutable chat/gift snapshots without accepting arbitrary URLs', () => {
     expect(readProjectedAvatarFrame({
       assetUrl: 'https://cdn.example.test/frame.png',

@@ -49,6 +49,28 @@ describe('dailyLoginContract', () => {
       ...fixture,
       walletCredits: [{ amount: -30, balanceAfter: 1_100, currency: 'coins' }],
     })).toBeUndefined();
+    expect(mapDailyLoginClaimResult({ ...fixture, receiptId: '   ' })).toBeUndefined();
+    expect(mapDailyLoginClaimResult({
+      ...fixture,
+      items: [{ itemId: '', outcome: 'granted' }],
+    })).toBeUndefined();
+  });
+
+  it('rejects malformed receipt identity and out-of-range receipt streaks', () => {
+    const blankIdentity = statusFixture();
+    blankIdentity.todayDayId = '  ';
+    expect(mapDailyLoginStatus(blankIdentity)).toBeUndefined();
+
+    expect(mapDailyLoginStatus({
+      ...statusFixture(),
+      lastReceipt: {
+        campaignRevision: 4,
+        dayId: 'day_2026-07-31_asia-baghdad',
+        receiptId: 'dlc_receipt',
+        settlementId: 'dls_settlement',
+        streakPosition: 8,
+      },
+    })).toBeUndefined();
   });
 });
 

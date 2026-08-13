@@ -57,6 +57,7 @@ async function main() {
     stageId,
     status: 'testing',
     audienceMode,
+    broadReleaseReady: false,
     allowedUids,
     allowedRegionCodes: [],
     minimumClientVersion,
@@ -91,7 +92,7 @@ async function main() {
     policy,
     previousStageId: beforePolicy.stageId || 0,
     note: audienceMode === 'public'
-      ? 'All authenticated development accounts can test. Recording remains rejected. Store release remains blocked.'
+      ? 'Public access remains closed until broadReleaseReady is explicitly enabled. Recording remains rejected.'
       : 'Stage 8 is allowlist-only. Recording remains rejected. Broad public release remains blocked.',
   }, null, 2));
   if (!apply) return;

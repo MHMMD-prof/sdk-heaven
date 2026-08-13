@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 
 import { VoiceProviderConfig } from './types';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomGameAction =
   | 'list-room-games'
@@ -9,7 +10,8 @@ export type RoomGameAction =
   | 'leave-room-game'
   | 'end-room-game';
 
-export type RoomGameId = 'drawing-guess' | 'carrom-royal' | 'royal-majlis';
+export type RoomGameId = 'drawing-guess' | 'carrom-royal' | 'royal-majlis' | 'naval-duel';
+
 
 export type RoomGameRewardPolicy = {
   cashRedemption: boolean;
@@ -23,6 +25,7 @@ export type RoomGameRegistryEntry = {
   capabilities: string[];
   clientRoute: 'DrawingGuess' | 'Carrom' | 'MiniGame';
   displayName: { ar: string; en: string };
+  entryFeeOptions?: number[];
   gameId: RoomGameId;
   maxPlayers: number;
   minPlayers: number;
@@ -32,10 +35,22 @@ export type RoomGameRegistryEntry = {
   rewardPolicy?: RoomGameRewardPolicy;
   rewardPolicyId: string;
   sessionMode: 'multiplayer' | 'host-local';
+  supportsCoinEntry?: boolean;
+};
+
+export type RoomGameSessionEconomy = {
+  currency: 'coins' | 'diamonds';
+  entryFeeCoins: number;
+  poolCoins: number;
+  prizeUid?: string | null;
+  settled: boolean;
+  settlementKind?: string | null;
+  settlementMode?: string | null;
 };
 
 export type RoomGameSession = {
   clientRoute: 'DrawingGuess' | 'Carrom' | 'MiniGame' | string;
+  economy?: RoomGameSessionEconomy | null;
   expiresAtMs: number;
   gameId: RoomGameId | string;
   hostUid: string;
@@ -115,6 +130,7 @@ export async function requestRoomGameCommand(
       headers: {
         Authorization: `Bearer ${await getIdToken(true)}`,
         'Content-Type': 'application/json',
+        ...(await getVoiceAppCheckHeader()),
       },
       method: 'POST',
       signal: controller.signal,
@@ -147,6 +163,10 @@ export function createRoomGameRequestId(now = Date.now(), random = Math.random()
 
 export function roomGameErrorMessage(code?: string, fallback?: string) {
   const messages: Record<string, string> = {
+    ECONOMY_DISABLED: 'دخول العملات لألعاب الغرفة غير مفعّل حالياً.',
+    ENTRY_FEE_UNSUPPORTED: 'رسوم الدخول متاحة فقط لخمن الرسم.',
+    INVALID_ENTRY_FEE: 'رسوم الدخول يجب أن تكون 0 أو 10 أو 25 أو 50 عملة.',
+    INSUFFICIENT_FUNDS: 'رصيد العملات غير كافٍ لرسوم الدخول.',
     FEATURE_DISABLED: 'ألعاب الغرفة غير مفعّلة حالياً.',
     CLIENT_UPDATE_REQUIRED: 'يجب تحديث التطبيق قبل تشغيل هذه اللعبة.',
     FORBIDDEN: 'ليس لديك صلاحية لهذا الإجراء.',

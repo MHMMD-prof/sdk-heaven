@@ -325,11 +325,19 @@ async function getPayrollProgress({ clock, db, uid }) {
     profile: evidence.profile,
   });
   if (!qualification.ok) return { errorCode: qualification.code };
+  const featureSnapshot = await db.doc('appConfig/voiceRoomFeatures').get();
+  const payoutEnabled = featureSnapshot.data()?.voice_room_payroll_payouts === true;
   return {
     cycle: cycle.value,
     enrolled: true,
+    payoutEnabled,
     plan: publicPlan(plan),
     progress: qualification.value,
+    settlement: {
+      // Prior cycle settles after the current week ends; estimate is this cycle's end.
+      mode: payoutEnabled ? 'live' : 'report-only',
+      nextSettlementEstimateAtMillis: cycle.value.endAtMillis,
+    },
     uid,
   };
 }

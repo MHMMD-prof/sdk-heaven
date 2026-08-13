@@ -73,6 +73,15 @@ describe('directChatPolicyCore', () => {
     expect(createBaghdadDayKey(Date.UTC(2026, 7, 1, 21, 0))).toBe('2026-08-02');
   });
 
+  it('keeps feature-disabled closed when only media or requests are on', () => {
+    expect(resolveDirectChatPairAccess({
+      actorProfile: activeProfile('user-1'),
+      featureFlags: { directMessageMedia: true, directMessageRequests: true, directMessages: false },
+      nowMs: 10_000,
+      targetProfile: activeProfile('user-2'),
+    })).toMatchObject({ code: 'FEATURE_DISABLED', ok: false });
+  });
+
   it('adapts the existing keyword policy without leaking the blocked term', () => {
     expect(filterDirectChatText('hello', { keywordTerms: ['blocked'] })).toEqual({ ok: true, value: 'hello' });
     expect(filterDirectChatText('a BLOCKED phrase', { keywordTerms: ['blocked'] })).toMatchObject({
@@ -92,5 +101,15 @@ describe('directChatPolicyCore', () => {
     expect(canUnsendDirectMessage({ actorUid: 'user-1', message, nowMs: 10_000 + DIRECT_CHAT_UNSEND_WINDOW_MS })).toEqual({ ok: true });
     expect(canUnsendDirectMessage({ actorUid: 'user-1', message, nowMs: 10_001 + DIRECT_CHAT_UNSEND_WINDOW_MS })).toMatchObject({ code: 'UNSEND_WINDOW_EXPIRED' });
     expect(canUnsendDirectMessage({ actorUid: 'user-2', message, nowMs: 10_000 })).toMatchObject({ code: 'MESSAGE_UNAVAILABLE' });
+  });
+
+  it('authorizes unsend windows from server nowMillis only (clock-skew resistant)', () => {
+    const message = { createdAt: 10_000, kind: 'text', senderUid: 'user-1', visibilityState: 'visible' };
+    // Policy never reads a client clock field; injected nowMs is authoritative.
+    expect(canUnsendDirectMessage({
+      actorUid: 'user-1',
+      message: { ...message, clientClaimedNowMs: 10_000 + DIRECT_CHAT_UNSEND_WINDOW_MS },
+      nowMs: 10_001 + DIRECT_CHAT_UNSEND_WINDOW_MS,
+    })).toMatchObject({ code: 'UNSEND_WINDOW_EXPIRED' });
   });
 });

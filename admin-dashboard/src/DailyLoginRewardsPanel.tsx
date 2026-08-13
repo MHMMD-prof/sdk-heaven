@@ -127,13 +127,8 @@ export function DailyLoginRewardsPanel({ permissions, user }: { permissions: str
 
   const pointer = detail.current;
   return (
-    <section className="daily-login-admin" aria-labelledby="daily-login-admin-title">
-      <AdminSurface className="settings-card daily-login-hero">
-        <div>
-          <p className="section-eyebrow">حافز الاحتفاظ اليومي</p>
-          <h2 id="daily-login-admin-title">مكافآت الدخول اليومي</h2>
-          <p className="field-hint">دورة ثابتة من 7 أيام. النشر يبدأ في منتصف الليل التالي بتوقيت بغداد، بينما مفاتيح السلامة تعمل فوراً.</p>
-        </div>
+    <section className="daily-login-admin incentives-embedded-panel" aria-labelledby="daily-login-admin-title">
+      <div className="incentives-panel-toolbar" id="daily-login-admin-title">
         <div className="daily-login-statuses">
           <AdminStatusBadge tone={detail.features.rewardsEnabled ? 'success' : 'warning'}>
             {detail.features.rewardsEnabled ? 'العلم مفعّل' : 'العلم مغلق'}
@@ -141,9 +136,8 @@ export function DailyLoginRewardsPanel({ permissions, user }: { permissions: str
           <AdminStatusBadge tone={pointer?.claimsPaused ? 'warning' : 'success'}>
             {pointer?.claimsPaused ? 'المطالبات متوقفة' : 'المطالبات متاحة'}
           </AdminStatusBadge>
-          <button className="secondary-button compact" onClick={() => void load()} type="button">تحديث</button>
         </div>
-      </AdminSurface>
+      </div>
 
       <div className="settings-kpis">
         <Metric label="الإصدار الإداري" value={String(detail.revision)} />
@@ -193,15 +187,15 @@ export function DailyLoginRewardsPanel({ permissions, user }: { permissions: str
             {draft.rewards.map((reward, index) => (
               <div className="daily-login-day-editor" key={index}>
                 <strong>اليوم {index + 1}</strong>
-                <label>
-                  <span>Coins</span>
+                <label className="field">
+                  <span>عملات</span>
                   <input min="0" disabled={!canManage} onChange={(event) => updateDay(index, 'coins', event.target.value, draft, setDraft)} type="number" value={reward.coins} />
                 </label>
-                <label>
-                  <span>Diamonds</span>
+                <label className="field">
+                  <span>ألماس</span>
                   <input min="0" disabled={!canManage} onChange={(event) => updateDay(index, 'diamonds', event.target.value, draft, setDraft)} type="number" value={reward.diamonds} />
                 </label>
-                <label className="daily-login-items-input">
+                <label className="field daily-login-items-input">
                   <span>العناصر</span>
                   <input dir="ltr" disabled={!canManage} onChange={(event) => updateDay(index, 'items', event.target.value, draft, setDraft)} value={reward.items} />
                 </label>
@@ -230,7 +224,7 @@ export function DailyLoginRewardsPanel({ permissions, user }: { permissions: str
             {liabilities.map((entry) => (
               <div className="settings-row" key={entry.claimants}>
                 <div><strong>{entry.claimants.toLocaleString('ar-IQ')} مستخدم</strong></div>
-                <b>{entry.coins.toLocaleString('ar-IQ')} Coins · {entry.diamonds.toLocaleString('ar-IQ')} Diamonds · {entry.items.toLocaleString('ar-IQ')} Items</b>
+                <b>{entry.coins.toLocaleString('ar-IQ')} عملات · {entry.diamonds.toLocaleString('ar-IQ')} ألماس · {entry.items.toLocaleString('ar-IQ')} عناصر</b>
               </div>
             ))}
           </div>
@@ -305,6 +299,7 @@ function buildTemplate(draft: Draft): AdminDailyLoginTemplate | undefined {
   const rewards: AdminDailyLoginTemplate['rewards'] = [];
   for (let index = 0; index < 7; index += 1) {
     const source = draft.rewards[index];
+    if (!source) return undefined;
     const coins = Number(source.coins);
     const diamonds = Number(source.diamonds);
     const items = parseItems(source.items);
@@ -329,11 +324,12 @@ function parseItems(value: string): AdminDailyLoginRewardBundle['items'] | undef
   const items: AdminDailyLoginRewardBundle['items'] = [];
   for (const token of value.split(',').map((entry) => entry.trim()).filter(Boolean)) {
     const [itemId, currency, rawAmount, ...extra] = token.split('|').map((entry) => entry.trim());
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(itemId) || extra.length > 0) return undefined;
+    if (!itemId || !/^[A-Za-z0-9_-]{1,128}$/.test(itemId) || extra.length > 0) return undefined;
     if (currency === undefined && rawAmount === undefined) {
       items.push({ itemId });
       continue;
     }
+    if (!currency || !rawAmount) return undefined;
     const amount = Number(rawAmount);
     if (!['coins', 'diamonds'].includes(currency) || !Number.isSafeInteger(amount) || amount < 1) return undefined;
     items.push({

@@ -5,7 +5,7 @@ const {
   resolveSlidingWindowRateLimit,
 } = require('./voiceRoomRateLimitCore');
 
-const HTTP_RATE_SURFACES = new Set(['room-attendance', 'room-command', 'room-gift']);
+const HTTP_RATE_SURFACES = new Set(['livekit-token', 'room-attendance', 'room-command', 'room-gift']);
 const HARDENING_COLLECTION_GROUPS = [
   'commandRequests',
   'commandRateLimits',
@@ -16,6 +16,8 @@ const HARDENING_COLLECTION_GROUPS = [
 const HARDENING_ROOT_COLLECTIONS = [
   'roomAttendanceEventReceipts',
   'roomAttendanceIntervals',
+  'voiceRoomAdmissionRateLimits',
+  'voiceRoomAdmissionRequests',
   'voiceRoomHttpRateLimits',
 ];
 

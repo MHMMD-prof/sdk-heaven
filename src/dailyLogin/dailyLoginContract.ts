@@ -74,7 +74,7 @@ export function mapDailyLoginStatus(input: unknown): DailyLoginStatus | undefine
     || !isPositiveInteger(input.streakPosition)
     || input.streakPosition > 7
     || input.timeZone !== 'Asia/Baghdad'
-    || typeof input.todayDayId !== 'string'
+    || !isNonEmptyString(input.todayDayId)
   ) return undefined;
   const lastReceipt = input.lastReceipt === undefined ? undefined : mapReceipt(input.lastReceipt);
   if (input.lastReceipt !== undefined && !lastReceipt) return undefined;
@@ -108,10 +108,10 @@ export function mapDailyLoginClaimResult(input: unknown): DailyLoginClaimResult 
     || !walletCredits
     || !items
     || !isPositiveInteger(input.campaignRevision)
-    || typeof input.dayId !== 'string'
+    || !isNonEmptyString(input.dayId)
     || !isNonNegativeInteger(input.nextResetAtMillis)
-    || typeof input.receiptId !== 'string'
-    || typeof input.settlementId !== 'string'
+    || !isNonEmptyString(input.receiptId)
+    || !isNonEmptyString(input.settlementId)
     || !isPositiveInteger(input.streakPosition)
     || input.streakPosition > 7
   ) return undefined;
@@ -162,10 +162,11 @@ function mapReceipt(input: unknown): DailyLoginReceipt | undefined {
   if (
     !isRecord(input)
     || !isPositiveInteger(input.campaignRevision)
-    || typeof input.dayId !== 'string'
-    || typeof input.receiptId !== 'string'
-    || typeof input.settlementId !== 'string'
+    || !isNonEmptyString(input.dayId)
+    || !isNonEmptyString(input.receiptId)
+    || !isNonEmptyString(input.settlementId)
     || !isPositiveInteger(input.streakPosition)
+    || input.streakPosition > 7
   ) return undefined;
   return input as DailyLoginReceipt;
 }
@@ -198,7 +199,7 @@ function mapClaimItems(input: unknown): DailyLoginClaimResult['items'] | undefin
   const values = input.map((entry) => {
     if (
       !isRecord(entry)
-      || typeof entry.itemId !== 'string'
+      || !isNonEmptyString(entry.itemId)
       || !['duplicate-fallback', 'extended', 'granted'].includes(String(entry.outcome))
     ) return undefined;
     const fallback = entry.fallback === undefined ? undefined : mapFallback(entry.fallback);
@@ -230,4 +231,8 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isPositiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }

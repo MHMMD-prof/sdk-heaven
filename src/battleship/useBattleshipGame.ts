@@ -27,15 +27,26 @@ import { useBattleshipShipFrames } from './useBattleshipShipFrames';
 
 type UseBattleshipGameOptions = {
   initialMode: MiniGameModeId;
+  onOnlineFleetConfirmed?: (targets: MiniGameTarget[]) => void;
+  persistenceEnabled?: boolean;
+  skipPreMatch?: boolean;
   screenWidth: number;
 };
 
-export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGameOptions) {
+export function useBattleshipGame({
+  initialMode,
+  onOnlineFleetConfirmed,
+  persistenceEnabled = true,
+  skipPreMatch = false,
+  screenWidth,
+}: UseBattleshipGameOptions) {
   const initialModeConfig =
     miniGameModes.find((item) => item.id === initialMode) ?? miniGameModes[0];
   const [modeId, setModeId] = useState<MiniGameModeId>(initialModeConfig.id);
   const mode = miniGameModes.find((item) => item.id === modeId) ?? miniGameModes[0];
-  const [phase, setPhase] = useState<GamePhase>(getResetPhase(initialModeConfig, true));
+  const [phase, setPhase] = useState<GamePhase>(
+    getResetPhase(initialModeConfig, !skipPreMatch),
+  );
   const [selectedTargetId, setSelectedTargetId] = useState<string | undefined>(
     getInitialSelectedTargetId(initialModeConfig),
   );
@@ -171,6 +182,14 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
   useEffect(() => {
     let isMounted = true;
 
+    if (!persistenceEnabled) {
+      setSavedMatch(undefined);
+      setPersistenceReady(true);
+      return () => {
+        isMounted = false;
+      };
+    }
+
     void loadSavedBattleshipMatch()
       .then((nextSavedMatch) => {
         if (isMounted) {
@@ -186,10 +205,10 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [persistenceEnabled]);
 
   useEffect(() => {
-    if (!persistenceReady || phase === 'pre-match') {
+    if (!persistenceEnabled || !persistenceReady || phase === 'pre-match') {
       return;
     }
 
@@ -213,6 +232,7 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
     lastShot,
     modeId,
     pendingTurnPass,
+    persistenceEnabled,
     persistenceReady,
     phase,
     playerOneGuesses,
@@ -258,7 +278,9 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
     playSound('tap');
     impactMedium();
     setSavedMatch(undefined);
-    void clearSavedBattleshipMatch();
+    if (persistenceEnabled) {
+      void clearSavedBattleshipMatch();
+    }
     resetGame(modeId, false);
   };
 
@@ -279,7 +301,9 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
     const nextMode = miniGameModes.find((item) => item.id === nextModeId) ?? miniGameModes[0];
 
     setSavedMatch(undefined);
-    void clearSavedBattleshipMatch();
+    if (persistenceEnabled) {
+      void clearSavedBattleshipMatch();
+    }
     clearShotAnimation();
     clearSunkEffects();
     setModeId(nextMode.id);
@@ -320,6 +344,7 @@ export function useBattleshipGame({ initialMode, screenWidth }: UseBattleshipGam
     mode,
     notifyError,
     notifySuccess,
+    onOnlineFleetConfirmed,
     phase,
     playInvalidSound: () => playSound('invalid'),
     playTapSound: () => playSound('tap'),

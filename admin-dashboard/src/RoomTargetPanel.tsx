@@ -153,13 +153,8 @@ export function RoomTargetPanel({ permissions, user }: { permissions: string[]; 
   }
 
   return (
-    <section className="room-target-section">
-      <div className="rocket-preview-heading">
-        <div>
-          <p className="section-kicker">هدف المالك الأسبوعي</p>
-          <h2>هدف الغرفة والعوائد</h2>
-          <p className="field-hint">القائمة الحالية مقفلة. أي نشر جديد يبدأ من الأسبوع التالي ويحفظ نسخة تاريخية كاملة.</p>
-        </div>
+    <section className="room-target-section incentives-embedded-panel">
+      <div className="incentives-panel-toolbar">
         <AdminStatusBadge tone={detail.campaign?.emergencyDisabled ? 'danger' : 'success'}>{detail.campaign?.emergencyDisabled ? 'موقوف للطوارئ' : 'متاح'}</AdminStatusBadge>
       </div>
 
@@ -184,7 +179,7 @@ export function RoomTargetPanel({ permissions, user }: { permissions: string[]; 
 
         <AdminSurface className="settings-card">
           <h3>تحويل العملة</h3>
-          <Field label="عملة العائد"><select onChange={(event) => setDraft({ ...draft, payoutCurrency: event.target.value as 'coins' | 'diamonds' })} value={draft.payoutCurrency}><option value="coins">Coins</option><option value="diamonds">Diamonds</option></select></Field>
+          <Field label="عملة العائد"><select onChange={(event) => setDraft({ ...draft, payoutCurrency: event.target.value as 'coins' | 'diamonds' })} value={draft.payoutCurrency}><option value="coins">عملات</option><option value="diamonds">ألماس</option></select></Field>
           <Field label="بسط التحويل"><input min="1" onChange={(event) => setDraft({ ...draft, conversionNumerator: event.target.value })} type="number" value={draft.conversionNumerator} /></Field>
           <Field label="مقام التحويل"><input min="1" onChange={(event) => setDraft({ ...draft, conversionDenominator: event.target.value })} type="number" value={draft.conversionDenominator} /></Field>
           <Field label="قيمة الماسة بالعملات"><input min="1" onChange={(event) => setDraft({ ...draft, diamondValueCoins: event.target.value })} type="number" value={draft.diamondValueCoins} /></Field>

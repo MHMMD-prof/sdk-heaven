@@ -30,6 +30,7 @@ import { AvatarFrameLayer } from './AvatarPresentation';
 import { useCosmeticsFeatureFlags, type CosmeticsFeatureFlags } from '../cosmetics/featureFlags';
 import type { AvatarFrameProjection } from '../cosmetics/avatarFrameProjection';
 import { EquipmentCosmeticAsset } from './EquipmentCosmeticAsset';
+import { CoupleEffectPresentation } from './CoupleEffectPresentation';
 
 type PublicProfilePageProps = {
   bottomNavigation?: ReactNode;
@@ -38,6 +39,11 @@ type PublicProfilePageProps = {
     onPress: () => void;
   };
   coupleAction?: {
+    disabled?: boolean;
+    label: string;
+    onPress: () => void;
+  };
+  followAction?: {
     disabled?: boolean;
     label: string;
     onPress: () => void;
@@ -58,6 +64,7 @@ type PublicProfilePageProps = {
   onBack: () => void;
   onOpenDiscovery?: () => void;
   onOpenCouples?: () => void;
+  onOpenFollowing?: (tab?: 'following' | 'followers') => void;
   onOpenFriends?: () => void;
   onOpenGifts?: () => void;
   onOpenNotifications?: () => void;
@@ -75,6 +82,7 @@ export function PublicProfilePage({
   bottomNavigation,
   chatAction,
   coupleAction,
+  followAction,
   friendAction,
   giftAction,
   fallbackAvatarLabel = '؟',
@@ -84,6 +92,7 @@ export function PublicProfilePage({
   onBack,
   onOpenDiscovery,
   onOpenCouples,
+  onOpenFollowing,
   onOpenFriends,
   onOpenGifts,
   onOpenNotifications,
@@ -119,6 +128,12 @@ export function PublicProfilePage({
           style={styles.hero}
         >
           <EquipmentCosmeticAsset category="profile-skin" enabled={cosmeticsFlags.profileSkins} flags={cosmeticsFlags} projection={profile?.equippedCosmetics?.profileSkin} style={styles.profileSkin} />
+          <CoupleEffectPresentation
+            flags={cosmeticsFlags}
+            projection={profile?.coupleEffect}
+            style={styles.coupleEffectHero}
+            surface="profile"
+          />
           <View style={styles.heroHaloLarge} />
           <View style={styles.heroHaloSmall} />
           <View style={styles.header}>
@@ -161,6 +176,13 @@ export function PublicProfilePage({
                 active={profile?.representativeBadgeActive}
                 variant="full"
               />
+              {profile?.family ? (
+                <View style={[styles.familyChip, { borderColor: profile.family.badgeColor }]}>
+                  <Text style={[styles.familyChipText, { color: profile.family.badgeColor }]}>
+                    عائلة {profile.family.nameAr}
+                  </Text>
+                </View>
+              ) : null}
               {profile ? (
                 <View style={styles.identityIds}>
                   {profile.specialId ? (
@@ -200,12 +222,41 @@ export function PublicProfilePage({
           {profile ? (
             <>
               <View style={styles.statsPanel}>
+                <Pressable disabled={!onOpenFollowing} onPress={() => onOpenFollowing?.('followers')} style={styles.statPressable}>
+                  <ProfileStat label="المتابعون" value={profile.followerCount} />
+                </Pressable>
+                <View style={styles.statDivider} />
+                <Pressable disabled={!onOpenFollowing} onPress={() => onOpenFollowing?.('following')} style={styles.statPressable}>
+                  <ProfileStat label="يتابع" value={profile.followingCount} />
+                </Pressable>
+                <View style={styles.statDivider} />
                 <ProfileStat label="الأصدقاء" value={profile.friendCount} />
                 <View style={styles.statDivider} />
                 <ProfileStat label="نقاط الهدايا" value={profile.giftScore} />
-                <View style={styles.statDivider} />
-                <ProfileStat label="مستوى الارتباط" value={profile.coupleLevel} />
               </View>
+
+              {!isSelf && followAction ? (
+                <Pressable
+                  disabled={followAction.disabled}
+                  onPress={followAction.onPress}
+                  style={({ pressed }) => [
+                    styles.friendAction,
+                    pressed && styles.pressed,
+                    followAction.disabled && styles.disabled,
+                  ]}
+                >
+                  {followAction.disabled ? (
+                    <ActivityIndicator color="#2A090C" />
+                  ) : (
+                    <SymbolView
+                      name={{ ios: 'person.crop.circle.badge.plus', android: 'person_add_alt', web: 'person_add_alt' }}
+                      size={21}
+                      tintColor="#2A090C"
+                    />
+                  )}
+                  <Text style={styles.friendActionText}>{followAction.label}</Text>
+                </Pressable>
+              ) : null}
 
               {!isSelf && friendAction ? (
                 <Pressable
@@ -352,6 +403,13 @@ export function PublicProfilePage({
                       onPress={onOpenFriends}
                     />
                   ) : null}
+                  {onOpenFollowing ? (
+                    <ProfileAction
+                      icon={{ ios: 'person.line.dotted.person.fill', android: 'group', web: 'group' }}
+                      label="المتابعون ويتابع"
+                      onPress={() => onOpenFollowing()}
+                    />
+                  ) : null}
                   {onOpenDiscovery ? (
                     <ProfileAction
                       icon={{ ios: 'person.2.fill', android: 'person_search', web: 'person_search' }}
@@ -418,10 +476,10 @@ function Avatar({ avatarLabel, avatarUrl, compact, flags, frame }: {
   );
 }
 
-function ProfileStat({ label, value }: { label: string; value: number }) {
+function ProfileStat({ label, value }: { label: string; value: number | string }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statValue}>{formatNumber(value)}</Text>
+      <Text style={styles.statValue}>{typeof value === 'number' ? formatNumber(value) : value}</Text>
       <Text numberOfLines={1} style={styles.statLabel}>{label}</Text>
     </View>
   );
@@ -661,6 +719,7 @@ function readTimestampDate(value: unknown): Date | undefined {
 }
 
 const styles = StyleSheet.create({
+  coupleEffectHero: { bottom: 0, left: 0, opacity: 0.86, position: 'absolute', right: 0, top: 0, zIndex: 1 },
   profileSkin: { bottom: 0, left: 0, opacity: 0.55, position: 'absolute', right: 0, top: 0 },
   nameplate: { height: 44, left: -12, position: 'absolute', right: -12, top: -8 },
   cosmeticBadge: { height: 24, width: 24, zIndex: 2 },
@@ -682,6 +741,17 @@ const styles = StyleSheet.create({
   avatarImage: { height: '100%', resizeMode: 'cover', width: '100%' },
   avatarLabel: { color: colors.goldSoft, fontSize: 42, fontWeight: typography.weights.black },
   identityCopy: { alignItems: 'flex-end', flexShrink: 1, gap: spacing.md },
+  familyChip: {
+    borderRadius: radius.full,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  familyChipText: {
+    fontSize: 13,
+    fontWeight: typography.weights.bold,
+    writingDirection: 'rtl',
+  },
   nameRow: { alignItems: 'center', flexDirection: 'row-reverse', gap: spacing.sm, maxWidth: 430 },
   flag: { borderRadius: 3, height: 22, resizeMode: 'cover', width: 32 },
   displayName: { color: '#FFF4D5', flexShrink: 1, fontSize: 28, fontWeight: typography.weights.black, textAlign: 'right', writingDirection: 'rtl' },
@@ -692,6 +762,7 @@ const styles = StyleSheet.create({
   specialIdText: { color: '#351007', fontSize: 13, fontWeight: typography.weights.black, writingDirection: 'rtl' },
   content: { gap: spacing.md, padding: spacing.lg },
   statsPanel: { alignItems: 'stretch', backgroundColor: '#100607', borderColor: 'rgba(232,190,97,0.36)', borderRadius: radius.xl, borderWidth: 1, flexDirection: 'row-reverse', minHeight: 94, paddingVertical: spacing.md },
+  statPressable: { flex: 1 },
   friendAction: { alignItems: 'center', alignSelf: 'stretch', backgroundColor: colors.gold, borderRadius: radius.full, flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'center', minHeight: 50, paddingHorizontal: spacing.xl },
   friendActionText: { color: '#2A090C', fontSize: 15, fontWeight: typography.weights.black, writingDirection: 'rtl' },
   chatAction: { alignItems: 'center', alignSelf: 'stretch', backgroundColor: '#E8BE61', borderColor: '#FFF0BE', borderRadius: radius.full, borderWidth: 1, flexDirection: 'row-reverse', gap: spacing.sm, justifyContent: 'center', minHeight: 50, paddingHorizontal: spacing.xl },

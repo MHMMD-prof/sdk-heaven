@@ -1,7 +1,9 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
+import { requestNotificationSettings } from '../social/requestSocialCommand';
 import { useSocialFeatureFlags } from '../social/useSocialFeatureFlags';
+import { mergeDirectChatInboxItems } from './directChatInboxState';
 import type { DirectChatInboxPage } from './directChatModels';
 import {
   mapRealtimeProjection,
@@ -22,6 +24,7 @@ type DirectChatContextValue = {
   mediaEnabled: boolean;
   refresh: () => Promise<void>;
   runPreference: (item: DirectChatRealtimeProjection, action: 'archive' | 'mute') => Promise<void>;
+  showOnlineStatus: boolean;
   status: InboxStatus;
   totalUnreadCount: number;
 };
@@ -38,20 +41,45 @@ export function DirectChatProvider({ children }: { children: ReactNode }) {
   const [nextCursor, setNextCursor] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [totalUnreadCount, setTotalUnreadCount] = useState(0);
+  const [showOnlineStatus, setShowOnlineStatus] = useState(true);
   const loadingMore = useRef(false);
+  const pagedConversationIds = useRef(new Set<string>());
+  const realtimeConversationIds = useRef(new Set<string>());
+  const realtimeHealthy = useRef(false);
+  const realtimeVersion = useRef(0);
+  const unreadSummaryVersion = useRef(0);
+
+  useEffect(() => {
+    if (!enabled || !user?.uid) {
+      setShowOnlineStatus(true);
+      return undefined;
+    }
+    let active = true;
+    void requestNotificationSettings().then((response) => {
+      if (active && response.ok) setShowOnlineStatus(response.result.preferences.showOnlineStatus !== false);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [enabled, user?.uid]);
 
   const mergeItems = useCallback((incoming: DirectChatRealtimeProjection[], replace = false) => {
-    setItems((current) => {
-      const map = new Map((replace ? [] : current).map((item) => [item.conversationId, item]));
-      incoming.forEach((item) => map.set(item.conversationId, item));
-      return [...map.values()]
-        .filter((item) => !item.archived)
-        .sort((left, right) => right.updatedAtMs - left.updatedAtMs || right.conversationId.localeCompare(left.conversationId));
-    });
+    setItems((current) => mergeDirectChatInboxItems({ current, incoming, replace }));
+  }, []);
+
+  const mergeRealtimeItems = useCallback((incoming: DirectChatRealtimeProjection[]) => {
+    const previousRealtimeIds = realtimeConversationIds.current;
+    realtimeConversationIds.current = new Set(incoming.map((item) => item.conversationId));
+    setItems((current) => mergeDirectChatInboxItems({
+      current,
+      incoming,
+      preserveConversationIds: pagedConversationIds.current,
+      removeConversationIds: previousRealtimeIds,
+    }));
   }, []);
 
   const refresh = useCallback(async () => {
     if (!enabled || !user?.uid) return;
+    const realtimeVersionAtStart = realtimeVersion.current;
+    const unreadSummaryVersionAtStart = unreadSummaryVersion.current;
     setStatus('loading');
     setErrorMessage('');
     try {
@@ -61,14 +89,21 @@ export function DirectChatProvider({ children }: { children: ReactNode }) {
         requestId: createDirectChatRequestId(),
       });
       const page = response.result;
-      mergeItems(page.items.map((item) => mapRealtimeProjection(item as unknown as Record<string, unknown>, user.uid)).filter(isPresent), true);
+      const nextItems = page.items.map((item) => mapRealtimeProjection(item as unknown as Record<string, unknown>, user.uid)).filter(isPresent);
+      if (realtimeVersion.current === realtimeVersionAtStart) {
+        pagedConversationIds.current.clear();
+        realtimeConversationIds.current = new Set(nextItems.map((item) => item.conversationId));
+        mergeItems(nextItems, true);
+      }
       setNextCursor(page.nextCursor || '');
       setHasMore(page.hasMore === true);
-      setTotalUnreadCount(Math.max(0, page.totalUnreadCount || 0));
-      setStatus('ready');
+      if (unreadSummaryVersion.current === unreadSummaryVersionAtStart) {
+        setTotalUnreadCount(Math.max(0, page.totalUnreadCount || 0));
+      }
+      setStatus(realtimeVersion.current === realtimeVersionAtStart || realtimeHealthy.current ? 'ready' : 'offline');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'تعذر تحميل المحادثات الآن.');
-      setStatus('error');
+      setStatus(realtimeHealthy.current ? 'ready' : 'error');
     }
   }, [enabled, mergeItems, user?.uid]);
 
@@ -79,6 +114,11 @@ export function DirectChatProvider({ children }: { children: ReactNode }) {
       setNextCursor('');
       setHasMore(false);
       setTotalUnreadCount(0);
+      pagedConversationIds.current.clear();
+      realtimeConversationIds.current.clear();
+      realtimeHealthy.current = false;
+      realtimeVersion.current = 0;
+      unreadSummaryVersion.current = 0;
       return undefined;
     }
     void refresh();
@@ -89,20 +129,32 @@ export function DirectChatProvider({ children }: { children: ReactNode }) {
       limit: 30,
       onData: (incoming) => {
         if (!active) return;
-        mergeItems(incoming);
+        realtimeHealthy.current = true;
+        realtimeVersion.current += 1;
+        mergeRealtimeItems(incoming);
+        setErrorMessage('');
         setStatus('ready');
       },
       onError: () => {
-        if (active) setStatus((current) => current === 'ready' ? 'offline' : 'error');
+        if (active) {
+          realtimeHealthy.current = false;
+          setStatus((current) => current === 'ready' ? 'offline' : 'error');
+        }
       },
     }).then((nextUnsubscribe) => {
       if (active) unsubscribe = nextUnsubscribe;
       else nextUnsubscribe();
     }).catch(() => {
-      if (active) setStatus('error');
+      if (active) {
+        realtimeHealthy.current = false;
+        setStatus('error');
+      }
     });
     void subscribeDirectChatUnreadSummary(user.uid, (nextTotal) => {
-      if (active) setTotalUnreadCount(nextTotal);
+      if (active) {
+        unreadSummaryVersion.current += 1;
+        setTotalUnreadCount(nextTotal);
+      }
     }).then((nextUnsubscribe) => {
       if (active) unsubscribeSummary = nextUnsubscribe;
       else nextUnsubscribe();
@@ -112,7 +164,7 @@ export function DirectChatProvider({ children }: { children: ReactNode }) {
       unsubscribe?.();
       unsubscribeSummary?.();
     };
-  }, [enabled, mergeItems, refresh, user?.uid]);
+  }, [enabled, mergeRealtimeItems, refresh, user?.uid]);
 
   const loadMore = useCallback(async () => {
     if (!enabled || !user?.uid || !hasMore || !nextCursor || loadingMore.current) return;
@@ -124,7 +176,9 @@ export function DirectChatProvider({ children }: { children: ReactNode }) {
         requestId: createDirectChatRequestId(),
       });
       const page = response.result;
-      mergeItems(page.items.map((item) => mapRealtimeProjection(item as unknown as Record<string, unknown>, user.uid)).filter(isPresent));
+      const nextItems = page.items.map((item) => mapRealtimeProjection(item as unknown as Record<string, unknown>, user.uid)).filter(isPresent);
+      nextItems.forEach((item) => pagedConversationIds.current.add(item.conversationId));
+      mergeItems(nextItems);
       setNextCursor(page.nextCursor || '');
       setHasMore(page.hasMore === true);
     } catch (error) {
@@ -165,9 +219,10 @@ export function DirectChatProvider({ children }: { children: ReactNode }) {
     mediaEnabled: flags.directMessageMedia === true,
     refresh,
     runPreference,
+    showOnlineStatus,
     status,
     totalUnreadCount,
-  }), [enabled, errorMessage, flags.directMessageMedia, hasMore, items, loadMore, refresh, runPreference, status, totalUnreadCount]);
+  }), [enabled, errorMessage, flags.directMessageMedia, hasMore, items, loadMore, refresh, runPreference, showOnlineStatus, status, totalUnreadCount]);
   return <DirectChatContext.Provider value={value}>{children}</DirectChatContext.Provider>;
 }
 

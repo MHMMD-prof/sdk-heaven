@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const { readPublicAvatarFrameProjection } = require('./avatarFrameProjectionCore');
 const { readPublicEquipmentCosmetics } = require('./equipmentCosmeticsCore');
+const { mapPublicCoupleEffectProjection } = require('./coupleEffectsCore');
 
 const DEFAULT_COUNTRY_CODE = 'IQ';
 const PUBLIC_ID_MAX = 9999999;
@@ -13,6 +14,7 @@ const SUPPORTED_COUNTRY_CODES = [
 const SOCIAL_FEATURE_FLAGS = [
   'usersDiscovery',
   'friends',
+  'following',
   'wallet',
   'gifts',
   'couples',
@@ -21,6 +23,7 @@ const SOCIAL_FEATURE_FLAGS = [
   'directMessages',
   'directMessageRequests',
   'directMessageMedia',
+  'personalChatsFrontendV2',
 ];
 
 const SOCIAL_ERRORS = Object.freeze({
@@ -96,6 +99,16 @@ const SOCIAL_ERRORS = Object.freeze({
     httpsCode: 'resource-exhausted',
     message: 'Too many requests. Try again later.',
     messageAr: 'طلبات كثيرة جداً. حاول مرة أخرى لاحقاً.',
+  },
+  UPLOAD_INVALID: {
+    httpsCode: 'failed-precondition',
+    message: 'The cosmetic upload is invalid or expired.',
+    messageAr: 'رفع المحتوى التجميلي غير صالح أو منتهٍ.',
+  },
+  ATTESTATION_REQUIRED: {
+    httpsCode: 'failed-precondition',
+    message: 'A copyright attestation is required before review.',
+    messageAr: 'يلزم إقرار حقوق الملكية قبل المراجعة.',
   },
   INTERNAL: {
     httpsCode: 'internal',
@@ -202,6 +215,10 @@ function resolveSocialCommandRequest({ auth, data }) {
     ![
       'bootstrap-profile',
       'get-readiness',
+      'update-profile-presentation',
+      'create-avatar-upload',
+      'finalize-avatar-upload',
+      'remove-avatar',
       'search-users',
       'get-friends',
       'get-friendship-status',
@@ -210,8 +227,14 @@ function resolveSocialCommandRequest({ auth, data }) {
       'decline-friend-request',
       'cancel-friend-request',
       'remove-friend',
+      'follow-user',
+      'unfollow-user',
+      'get-follow-status',
+      'get-following',
+      'get-followers',
       'block-user',
       'unblock-user',
+      'get-blocked-users',
       'get-wallet-store',
       'purchase-special-id',
       'get-store-catalog',
@@ -219,6 +242,16 @@ function resolveSocialCommandRequest({ auth, data }) {
       'get-my-store-items',
       'equip-store-item',
       'gift-store-item',
+      'get-couple-effects',
+      'purchase-couple-effect',
+      'equip-couple-effect',
+      'unequip-couple-effect',
+      'create-cosmetic-custom-upload',
+      'finalize-cosmetic-custom-upload',
+      'attest-cosmetic-custom-submission',
+      'list-cosmetic-custom-submissions',
+      'equip-cosmetic-custom-asset',
+      'unequip-cosmetic-custom-asset',
       'get-representative-status',
       'create-representative-portal-ticket',
       'get-gift-center',
@@ -230,10 +263,29 @@ function resolveSocialCommandRequest({ auth, data }) {
       'decline-couple-request',
       'cancel-couple-request',
       'dissolve-couple',
+      'get-my-family',
+      'create-family',
+      'invite-to-family',
+      'accept-family-invite',
+      'decline-family-invite',
+      'cancel-family-invite',
+      'join-family',
+      'leave-family',
+      'kick-family-member',
+      'dissolve-family',
       'get-notification-settings',
       'register-push-device',
       'unregister-push-device',
       'update-notification-preferences',
+      'quick-match',
+      'claim-lucky-bag',
+      'get-leaderboard',
+      'get-vip-status',
+      'get-ops-missions',
+      'claim-ops-mission',
+      'soft-match-enqueue',
+      'soft-match-cancel',
+      'soft-match-status',
     ].includes(action) ||
     !/^[A-Za-z0-9_-]{16,80}$/.test(requestId)
   ) {
@@ -263,6 +315,8 @@ function buildPublicProfileDocument({ existing = {}, privateProfile, publicId, t
     bio: typeof existing.bio === 'string' ? existing.bio.trim().slice(0, 160) : '',
     giftScore: readNonNegativeInteger(existing.giftScore),
     friendCount: readNonNegativeInteger(existing.friendCount),
+    followerCount: readNonNegativeInteger(existing.followerCount),
+    followingCount: readNonNegativeInteger(existing.followingCount),
     coupleLevel: readNonNegativeInteger(existing.coupleLevel),
     moderationStatus: ['active', 'suspended', 'removed'].includes(existing.moderationStatus)
       ? existing.moderationStatus
@@ -302,6 +356,43 @@ function buildPublicProfileDocument({ existing = {}, privateProfile, publicId, t
     if (avatarFrame.canonicalAsset) equippedCosmetics.avatarFrame = { ...avatarFrame.canonicalAsset, itemId: avatarFrame.itemId };
   }
   if (Object.keys(equippedCosmetics).length) document.equippedCosmetics = equippedCosmetics;
+  const coupleEffect = mapPublicCoupleEffectProjection(existing.coupleEffect);
+  if (coupleEffect) document.coupleEffect = coupleEffect;
+
+  if (
+    existing.vipTier
+    && typeof existing.vipTier === 'object'
+    && typeof existing.vipTier.id === 'string'
+    && typeof existing.vipTier.nameAr === 'string'
+    && typeof existing.vipTier.accentColor === 'string'
+    && Number.isSafeInteger(existing.vipTier.rank)
+  ) {
+    document.vipTier = {
+      accentColor: String(existing.vipTier.accentColor).slice(0, 32),
+      id: String(existing.vipTier.id).slice(0, 40),
+      nameAr: String(existing.vipTier.nameAr).slice(0, 40),
+      rank: existing.vipTier.rank,
+      ...(existing.vipTier.unlockedAt != null ? { unlockedAt: existing.vipTier.unlockedAt } : {}),
+    };
+  }
+
+  if (
+    existing.family
+    && typeof existing.family === 'object'
+    && typeof existing.family.familyId === 'string'
+    && typeof existing.family.nameAr === 'string'
+    && typeof existing.family.role === 'string'
+    && ['owner', 'elder', 'member'].includes(existing.family.role)
+  ) {
+    document.family = {
+      badgeColor: typeof existing.family.badgeColor === 'string'
+        ? String(existing.family.badgeColor).slice(0, 32)
+        : '#5B8C5A',
+      familyId: String(existing.family.familyId).slice(0, 64),
+      nameAr: String(existing.family.nameAr).trim().slice(0, 40),
+      role: existing.family.role,
+    };
+  }
 
   return document;
 }
@@ -349,6 +440,8 @@ function inspectPublicProfile(profile, reservation, expectedUid) {
     ('gender' in profile && !['male', 'female'].includes(profile.gender))
     || !isNonNegativeInteger(profile.giftScore)
     || !isNonNegativeInteger(profile.friendCount)
+    || (profile.followerCount !== undefined && !isNonNegativeInteger(profile.followerCount))
+    || (profile.followingCount !== undefined && !isNonNegativeInteger(profile.followingCount))
     || !isNonNegativeInteger(profile.coupleLevel)
     || !['active', 'suspended', 'removed'].includes(profile.moderationStatus)
     || !['clear', 'pending', 'removed'].includes(profile.avatarModerationStatus)

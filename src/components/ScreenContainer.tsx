@@ -3,15 +3,17 @@ import { PropsWithChildren, ReactNode } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, spacing } from '../theme';
+import { colors, layers, spacing } from '../theme';
 
 type ScreenContainerProps = PropsWithChildren<{
+  backdrop?: ReactNode;
   bottomInset?: boolean;
   decorativeGlows?: boolean;
   fixedBottom?: ReactNode;
@@ -19,10 +21,13 @@ type ScreenContainerProps = PropsWithChildren<{
   topPadding?: number;
   scroll?: boolean;
   scrollEnabled?: boolean;
+  onRefresh?: () => void;
+  refreshing?: boolean;
   variant?: 'default' | 'ruby';
 }>;
 
 export function ScreenContainer({
+  backdrop,
   bottomInset = false,
   children,
   decorativeGlows = true,
@@ -30,6 +35,8 @@ export function ScreenContainer({
   horizontalPadding = spacing.lg,
   scroll = true,
   scrollEnabled = true,
+  onRefresh,
+  refreshing = false,
   topPadding,
   variant = 'default',
 }: ScreenContainerProps) {
@@ -62,7 +69,7 @@ export function ScreenContainer({
     <LinearGradient
       colors={
         isRuby
-          ? ['#020202', '#090505', '#140708', '#020202']
+          ? ['#080405', '#0C0607', '#140A0B', '#080405']
           : [colors.backgroundDeep, colors.background, '#150A25', colors.backgroundDeep]
       }
       start={{ x: 0.1, y: 0 }}
@@ -70,6 +77,11 @@ export function ScreenContainer({
       style={styles.gradient}
     >
       <View style={styles.safeArea}>
+        {backdrop ? (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            {backdrop}
+          </View>
+        ) : null}
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboard}
@@ -77,7 +89,16 @@ export function ScreenContainer({
           {scroll ? (
             <ScrollView
               contentContainerStyle={styles.scrollContent}
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               keyboardShouldPersistTaps="handled"
+              refreshControl={onRefresh ? (
+                <RefreshControl
+                  colors={[colors.gold]}
+                  onRefresh={onRefresh}
+                  refreshing={refreshing}
+                  tintColor={colors.gold}
+                />
+              ) : undefined}
               scrollEnabled={scrollEnabled}
               showsVerticalScrollIndicator={false}
             >
@@ -93,9 +114,19 @@ export function ScreenContainer({
             style={[
               styles.fixedBottom,
               {
-                backgroundColor: isRuby ? '#060202' : 'transparent',
-                paddingBottom: isRuby ? insets.bottom : Math.max(insets.bottom, spacing.sm),
-                paddingHorizontal: isRuby ? 0 : spacing.lg,
+                backgroundColor: backdrop
+                  ? 'transparent'
+                  : isRuby
+                    ? '#060202'
+                    : 'transparent',
+                paddingBottom: backdrop || !isRuby
+                  ? Math.max(insets.bottom, spacing.sm)
+                  : insets.bottom,
+                paddingHorizontal: backdrop
+                  ? spacing.md
+                  : isRuby
+                    ? 0
+                    : spacing.lg,
               },
             ]}
           >
@@ -128,6 +159,7 @@ const styles = StyleSheet.create({
     left: 0,
     position: 'absolute',
     right: 0,
+    zIndex: layers.fixedDock,
   },
   glowTop: {
     position: 'absolute',

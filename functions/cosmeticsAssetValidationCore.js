@@ -207,6 +207,9 @@ function inspectIsoMedia(buffer, format, budget) {
   ) {
     return invalid('MP4 must contain one H.264 track and optional AAC audio only.');
   }
+  if (audioTracks.length > 0) {
+    return invalid('MP4 visual assets must be silent; publish approved M4A/AAC separately.');
+  }
   const video = videoTracks[0];
   if (
     !positiveInteger(video.width)
@@ -221,7 +224,7 @@ function inspectIsoMedia(buffer, format, budget) {
   return {
     ok: true,
     metadata: {
-      audioCodec: audioTracks.length ? 'aac' : '',
+      audioCodec: '',
       durationMs,
       frameRate: round(video.frameRate, 3),
       height: video.height,

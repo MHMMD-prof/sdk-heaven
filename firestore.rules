@@ -3,6 +3,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
+      return request.auth != null
+        && (!request.auth.token.keys().hasAll(['accountDeletionPending']) || request.auth.token.accountDeletionPending != true);
+    }
+
+    function authenticated() {
       return request.auth != null;
     }
 
@@ -15,7 +20,9 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return verified() && request.auth.token.admin == true;
+      return verified()
+        && 'admin' in request.auth.token
+        && request.auth.token.admin == true;
     }
 
     function profilePath(userId) {
@@ -170,8 +177,7 @@ service cloud.firestore {
         || countryCode == 'KM';
     }
 
-    function validPublicProfile(userId) {
-      let data = request.resource.data;
+    function validPublicProfile(userId, data) {
       return data.keys().hasOnly([
           'uid',
           'publicId',
@@ -184,7 +190,10 @@ service cloud.firestore {
           'gender',
           'giftScore',
           'friendCount',
+          'followerCount',
+          'followingCount',
           'coupleLevel',
+          'coupleEffect',
           'equippedAvatarFrame',
           'equippedCosmetics',
           'moderationStatus',
@@ -228,8 +237,11 @@ service cloud.firestore {
         && data.giftScore >= 0
         && data.friendCount is int
         && data.friendCount >= 0
+        && (!('followerCount' in data) || (data.followerCount is int && data.followerCount >= 0))
+        && (!('followingCount' in data) || (data.followingCount is int && data.followingCount >= 0))
         && data.coupleLevel is int
         && data.coupleLevel >= 0
+        && (!('coupleEffect' in data) || validCoupleEffectProjection(data.coupleEffect))
         && (
           !('equippedAvatarFrame' in data)
           || (
@@ -283,6 +295,50 @@ service cloud.firestore {
         && value.itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$');
     }
 
+    function validCoupleEffectProjection(value) {
+      return value is map
+        && value.keys().hasOnly([
+          'assetId',
+          'assetVersionId',
+          'borderMode',
+          'coupleIdHash',
+          'entranceMode',
+          'fallbackAssetId',
+          'fallbackAssetVersionId',
+          'format',
+          'itemId',
+          'profileMode',
+        ])
+        && value.keys().hasAll([
+          'assetId',
+          'assetVersionId',
+          'borderMode',
+          'coupleIdHash',
+          'entranceMode',
+          'fallbackAssetId',
+          'fallbackAssetVersionId',
+          'format',
+          'itemId',
+          'profileMode',
+        ])
+        && value.assetId is string
+        && value.assetId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && value.assetVersionId is string
+        && value.assetVersionId.matches('^v[1-9][0-9]{0,8}-[a-f0-9]{12}$')
+        && value.fallbackAssetId is string
+        && value.fallbackAssetId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && value.fallbackAssetVersionId is string
+        && value.fallbackAssetVersionId.matches('^v[1-9][0-9]{0,8}-[a-f0-9]{12}$')
+        && value.itemId is string
+        && value.itemId.matches('^[a-z0-9][a-z0-9_-]{2,79}$')
+        && value.coupleIdHash is string
+        && value.coupleIdHash.matches('^[a-f0-9]{64}$')
+        && (value.format == 'png' || value.format == 'lottie-json')
+        && (value.profileMode == 'off' || value.profileMode == 'static' || value.profileMode == 'looping')
+        && (value.borderMode == 'off' || value.borderMode == 'static' || value.borderMode == 'looping')
+        && (value.entranceMode == 'off' || value.entranceMode == 'static' || value.entranceMode == 'one-shot');
+    }
+
     function validAccountDeletionRequest(userId) {
       let data = request.resource.data;
       return isOwner(userId)
@@ -309,19 +365,24 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId) && validProfile(userId);
+      allow create: if isOwner(userId) && validProfile(userId);
+      allow update: if false;
       allow delete: if false;
 
       match /accountDeletionRequests/{requestId} {
-        allow read: if isOwner(userId);
-        allow create: if validAccountDeletionRequest(userId);
-        allow update, delete: if false;
+        allow read, create, update, delete: if false;
       }
+    }
+
+    match /accountLifecycles/{userId} {
+      allow get: if authenticated() && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
     }
 
     match /publicProfiles/{userId} {
       allow get: if signedIn()
         && resource.data.uid == userId
+        && validPublicProfile(userId, resource.data)
         && (
           isOwner(userId)
           || (
@@ -335,22 +396,25 @@ service cloud.firestore {
       // security rules as query filters or exceeding document-access limits.
       allow list: if false;
       allow create, delete: if false;
-      allow update: if isOwner(userId)
-        && validPublicProfile(userId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'avatarUrl',
-          'countryCode',
-          'bio',
-          'gender',
-          'updatedAt',
-        ]);
+      allow update: if false;
+    }
+
+    match /avatarSubmissions/{uploadId} {
+      allow get, list: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    match /avatarUploadAuthorizations/{userId} {
+      allow read, write: if false;
     }
 
     match /appConfig/{configId} {
       allow read: if signedIn()
         && (
           configId == 'socialFeatures'
+          || configId == 'personalChatsFrontendRollout'
           || configId == 'cosmeticsFeatures'
+          || configId == 'growthFeatures'
           || configId == 'voiceRoomFeatures'
           || configId == 'voiceRoomLaunch'
           || configId == 'roomRocketPublic'
@@ -403,6 +467,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /roomWatchRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
     match /voiceRoomHttpRateLimits/{rateId} {
       allow read, write: if false;
     }
@@ -420,6 +488,10 @@ service cloud.firestore {
     }
 
     match /notificationDeliveries/{deliveryId} {
+      allow read, write: if false;
+    }
+
+    match /notificationCoalesce/{coalesceId} {
       allow read, write: if false;
     }
 
@@ -456,6 +528,18 @@ service cloud.firestore {
     match /blocks/{blockerId}/{document=**} {
       allow read: if hasActivePublicProfile() && request.auth.uid == blockerId;
       allow write: if false;
+    }
+
+    match /following/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /followers/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /socialFollowRateLimits/{userId} {
+      allow read, write: if false;
     }
 
     match /friendRequests/{requestId} {
@@ -541,6 +625,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /directChatHttpRateLimits/{rateId} {
+      allow read, write: if false;
+    }
+
     match /directChatRestrictions/{userId} {
       allow read, write: if false;
     }
@@ -598,6 +686,50 @@ service cloud.firestore {
     }
 
     match /dailyLoginFailureMetrics/{metricId} {
+      allow read, write: if false;
+    }
+
+    match /opsEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /opsEventsConfig/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /opsMissionsCatalog/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /userMissionProgress/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /opsMissionClaims/{claimId} {
+      allow read, write: if false;
+    }
+
+    match /opsMissionRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /softMatchQueue/{userId} {
+      allow read, write: if false;
+    }
+
+    match /softMatchSessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /softMatchRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /softMatchRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /adminOpsEventRequests/{requestId} {
       allow read, write: if false;
     }
 
@@ -760,22 +892,56 @@ service cloud.firestore {
     }
 
     match /cosmeticAssets/{assetId} {
-      allow get, list: if hasActivePublicProfile()
+      // get: peers may resolve an already-equipped owner-bound asset by exact ID.
+      allow get: if hasActivePublicProfile()
+        && resource.data.keys().hasAll([
+          'schemaVersion', 'assetId', 'publicationStatus', 'renderingEnabled', 'publishedVersionId',
+        ])
         && resource.data.schemaVersion == 1
         && resource.data.assetId == assetId
         && resource.data.publicationStatus == 'published'
         && resource.data.renderingEnabled == true
         && resource.data.publishedVersionId is string;
+      // list: owner-bound customs are not a public catalog.
+      allow list: if hasActivePublicProfile()
+        && resource.data.keys().hasAll([
+          'schemaVersion', 'assetId', 'publicationStatus', 'renderingEnabled', 'publishedVersionId',
+        ])
+        && resource.data.schemaVersion == 1
+        && resource.data.assetId == assetId
+        && resource.data.publicationStatus == 'published'
+        && resource.data.renderingEnabled == true
+        && resource.data.publishedVersionId is string
+        && (
+          !('visibility' in resource.data)
+          || resource.data.visibility != 'owner-bound'
+        );
       allow create, update, delete: if false;
 
       match /versions/{versionId} {
-        allow get, list: if hasActivePublicProfile()
+        allow get: if hasActivePublicProfile()
+          && resource.data.keys().hasAll(['schemaVersion', 'assetId', 'assetVersionId'])
           && resource.data.schemaVersion == 1
           && resource.data.assetId == assetId
           && resource.data.assetVersionId == versionId
           && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.publicationStatus == 'published'
           && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.renderingEnabled == true
           && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.publishedVersionId == versionId;
+        allow list: if hasActivePublicProfile()
+          && resource.data.keys().hasAll(['schemaVersion', 'assetId', 'assetVersionId'])
+          && resource.data.schemaVersion == 1
+          && resource.data.assetId == assetId
+          && resource.data.assetVersionId == versionId
+          && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.keys().hasAll([
+            'publicationStatus', 'renderingEnabled', 'publishedVersionId',
+          ])
+          && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.publicationStatus == 'published'
+          && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.renderingEnabled == true
+          && get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.publishedVersionId == versionId
+          && (
+            !('visibility' in get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data)
+            || get(/databases/$(database)/documents/cosmeticAssets/$(assetId)).data.visibility != 'owner-bound'
+          );
         allow create, update, delete: if false;
       }
     }
@@ -800,6 +966,20 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /cosmeticCustomEligibility/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
+    }
+
+    match /cosmeticCustomOwnerships/{userId}/{document=**} {
+      allow get, list: if signedIn() && request.auth.uid == userId;
+      allow create, update, delete: if false;
+    }
+
+    match /cosmeticCustomRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
     match /cosmeticSubmissions/{submissionId} {
       allow get, list: if signedIn()
         && resource.data.ownerUid == request.auth.uid;
@@ -809,7 +989,7 @@ service cloud.firestore {
     match /roomThemes/{themeId} {
       allow get, list: if hasActivePublicProfile()
         && resource.data.themeId == themeId
-        && resource.data.manifestVersion == 1
+        && resource.data.manifestVersion in [1, 2]
         && resource.data.publicationStatus == 'published';
       allow create, update, delete: if false;
     }
@@ -922,6 +1102,42 @@ service cloud.firestore {
     }
 
     match /coupleMemberships/{userId} {
+      allow read, write: if false;
+    }
+
+    match /families/{familyId} {
+      allow read, write: if false;
+    }
+
+    match /familyMemberships/{userId} {
+      allow read, write: if false;
+    }
+
+    match /familyInvites/{inviteId} {
+      allow read, write: if false;
+    }
+
+    match /familyInviteCodes/{inviteCode} {
+      allow read, write: if false;
+    }
+
+    match /socialFamilyRateLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /coupleEffectOwnerships/{relationshipId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /coupleEffectEquipment/{relationshipId} {
+      allow read, write: if false;
+    }
+
+    match /coupleEffectTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+
+    match /coupleEffectAuditEvents/{eventId} {
       allow read, write: if false;
     }
 
@@ -1184,6 +1400,7 @@ service cloud.firestore {
         )
         && data.status == 'active'
         && !hasActiveRoomBan(roomId, userId)
+        && (!('softMatch' in room) || room.softMatch != true)
         && validOptionalMemberV2(data, room)
         && data.joinedAt is timestamp
         && data.updatedAt is timestamp;
@@ -1336,7 +1553,12 @@ service cloud.firestore {
             get(launchPath).data.allowedUids is list
             && request.auth.uid in get(launchPath).data.allowedUids
           )
-          || get(launchPath).data.audienceMode == 'public'
+          || (
+            get(launchPath).data.audienceMode == 'public'
+            && get(launchPath).data.stageId == 10
+            && 'broadReleaseReady' in get(launchPath).data
+            && get(launchPath).data.broadReleaseReady == true
+          )
           || (
             get(launchPath).data.audienceMode == 'region'
             && get(launchPath).data.allowedRegionCodes is list
@@ -1366,6 +1588,11 @@ service cloud.firestore {
     function roomMusicEnabled() {
       return exists(voiceRoomFeaturePath())
         && get(voiceRoomFeaturePath()).data.voice_room_shared_music == true;
+    }
+
+    function roomWatchEnabled() {
+      return exists(/databases/$(database)/documents/appConfig/growthFeatures)
+        && get(/databases/$(database)/documents/appConfig/growthFeatures).data.watchTogether == true;
     }
 
     function roomSupportRankingsEnabled() {
@@ -1615,7 +1842,23 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      match /coupleEntryClaims/{claimId} {
+        allow read, write: if false;
+      }
+
       match /entryEffectRateLimits/{userId} {
+        allow read, write: if false;
+      }
+
+      match /reactionRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /reactionRateLimits/{userId} {
+        allow read, write: if false;
+      }
+
+      match /reactionRoomRateLimits/{rateId} {
         allow read, write: if false;
       }
 
@@ -1636,12 +1879,25 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /pkCommandRequests/{requestId} {
+        allow read, write: if false;
+      }
+
       match /musicCommandRequests/{requestId} {
         allow read, write: if false;
       }
 
       match /musicLeases/{leaseId} {
         allow read: if roomMusicEnabled() && canReadPresence(roomId);
+        allow write: if false;
+      }
+
+      match /watchCommandRequests/{requestId} {
+        allow read, write: if false;
+      }
+
+      match /watchLeases/{leaseId} {
+        allow read: if roomWatchEnabled() && canReadPresence(roomId);
         allow write: if false;
       }
 
@@ -1753,6 +2009,21 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['appealText', 'status', 'submittedAt']);
       allow create, delete: if false;
+    }
+
+    match /roomPkSessions/{pkId} {
+      allow read: if signedIn()
+        && resource.data.roomId is string
+        && canReadPresence(resource.data.roomId);
+      allow write: if false;
+    }
+
+    match /roomPkGiftFacts/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /roomPkRateLimits/{uid} {
+      allow read, write: if false;
     }
   }
 }

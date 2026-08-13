@@ -138,7 +138,7 @@ function resolveRoomChatAuthority({ decodedToken = {}, featureFlags, membership,
 function resolveSendMessage({
   authority,
   featureFlags,
-  isFriendOfOwner,
+  isFollowerOfOwner,
   membership,
   nowMs,
   profile,
@@ -164,9 +164,9 @@ function resolveSendMessage({
     room.chatMode === 'followers'
     && authority !== 'owner'
     && authority !== 'moderator'
-    && !isFriendOfOwner
+    && !isFollowerOfOwner
   ) {
-    return roomChatError('CHAT_FOLLOWERS_ONLY', 403, 'Only the owner’s friends can chat in this room.');
+    return roomChatError('CHAT_FOLLOWERS_ONLY', 403, 'Only the owner’s followers can chat in this room.');
   }
   const rateResult = resolveChatRateLimit({
     nowMs,

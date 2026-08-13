@@ -1,6 +1,7 @@
 import { CryptoDigestAlgorithm, digestStringAsync } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { getBytes, getStorage, ref, uploadBytesResumable, type UploadTask } from 'firebase/storage';
+import { Platform } from 'react-native';
 
 import { firebaseApp } from '../auth/firebase';
 import { createDirectChatRequestId, requestDirectChatCommand } from './requestDirectChatCommand';
@@ -29,7 +30,7 @@ type Authorization = {
 };
 
 const storage = getStorage(firebaseApp);
-const mediaCacheRoot = new Directory(Paths.cache, 'direct-chat-media-v1');
+let mediaCacheRoot: Directory | undefined;
 
 export function validateLocalAttachment(value: DirectChatLocalAttachment) {
   const file = new File(value.uri);
@@ -103,13 +104,18 @@ export async function prepareProtectedDirectChatMedia(uid: string, mediaPath: st
   if (!uid || !/^direct-chat-media\/[a-f0-9]{64}\/dmu_[a-f0-9]{40}\/(image\.webp|voice\.(m4a|aac))$/.test(mediaPath)) {
     throw new Error('MEDIA_PATH_INVALID');
   }
-  ensureCacheRoot();
-  const userDirectory = new Directory(mediaCacheRoot, await safeCacheSegment(uid));
-  if (!userDirectory.exists) userDirectory.create({ idempotent: true, intermediates: true });
   const extension = mediaPath.endsWith('.webp') ? 'webp' : mediaPath.endsWith('.aac') ? 'aac' : 'm4a';
+  const maxBytes = extension === 'webp' ? DIRECT_CHAT_IMAGE_MAX_BYTES : DIRECT_CHAT_VOICE_MAX_BYTES;
+  if (Platform.OS === 'web') {
+    const bytes = await getBytes(ref(storage, mediaPath), maxBytes);
+    const contentType = extension === 'webp' ? 'image/webp' : extension === 'aac' ? 'audio/aac' : 'audio/mp4';
+    return URL.createObjectURL(new Blob([bytes], { type: contentType }));
+  }
+  const cacheRoot = ensureCacheRoot();
+  const userDirectory = new Directory(cacheRoot, await safeCacheSegment(uid));
+  if (!userDirectory.exists) userDirectory.create({ idempotent: true, intermediates: true });
   const file = new File(userDirectory, `${await safeCacheSegment(mediaPath)}.${extension}`);
   if (file.exists && file.size > 0) return file.uri;
-  const maxBytes = extension === 'webp' ? DIRECT_CHAT_IMAGE_MAX_BYTES : DIRECT_CHAT_VOICE_MAX_BYTES;
   const bytes = await getBytes(ref(storage, mediaPath), maxBytes);
   file.create({ intermediates: true, overwrite: true });
   file.write(new Uint8Array(bytes));
@@ -117,13 +123,18 @@ export async function prepareProtectedDirectChatMedia(uid: string, mediaPath: st
 }
 
 export async function clearProtectedDirectChatMedia(uid: string) {
-  if (!uid || !mediaCacheRoot.exists) return;
-  const directory = new Directory(mediaCacheRoot, await safeCacheSegment(uid));
+  if (!uid || Platform.OS === 'web') return;
+  const cacheRoot = ensureCacheRoot();
+  if (!cacheRoot.exists) return;
+  const directory = new Directory(cacheRoot, await safeCacheSegment(uid));
   if (directory.exists) directory.delete();
 }
 
 function ensureCacheRoot() {
+  if (Platform.OS === 'web') throw new Error('DIRECT_CHAT_MEDIA_UNSUPPORTED_PLATFORM');
+  mediaCacheRoot ??= new Directory(Paths.cache, 'direct-chat-media-v1');
   if (!mediaCacheRoot.exists) mediaCacheRoot.create({ idempotent: true, intermediates: true });
+  return mediaCacheRoot;
 }
 
 async function safeCacheSegment(value: string) {

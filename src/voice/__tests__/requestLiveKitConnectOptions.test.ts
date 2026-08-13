@@ -127,7 +127,7 @@ describe('requestLiveKitConnectOptions', () => {
 
     const request = requestLiveKitConnectOptions(room, config, async () => 'id-token-1');
     const expectation = expect(request).rejects.toThrow('Voice token request timed out.');
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(20000);
 
     await expectation;
   });
@@ -148,5 +148,36 @@ describe('requestLiveKitConnectOptions', () => {
     await expect(requestLiveKitConnectOptions(room, config, async () => 'id-token-1')).rejects.toThrow(
       'Voice token request was denied.',
     );
+  });
+
+  it('refreshes a stale Firebase token once after a 401 response', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'expired' }), { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        serverUrl: 'wss://livekit.example.test',
+        token: 'token-2',
+      }), { status: 200 }));
+    const getIdToken = vi.fn()
+      .mockResolvedValueOnce('stale-token')
+      .mockResolvedValueOnce('fresh-token');
+
+    await expect(requestLiveKitConnectOptions(room, config, getIdToken)).resolves.toMatchObject({
+      token: 'token-2',
+    });
+    expect(getIdToken).toHaveBeenNthCalledWith(1, false);
+    expect(getIdToken).toHaveBeenNthCalledWith(2, true);
+  });
+
+  it('retries one transient network failure', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        serverUrl: 'wss://livekit.example.test',
+        token: 'token-2',
+      }), { status: 200 }));
+
+    await expect(requestLiveKitConnectOptions(room, config, async () => 'id-token-1'))
+      .resolves.toMatchObject({ token: 'token-2' });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 });

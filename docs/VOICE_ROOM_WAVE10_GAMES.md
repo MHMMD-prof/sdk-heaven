@@ -33,12 +33,26 @@ and the activation audit event is `completed`.
 | gameId | clientRoute | mode | players | enabled behavior |
 | --- | --- | --- | --- | --- |
 | `drawing-guess` | `DrawingGuess` | `multiplayer` | 2–8 | Room invitation, explicit join, isolated data transport |
+| `naval-duel` | `MiniGame` | `multiplayer` | 2 | Room invite/join; LiveKit transport; private placement; fog-of-war shots; snapshot/host-transfer reliability (physical two-device QA still required) |
 | `carrom-royal` | `Carrom` | `host-local` | 1 | Host launches the existing local game while staying in voice |
-| `royal-majlis` | `MiniGame` | `host-local` | 1 | Host launches the existing local game while staying in voice |
+| `royal-majlis` | `MiniGame` | `host-local` | 1 | Host launches the existing local MiniGame while staying in voice |
 
 All entries require client version `1.0.0` or newer. Carrom Royal and Royal
 Majlis are deliberately labelled `host-local`; their current controllers do not
-provide trustworthy multiplayer state synchronization.
+provide trustworthy multiplayer state synchronization. `naval-duel` is registered
+as multiplayer so invite/join/token paths match Drawing Guess; online placement and
+battle sync land in later Battleship waves.
+
+### Naval Duel client waves
+
+| Wave | Status | Scope |
+| --- | --- | --- |
+| 0 | Done | Registry + room launch params (`mode: online`) |
+| 1 | Done | Online lobby UI; hide hot-seat handoff; skip local save/load |
+| 2 | Done | LiveKit transport shell, presence, lobby announce/request bootstrap |
+| 3 | Done | Parallel secret placement + sealed fleet ready + host battle-start |
+| 4 | Done | Fog-of-war battle loop (fire → defender resolve → result broadcast) |
+| 5 | Done | Public snapshot resync, host transfer, disconnect wait, QA gate |
 
 ## Server contract
 

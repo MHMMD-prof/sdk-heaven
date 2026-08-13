@@ -13,6 +13,7 @@ import { activeVoiceProviderConfig } from '../../voice/activeVoiceProviderConfig
 import {
   RoomGiftCatalogItem,
   RoomGiftEffect,
+  RoomGiftMagicFrameTemplate,
   RoomGiftQuote,
   RoomGiftRequestError,
   requestRoomGiftCommand,
@@ -45,11 +46,19 @@ export function RoomGiftSheet({
   const [error, setError] = useState('');
   const [giftId, setGiftId] = useState('');
   const [loading, setLoading] = useState(false);
+  const [luckyOddsNote, setLuckyOddsNote] = useState('');
+  const [magicFrameTemplateId, setMagicFrameTemplateId] = useState('');
+  const [magicTemplates, setMagicTemplates] = useState<RoomGiftMagicFrameTemplate[]>([]);
   const [pending, setPending] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [quote, setQuote] = useState<RoomGiftQuote | null>(null);
   const [quoteNowMs, setQuoteNowMs] = useState(() => Date.now());
   const [targetUid, setTargetUid] = useState('');
+  const [theaterFlags, setTheaterFlags] = useState({
+    giftCombos: false,
+    luckyGifts: false,
+    magicGiftTemplates: false,
+  });
 
   const selectedGift = useMemo(
     () => catalog.find((item) => item.giftId === giftId),
@@ -66,6 +75,8 @@ export function RoomGiftSheet({
     setQuote(null);
     setQuantity(1);
     setGiftId('');
+    setMagicFrameTemplateId('');
+    setLuckyOddsNote('');
     setTargetUid(recipients[0]?.uid || '');
     if (!enabled) {
       setError('هدايا الغرفة غير مفعّلة حالياً.');
@@ -81,6 +92,19 @@ export function RoomGiftSheet({
         if (cancelled) return;
         setCatalog((result.catalog || []).filter((item) => item.status === 'available'));
         setCoins(result.balances?.coins || 0);
+        setTheaterFlags(result.theaterFlags || {
+          giftCombos: false,
+          luckyGifts: false,
+          magicGiftTemplates: false,
+        });
+        setMagicTemplates(result.magicFrameTemplates || []);
+        if (result.luckyOdds?.entries?.length) {
+          setLuckyOddsNote(
+            result.luckyOdds.entries
+              .map((entry) => `${entry.labelAr} ${entry.oddsLabelAr}`)
+              .join(' · '),
+          );
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -140,12 +164,19 @@ export function RoomGiftSheet({
       setError('اطلب عرض السعر أولاً.');
       return;
     }
+    const needsMagic = theaterFlags.magicGiftTemplates
+      && selectedGift?.theater?.tags.includes('magic') === true;
+    if (needsMagic && !magicFrameTemplateId) {
+      setError('اختر إطاراً سحرياً معتمداً قبل الإرسال.');
+      return;
+    }
     setPending(true);
     setError('');
     try {
       const result = await requestRoomGiftCommand({
         action: 'send-room-gift',
         giftId: quote.giftId,
+        ...(needsMagic ? { magicFrameTemplateId } : {}),
         quantity: quote.quantity,
         quoteId: quote.quoteId,
         roomId,
@@ -160,7 +191,7 @@ export function RoomGiftSheet({
     } finally {
       setPending(false);
     }
-  }, [onClose, onGiftCommitted, quote, roomId]);
+  }, [magicFrameTemplateId, onClose, onGiftCommitted, quote, roomId, selectedGift, theaterFlags.magicGiftTemplates]);
 
   const quoteSecondsRemaining = quote
     ? Math.max(0, Math.ceil((quote.expiresAtMs - quoteNowMs) / 1_000))
@@ -202,13 +233,38 @@ export function RoomGiftSheet({
               accessibilityRole="button"
               onPress={() => {
                 setGiftId(item.giftId);
+                setMagicFrameTemplateId('');
                 setQuote(null);
               }}
               style={[styles.option, giftId === item.giftId && styles.optionActive]}
             >
-              <Text style={styles.optionText}>{item.nameAr} — {item.price} عملة</Text>
+              <Text style={styles.optionText}>
+                {item.nameAr} — {item.price} عملة
+                {item.theater?.tags?.length ? ` · ${item.theater.tags.join('/')}` : ''}
+              </Text>
             </Pressable>
           ))}
+          {theaterFlags.luckyGifts && selectedGift?.theater?.tags.includes('lucky') && luckyOddsNote ? (
+            <Text style={styles.meta}>جدول الحظ (ترفيه): {luckyOddsNote}</Text>
+          ) : null}
+          {theaterFlags.magicGiftTemplates && selectedGift?.theater?.tags.includes('magic') ? (
+            <>
+              <Text style={styles.section}>إطار سحري معتمد</Text>
+              {magicTemplates.map((template) => (
+                <Pressable
+                  key={template.templateId}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setMagicFrameTemplateId(template.templateId);
+                    setQuote(null);
+                  }}
+                  style={[styles.option, magicFrameTemplateId === template.templateId && styles.optionActive]}
+                >
+                  <Text style={styles.optionText}>{template.labelAr}</Text>
+                </Pressable>
+              ))}
+            </>
+          ) : null}
           <Text style={styles.section}>الكمية</Text>
           <View style={styles.quantityRow}>
             {[1, 5, 10].map((value) => (

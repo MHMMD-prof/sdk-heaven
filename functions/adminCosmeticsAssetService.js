@@ -57,6 +57,62 @@ async function mutateAdminCosmeticsAsset({
       input,
     });
   }
+  if (input.operation === 'approve-custom-submission') {
+    const {
+      approveCosmeticCustomSubmission,
+    } = require('./cosmeticCustomSubmissionService');
+    return approveCosmeticCustomSubmission({
+      bucket,
+      db,
+      decodedToken,
+      fieldValue,
+      input,
+    });
+  }
+  if (input.operation === 'reject-custom-submission') {
+    const {
+      rejectCosmeticCustomSubmission,
+    } = require('./cosmeticCustomSubmissionService');
+    return rejectCosmeticCustomSubmission({
+      db,
+      decodedToken,
+      fieldValue,
+      input,
+    });
+  }
+  if (input.operation === 'suspend-custom-submission') {
+    const {
+      suspendCosmeticCustomSubmission,
+    } = require('./cosmeticCustomSubmissionService');
+    return suspendCosmeticCustomSubmission({
+      db,
+      decodedToken,
+      fieldValue,
+      input,
+    });
+  }
+  if (input.operation === 'grant-custom-eligibility') {
+    const {
+      grantCosmeticCustomEligibility,
+    } = require('./cosmeticCustomSubmissionService');
+    return grantCosmeticCustomEligibility({
+      db,
+      decodedToken,
+      fieldValue,
+      input,
+    });
+  }
+  if (input.operation === 'revoke-custom-eligibility') {
+    const {
+      revokeCosmeticCustomEligibility,
+    } = require('./cosmeticCustomSubmissionService');
+    return revokeCosmeticCustomEligibility({
+      db,
+      decodedToken,
+      fieldValue,
+      input,
+    });
+  }
   return mutateRegisteredAsset({ db, decodedToken, fieldValue, input });
 }
 

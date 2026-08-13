@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 
 const host = '127.0.0.1';
@@ -81,6 +82,7 @@ function runCommand(configPath, cliConfigPath, cliCachePath) {
     );
     const args = [
       'emulators:exec',
+      '--non-interactive',
       '--only',
       'firestore,storage',
       '--project',
@@ -97,6 +99,11 @@ function runCommand(configPath, cliConfigPath, cliCachePath) {
     const child = spawn(command, spawnArgs, {
       env: {
         ...process.env,
+        // The CLI config stays throwaway, but the emulator JARs must come from the shared
+        // user cache. Redirecting them forces a ~190 MB re-download on every run, which is
+        // what made this gate look like a silent startup hang.
+        FIREBASE_EMULATORS_PATH: process.env.FIREBASE_EMULATORS_PATH
+          || path.join(os.homedir(), '.cache', 'firebase', 'emulators'),
         FIRESTORE_RULES_TEST_PORT: String(firestorePort),
         STORAGE_RULES_TEST_PORT: String(storagePort),
         XDG_CACHE_HOME: cliCachePath,

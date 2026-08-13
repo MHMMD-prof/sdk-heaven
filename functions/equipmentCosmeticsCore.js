@@ -11,9 +11,13 @@ const EQUIPMENT_COSMETIC_CONFIG = Object.freeze({
   nameplates: Object.freeze({ assetCategory: 'nameplate', projectionKey: 'nameplate', formats: Object.freeze(['png', 'lottie-json', 'legacy-webp']) }),
   'cosmetic-badges': Object.freeze({ assetCategory: 'cosmetic-badge', projectionKey: 'cosmeticBadge', formats: Object.freeze(['png', 'lottie-json', 'legacy-webp']) }),
   'seat-effects': Object.freeze({ assetCategory: 'seat-effect', projectionKey: 'seatEffect', formats: Object.freeze(['png', 'lottie-json', 'legacy-webp']) }),
+  'couple-effects': Object.freeze({ assetCategory: 'couple-effect', projectionKey: 'coupleEffect', formats: Object.freeze(['png', 'lottie-json']) }),
 });
 
-const WAVE6_COSMETIC_CATEGORIES = Object.freeze(Object.keys(EQUIPMENT_COSMETIC_CONFIG).filter((category) => category !== 'avatar-frames'));
+const WAVE6_COSMETIC_CATEGORIES = Object.freeze(
+  Object.keys(EQUIPMENT_COSMETIC_CONFIG)
+    .filter((category) => !['avatar-frames', 'couple-effects'].includes(category)),
+);
 
 function getEquipmentCosmeticConfig(category) {
   return EQUIPMENT_COSMETIC_CONFIG[category];

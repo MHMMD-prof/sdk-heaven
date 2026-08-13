@@ -56,7 +56,6 @@ export function useRoomChat({
   useEffect(() => {
     if (!enabled || !uid || !roomId) {
       setServerMessages([]);
-      setBlockedUids(new Set());
       setPinnedMessageId('');
       setHasOlderMessages(false);
       oldestCursorRef.current = undefined;
@@ -106,15 +105,6 @@ export function useRoomChat({
           },
         ),
         firestore.onSnapshot(
-          firestore.collection(firebaseDb, 'blocks', uid, 'blocked'),
-          (snapshot) => {
-            if (mounted) setBlockedUids(new Set(snapshot.docs.map((item) => item.id)));
-          },
-          () => {
-            if (mounted) setBlockedUids(new Set());
-          },
-        ),
-        firestore.onSnapshot(
           firestore.doc(firebaseDb, 'rooms', roomId, 'chatState', 'current'),
           (snapshot) => {
             if (!mounted) return;
@@ -135,6 +125,36 @@ export function useRoomChat({
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, [enabled, historyVisibility, roomId, uid]);
+
+  useEffect(() => {
+    if (!uid) {
+      setBlockedUids(new Set());
+      return undefined;
+    }
+    let mounted = true;
+    let unsubscribe: (() => void) | undefined;
+    void Promise.all([
+      import('../auth/firebase'),
+      import('firebase/firestore'),
+    ]).then(([{ firebaseDb }, firestore]) => {
+      if (!mounted) return;
+      unsubscribe = firestore.onSnapshot(
+        firestore.collection(firebaseDb, 'blocks', uid, 'blocked'),
+        (snapshot) => {
+          if (mounted) setBlockedUids(new Set(snapshot.docs.map((item) => item.id)));
+        },
+        () => {
+          if (mounted) setBlockedUids(new Set());
+        },
+      );
+    }).catch(() => {
+      if (mounted) setBlockedUids(new Set());
+    });
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
+  }, [uid]);
 
   const visibleServerMessages = useMemo(
     () => serverMessages.filter(

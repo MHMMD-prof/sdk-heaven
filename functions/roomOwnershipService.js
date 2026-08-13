@@ -61,6 +61,10 @@ async function executeRoomOwnershipCommand({
     let targetMembership;
     let targetPublicProfile;
     let currentOwnerMembership;
+    let currentOwnerHostLockRef;
+    let currentOwnerHostLockSnapshot;
+    let nextOwnerHostLockRef;
+    let nextOwnerHostLockSnapshot;
 
     if (command.action === 'offer-ownership-transfer') {
       const targetMemberRef = roomRef.collection('members').doc(command.targetUid);
@@ -117,32 +121,48 @@ async function executeRoomOwnershipCommand({
       const ownerBlocksActorRef = currentOwnerUid
         ? db.doc(`blocks/${currentOwnerUid}/blocked/${decodedToken.uid}`)
         : null;
+      currentOwnerHostLockRef = currentOwnerUid
+        ? db.doc(`voiceRoomActiveHosts/${currentOwnerUid}`)
+        : null;
+      nextOwnerHostLockRef = db.doc(`voiceRoomActiveHosts/${decodedToken.uid}`);
       const [
         currentOwnerMemberSnapshot,
         currentOwnerPublicSnapshot,
         actorBlocksOwnerSnapshot,
         ownerBlocksActorSnapshot,
+        loadedCurrentOwnerHostLockSnapshot,
+        loadedNextOwnerHostLockSnapshot,
       ] = await Promise.all([
         currentOwnerMemberRef ? transaction.get(currentOwnerMemberRef) : Promise.resolve(null),
         currentOwnerPublicRef ? transaction.get(currentOwnerPublicRef) : Promise.resolve(null),
         actorBlocksOwnerRef ? transaction.get(actorBlocksOwnerRef) : Promise.resolve(null),
         ownerBlocksActorRef ? transaction.get(ownerBlocksActorRef) : Promise.resolve(null),
+        currentOwnerHostLockRef ? transaction.get(currentOwnerHostLockRef) : Promise.resolve(null),
+        transaction.get(nextOwnerHostLockRef),
       ]);
+      currentOwnerHostLockSnapshot = loadedCurrentOwnerHostLockSnapshot;
+      nextOwnerHostLockSnapshot = loadedNextOwnerHostLockSnapshot;
       currentOwnerMembership = currentOwnerMemberSnapshot?.exists ? currentOwnerMemberSnapshot.data() : undefined;
-      resolution = resolveOwnershipResponse({
-        actorMembership,
-        actorPrivateProfile,
-        actorPublicProfile,
-        blocksExist: actorBlocksOwnerSnapshot?.exists || ownerBlocksActorSnapshot?.exists,
-        command,
-        currentOwnerMembership,
-        currentOwnerPublicProfile: currentOwnerPublicSnapshot?.exists ? currentOwnerPublicSnapshot.data() : undefined,
-        decodedToken,
-        featureFlags,
-        nowMs,
-        room,
-        transfer,
-      });
+      resolution = (
+        command.action === 'accept-ownership-transfer'
+        && nextOwnerHostLockSnapshot.exists
+        && nextOwnerHostLockSnapshot.data()?.roomId !== command.roomId
+      )
+        ? ownershipError('ACTIVE_ROOM_EXISTS', 409, 'Close your active room before accepting another room.')
+        : resolveOwnershipResponse({
+          actorMembership,
+          actorPrivateProfile,
+          actorPublicProfile,
+          blocksExist: actorBlocksOwnerSnapshot?.exists || ownerBlocksActorSnapshot?.exists,
+          command,
+          currentOwnerMembership,
+          currentOwnerPublicProfile: currentOwnerPublicSnapshot?.exists ? currentOwnerPublicSnapshot.data() : undefined,
+          decodedToken,
+          featureFlags,
+          nowMs,
+          room,
+          transfer,
+        });
     }
 
     if (!resolution.ok) {
@@ -251,6 +271,19 @@ async function executeRoomOwnershipCommand({
           revision: resolution.value.nextRevision,
           updatedAt: timestamp,
           updatedBy: decodedToken.uid,
+        });
+        if (
+          currentOwnerHostLockRef
+          && currentOwnerHostLockSnapshot?.exists
+          && currentOwnerHostLockSnapshot.data()?.roomId === command.roomId
+        ) {
+          transaction.delete(currentOwnerHostLockRef);
+        }
+        transaction.set(nextOwnerHostLockRef, {
+          ownerUid: decodedToken.uid,
+          roomId: command.roomId,
+          status: 'active',
+          updatedAt: timestamp,
         });
         transaction.update(effectiveTransferRef, {
           acceptedAt: timestamp,

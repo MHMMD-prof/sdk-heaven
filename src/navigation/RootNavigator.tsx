@@ -38,7 +38,7 @@ export function RootNavigator() {
 }
 
 function AuthGateScreen() {
-  const { initializing, profileStatus, user } = useAuth();
+  const { accountState, initializing, profileStatus, user } = useAuth();
   const authRoute = resolveAuthGateRoute({
     initializing,
     profileStatus,
@@ -47,6 +47,14 @@ function AuthGateScreen() {
 
   if (authRoute === 'loading') {
     return <LoadingScreen />;
+  }
+
+  if (user && (accountState === 'deletion-pending' || accountState === 'purging')) {
+    return (
+      <Stack.Navigator screenOptions={stackScreenOptions}>
+        <Stack.Screen name="DeletionStatus" component={DeletionStatusScreenEntry} />
+      </Stack.Navigator>
+    );
   }
 
   if (authRoute === 'main') {
@@ -62,6 +70,11 @@ function AuthGateScreen() {
       )}
     </Stack.Navigator>
   );
+}
+
+function DeletionStatusScreenEntry(_props: RootStackScreenProps<'DeletionStatus'>) {
+  const { DeletionStatusScreen } = require('../screens/DeletionStatusScreen') as typeof import('../screens/DeletionStatusScreen');
+  return <DeletionStatusScreen />;
 }
 
 function LoadingScreen() {
@@ -97,12 +110,16 @@ function MainAppStack() {
         <Stack.Screen name="Main" component={MainScreenEntry} />
         <Stack.Screen name="MeProfile" component={MeProfileScreenEntry} />
         <Stack.Screen name="Friends" component={FriendsScreenEntry} />
+        <Stack.Screen name="Following" component={FollowingScreenEntry} />
+        <Stack.Screen name="BlockedUsers" component={BlockedUsersScreenEntry} />
         <Stack.Screen name="Couples" component={CouplesScreenEntry} />
+        <Stack.Screen name="Families" component={FamiliesScreenEntry} />
         <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreenEntry} />
         <Stack.Screen name="Gifts" component={GiftsScreenEntry} />
         <Stack.Screen name="WalletStore" component={WalletStoreScreenEntry} />
         <Stack.Screen name="Store" component={StoreScreenEntry} />
         <Stack.Screen name="MyItems" component={MyItemsScreenEntry} />
+        <Stack.Screen name="Leaderboards" component={LeaderboardsScreenEntry} />
         <Stack.Screen name="RepresentativeTransfer" component={RepresentativeTransferScreenEntry} />
         <Stack.Screen name="UserProfile" component={UserProfileScreenEntry} />
         <Stack.Screen name="DirectChat" component={DirectChatScreenEntry} />
@@ -152,10 +169,28 @@ function FriendsScreenEntry(props: RootStackScreenProps<'Friends'>) {
   return <FriendsScreen {...props} />;
 }
 
+function FollowingScreenEntry(props: RootStackScreenProps<'Following'>) {
+  const { FollowingScreen } = require('../screens/FollowingScreen') as typeof import('../screens/FollowingScreen');
+
+  return <FollowingScreen {...props} />;
+}
+
+function BlockedUsersScreenEntry(props: RootStackScreenProps<'BlockedUsers'>) {
+  const { BlockedUsersScreen } = require('../screens/BlockedUsersScreen') as typeof import('../screens/BlockedUsersScreen');
+
+  return <BlockedUsersScreen {...props} />;
+}
+
 function CouplesScreenEntry(props: RootStackScreenProps<'Couples'>) {
   const { CouplesScreen } = require('../screens/CouplesScreen') as typeof import('../screens/CouplesScreen');
 
   return <CouplesScreen {...props} />;
+}
+
+function FamiliesScreenEntry(props: RootStackScreenProps<'Families'>) {
+  const { FamiliesScreen } = require('../screens/FamiliesScreen') as typeof import('../screens/FamiliesScreen');
+
+  return <FamiliesScreen {...props} />;
 }
 
 function NotificationSettingsScreenEntry(props: RootStackScreenProps<'NotificationSettings'>) {
@@ -183,6 +218,11 @@ function StoreScreenEntry(props: RootStackScreenProps<'Store'>) {
 function MyItemsScreenEntry(props: RootStackScreenProps<'MyItems'>) {
   const { MyItemsScreen } = require('../screens/MyItemsScreen') as typeof import('../screens/MyItemsScreen');
   return <MyItemsScreen {...props} />;
+}
+
+function LeaderboardsScreenEntry(props: RootStackScreenProps<'Leaderboards'>) {
+  const { LeaderboardsScreen } = require('../screens/LeaderboardsScreen') as typeof import('../screens/LeaderboardsScreen');
+  return <LeaderboardsScreen {...props} />;
 }
 
 function RepresentativeTransferScreenEntry(props: RootStackScreenProps<'RepresentativeTransfer'>) {

@@ -5,6 +5,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret, defineString } = require('firebase-functions/params');
 const {
   AccessToken,
+  DataPacket_Kind,
   RoomServiceClient,
   TrackSource,
   WebhookReceiver,
@@ -32,6 +33,8 @@ const {
   normalizeAdminAuditQuery,
   normalizeAdminAuditLookup,
   normalizeAdminClientError,
+  normalizeAdminCosmeticsRendererDisable,
+  normalizeAdminDirectChatRetentionSet,
   normalizeAdminFeatureFlagUpdate,
   normalizeRoomGiftPolicyUpdate,
   normalizeAdministratorAction,
@@ -100,6 +103,7 @@ const {
   cleanupExpiredCosmeticSubmissions,
   getAdminCosmeticsAssets,
   mutateAdminCosmeticsAsset,
+  reconcileCosmeticAssetRegistryBatch,
 } = require('./adminCosmeticsAssetService');
 const { normalizeAdminRoomRocketMutation } = require('./adminRoomRocketCore');
 const {
@@ -120,16 +124,24 @@ const { normalizeDirectChatCommand } = require('./directChatCore');
 const { normalizeRoomMediaCommandBody } = require('./roomMediaCore');
 const { normalizeRoomOwnershipBody } = require('./roomOwnershipCore');
 const { normalizeRoomGiftBody } = require('./roomGiftCore');
-const { inspectApprovedGiftPresentation } = require('./roomGiftPresentationCore');
+const { inspectGiftPresentation } = require('./roomGiftPresentationCore');
+const {
+  ROOM_EFFECT_COPY_TEMPLATE_VERSION,
+  resolveRoomEffectSurface,
+} = require('./roomEffectPresentationCore');
 const { normalizeRoomEntryEffectBody } = require('./roomEntryEffectCore');
+const { encodeRoomReactionEnvelope, normalizeRoomReactionBody } = require('./roomReactionCore');
 const { normalizeRoomGameBody } = require('./roomGameCore');
+const { normalizeRoomPkBody } = require('./roomPkCore');
 const { normalizeRoomMusicBody } = require('./roomMusicCore');
+const { normalizeRoomWatchBody } = require('./roomWatchCore');
 const { isValidRoomSeatCommandAction } = require('./roomSeatCore');
 const {
   executeRoomCommand,
   retryPendingRoomLiveKitSync,
   synchronizeRoomCommandLiveKit,
 } = require('./roomCommandService');
+const { executeRoomAdmissionCommand } = require('./roomAdmissionService');
 const { cleanupOrphanedRoomMedia, executeRoomMediaCommand } = require('./roomMediaService');
 const { finalizeRemovedRooms } = require('./roomLifecycleService');
 const {
@@ -149,6 +161,18 @@ const {
   processRoomRocketRewardNotifications,
   projectRoomRocketGiftFact,
 } = require('./roomRocketService');
+const {
+  createAdminPushCampaign,
+  estimateAdminPushAudience,
+  listAdminPushCampaigns,
+  normalizeAdminPushEstimateInput,
+  normalizeAdminPushSendInput,
+  processAdminPushCampaigns,
+} = require('./adminPushService');
+const {
+  buildGrowthHealthSummary,
+  readGrowthTelemetry,
+} = require('./growthTelemetryCore');
 const {
   prepareNextRoomTargetRoster,
   searchRoomTargetRosterUsers,
@@ -171,16 +195,31 @@ const {
   executeRoomEntryEffectCommand,
 } = require('./roomEntryEffectService');
 const {
+  cleanupExpiredRoomReactionRecords,
+  executeRoomReactionCommand,
+} = require('./roomReactionService');
+const {
   cleanupExpiredRoomGameRecords,
   executeRoomGameCommand,
   expireRoomGameSessions,
 } = require('./roomGameService');
+const {
+  applyRoomPkGiftContribution,
+  executeRoomPkCommand,
+  finalizeExpiredRoomPkSessions,
+  forceFinalizeRoomPkOnFlagOff,
+} = require('./roomPkService');
 const {
   applyRoomMusicLiveKit,
   cleanupExpiredRoomMusicRecords,
   executeRoomMusicCommand,
   expireRoomMusicLeases,
 } = require('./roomMusicService');
+const {
+  cleanupExpiredRoomWatchRecords,
+  executeRoomWatchCommand,
+  expireRoomWatchLeases,
+} = require('./roomWatchService');
 const {
   cleanupExpiredRoomEvidence,
   cleanupUnreportedRecordingSegments,
@@ -192,11 +231,47 @@ const {
   expirePendingDirectMessageRequests,
 } = require('./directChatService');
 const { cleanupDirectChatUploads } = require('./directChatMediaService');
+const {
+  cleanupDirectChatEvidence,
+  cleanupDirectChatMessages,
+  copyDirectChatEvidenceMedia,
+} = require('./directChatRetentionService');
+const {
+  normalizeDirectChatEvidenceRequest,
+  normalizeDirectChatModerationAction,
+} = require('./directChatModerationCore');
+const {
+  executeDirectChatModerationAction,
+  resolveDirectChatEvidence,
+} = require('./directChatModerationService');
+const {
+  executeDirectChatRetentionPolicySet,
+  resolveAdminUserDirectChatContext,
+  resolveDirectChatOpsStatus,
+  resolveDirectChatRetentionPolicy,
+} = require('./directChatAdminOpsService');
 const { createGoogleVisionSafetyAdapter } = require('./directChatMediaSafetyAdapter');
+const {
+  createAvatarUpload,
+  expireAvatarUploads,
+  finalizeAvatarUpload,
+  removeAvatar,
+  updateProfilePresentation,
+} = require('./profileProductionService');
+const {
+  cancelAccountDeletion,
+  getAccountDeletionStatus,
+  purgeDueAccounts,
+  requestAccountDeletion,
+} = require('./accountLifecycleService');
 const {
   cleanupVoiceRoomHardeningArtifacts,
   consumeVoiceRoomHttpRateLimit,
 } = require('./voiceRoomHardeningService');
+const {
+  consumeDirectChatCommandHttpRateLimits,
+} = require('./directChatHardeningService');
+const { verifyDirectChatAppCheck } = require('./directChatAppCheck');
 const {
   evaluateVoiceRoomLaunchAccess,
   summarizeLaunchReadiness,
@@ -252,9 +327,20 @@ const {
 } = require('./adminWeeklyIncentiveIntegrityCore');
 const { discoverUsers } = require('./socialDiscoveryService');
 const { getCoupleOverview, getCoupleStatus, mutateCouple } = require('./socialCouplesService');
-const { normalizeAdminGiftCatalogInput } = require('./socialGiftsCore');
+const { getMyFamily, mutateFamily } = require('./socialFamiliesService');
+const {
+  claimOpsMission,
+  getAdminOpsEvents,
+  getOpsMissionsOverview,
+  mutateAdminOpsEvent,
+} = require('./opsEventsService');
+const {
+  isExpectedAdminGiftRevisionCurrent,
+  normalizeAdminGiftCatalogInput,
+} = require('./socialGiftsCore');
 const { getGiftCenter, sendGift } = require('./socialGiftsService');
 const {
+  deliverDirectChatNotification,
   deliverNotificationForCommand,
   deliverSocialNotification,
   getNotificationSettings,
@@ -270,7 +356,28 @@ const {
   getFriendshipStatus,
   mutateFriendship,
 } = require('./socialFriendsService');
+const {
+  getBlockedUsers,
+  getFollowStatus,
+  getFollowersOverview,
+  getFollowingOverview,
+  mutateFollow,
+} = require('./socialFollowService');
 const { mutateUserBlock } = require('./socialBlocksService');
+const { claimLuckyBag, quickMatch } = require('./growthMatchService');
+const {
+  cleanupExpiredSoftMatchRecords,
+  expireSoftMatchQueueAndSessions,
+  softMatchCancel,
+  softMatchEnqueue,
+  softMatchStatus,
+} = require('./softOneToOneMatchService');
+const {
+  applyGiftLeaderboardContribution,
+  getLeaderboard,
+  getVipStatus,
+  processLeaderboardRefreshQueue,
+} = require('./growthLeaderboardService');
 const {
   isTimestampLike,
   isValidPublicId,
@@ -285,6 +392,32 @@ const { getWalletStore, purchaseSpecialId } = require('./socialWalletService');
 const { equipStoreItem, expireStoreOwnerships, getMyStoreItems, getStoreCatalog, giftStoreItem, purchaseStoreItem } = require('./storeService');
 const { clearSuspendedAvatarFrameProjection, reconcileAvatarFrameProjections } = require('./avatarFrameProjectionService');
 const { clearSuspendedEquipmentCosmetics, reconcileEquipmentCosmeticProjections } = require('./equipmentCosmeticsService');
+const {
+  applyDissolutionClear,
+  clearSuspendedCoupleEffects,
+  equipCoupleEffect,
+  getCoupleEffects,
+  prepareDissolutionClear,
+  purchaseCoupleEffect,
+  reconcileCoupleEffects,
+  unequipCoupleEffect,
+} = require('./coupleEffectsService');
+const {
+  attestCosmeticCustomSubmission,
+  createCosmeticCustomUpload,
+  equipCosmeticCustomAsset,
+  finalizeCosmeticCustomUpload,
+  getAdminCosmeticCustomEligibility,
+  listAdminCosmeticCustomSubmissions,
+  listCosmeticCustomSubmissions,
+  previewAdminCosmeticCustomSubmission,
+  unequipCosmeticCustomAsset,
+} = require('./cosmeticCustomSubmissionService');
+const {
+  normalizeAdminCustomEligibilityQuery,
+  normalizeAdminCustomSubmissionPreview,
+  normalizeAdminCustomSubmissionQuery,
+} = require('./cosmeticCustomSubmissionCore');
 const { normalizeRoomThemeBody } = require('./roomThemeCore');
 const { executeRoomThemeCommand, expireRoomThemeEntitlements } = require('./roomThemeService');
 const {
@@ -334,12 +467,65 @@ const directChatMediaSafetyAdapter = createGoogleVisionSafetyAdapter({ credentia
 const liveKitUrl = defineSecret('LIVEKIT_URL');
 const liveKitApiKey = defineSecret('LIVEKIT_API_KEY');
 const liveKitApiSecret = defineSecret('LIVEKIT_API_SECRET');
+const accountDeletionPseudonymSecret = defineSecret('ACCOUNT_DELETION_PSEUDONYM_SECRET');
 const representativePortalOrigin = defineString('REPRESENTATIVE_PORTAL_ORIGIN', {
   default: 'https://disabled.invalid',
   description: 'Exact HTTPS origin for the representative portal; disabled.invalid keeps the portal fail-closed.',
 });
+const directChatAppCheckMode = defineString('DIRECT_CHAT_APP_CHECK_MODE', {
+  default: 'monitor',
+  description: 'Use monitor during attestation rollout, then enforce before public personal-chat cohorts.',
+});
+const voiceAppCheckMode = defineString('VOICE_APP_CHECK_MODE', {
+  default: 'monitor',
+  description: 'Monitor voice attestation first; switch to enforce after verified production traffic is healthy.',
+});
 const roomMediaRegion = 'us-central1';
 const roomChatRegion = 'us-central1';
+
+async function verifyVoiceRequestAppCheck(request, response, source) {
+  const result = await verifyDirectChatAppCheck({
+    appCheck: admin.appCheck(),
+    headers: request.headers,
+    mode: voiceAppCheckMode.value(),
+  });
+  console.info(`[functions.${source}] app-check`, {
+    mode: result.mode,
+    reason: result.reason,
+    verified: result.verified,
+  });
+  if (!result.ok) {
+    response.status(result.status).json({ code: result.code, error: result.error });
+    return false;
+  }
+  return true;
+}
+
+exports.purgeDeletedAccounts = onSchedule(
+  { region: 'us-central1', schedule: 'every 15 minutes', secrets: [accountDeletionPseudonymSecret], timeZone: 'UTC' },
+  async () => {
+    const result = await purgeDueAccounts({
+      auth: admin.auth(), bucket: admin.storage().bucket(),
+      clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+      db: admin.firestore(), fieldValue: admin.firestore.FieldValue,
+      pseudonymSecret: accountDeletionPseudonymSecret.value(),
+    });
+    console.info('[functions.purgeDeletedAccounts] complete', { scanned: result.scanned, states: result.results.map((entry) => entry.state) });
+  },
+);
+
+exports.expireAvatarUploads = onSchedule(
+  { region: 'us-central1', schedule: 'every 15 minutes', timeZone: 'UTC' },
+  async () => {
+    const result = await expireAvatarUploads({
+      bucket: admin.storage().bucket(),
+      clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[about-me.avatar] expired-authorizations', result);
+  },
+);
 
 exports.processNotificationReceipts = onSchedule(
   { region: 'us-central1', schedule: 'every 15 minutes', timeZone: 'Asia/Baghdad' },
@@ -388,6 +574,18 @@ exports.reconcileEquipmentCosmeticProjections = onSchedule(
   },
 );
 
+exports.reconcileCoupleEffects = onSchedule(
+  { region: 'us-central1', schedule: 'every 30 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await reconcileCoupleEffects({
+      clock: { nowMillis: () => Date.now() },
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.reconcileCoupleEffects] complete', result);
+  },
+);
+
 exports.clearSuspendedAvatarFrameProjection = onDocumentWritten(
   { document: 'publicProfiles/{uid}', region: 'us-central1' },
   async (event) => {
@@ -400,6 +598,12 @@ exports.clearSuspendedAvatarFrameProjection = onDocumentWritten(
       uid: event.params.uid,
     });
     await clearSuspendedEquipmentCosmetics({
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      uid: event.params.uid,
+    });
+    await clearSuspendedCoupleEffects({
+      clock: { nowMillis: () => Date.now() },
       db: admin.firestore(),
       fieldValue: admin.firestore.FieldValue,
       uid: event.params.uid,
@@ -519,6 +723,17 @@ exports.processRoomRocketRewardNotifications = onSchedule(
   },
 );
 
+exports.processAdminPushCampaigns = onSchedule(
+  { region: 'us-central1', schedule: 'every 1 minutes', timeZone: 'Asia/Baghdad' },
+  async () => {
+    const result = await processAdminPushCampaigns({
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+    });
+    console.info('[functions.processAdminPushCampaigns] complete', result);
+  },
+);
+
 exports.startRoomTargetCycles = onSchedule(
   { region: 'us-central1', schedule: 'every 10 minutes', timeZone: 'Asia/Baghdad' },
   async () => {
@@ -563,6 +778,22 @@ exports.processRoomTargetRosterNotifications = onSchedule(
       fieldValue: admin.firestore.FieldValue,
     });
     console.info('[functions.processRoomTargetRosterNotifications] complete', result);
+  },
+);
+
+exports.refreshGrowthLeaderboards = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 5 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await processLeaderboardRefreshQueue({
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      limit: 24,
+    });
+    console.info('[functions.refreshGrowthLeaderboards] complete', result);
   },
 );
 
@@ -647,6 +878,32 @@ exports.reconcileRoomSupportProjections = onSchedule(
   },
 );
 
+exports.accountLifecycleCommand = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication is required.');
+    const action = typeof request.data?.action === 'string' ? request.data.action.trim() : '';
+    const requestId = typeof request.data?.requestId === 'string' ? request.data.requestId.trim() : '';
+    if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId) || !['request-account-deletion', 'cancel-account-deletion', 'get-account-deletion-status'].includes(action)) {
+      throw new HttpsError('invalid-argument', 'A valid lifecycle command is required.');
+    }
+    const common = {
+      auth: admin.auth(),
+      authTimeMillis: Number(request.auth.token?.auth_time) * 1000,
+      clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+      db: admin.firestore(), fieldValue: admin.firestore.FieldValue, uid: request.auth.uid,
+    };
+    const result = action === 'request-account-deletion'
+      ? await requestAccountDeletion({ ...common, reason: request.data?.payload?.reason, requestId })
+      : action === 'cancel-account-deletion'
+        ? await cancelAccountDeletion(common)
+        : await getAccountDeletionStatus({ db: common.db, uid: common.uid });
+    if (result.errorCode === 'RECENT_LOGIN_REQUIRED') throw new HttpsError('failed-precondition', 'RECENT_LOGIN_REQUIRED');
+    if (result.errorCode) throw new HttpsError('failed-precondition', result.errorCode);
+    return { ok: true, result: result.result };
+  },
+);
+
 exports.socialCommand = onCall(
   {
     cors: true,
@@ -662,10 +919,56 @@ exports.socialCommand = onCall(
       throwSocialCommandError(command.code);
     }
 
+    if (request.auth?.token?.accountDeletionPending === true) {
+      throwSocialCommandError('PERMISSION_DENIED');
+    }
+
     try {
       if (command.value.action === 'get-readiness') {
         const result = await getProfileReadiness(admin.firestore(), command.value.uid);
         return { ok: true, result };
+      }
+
+      if (command.value.action === 'update-profile-presentation') {
+        const result = await updateProfilePresentation({
+          db: admin.firestore(), fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload, requestId: command.value.requestId, uid: command.value.uid,
+        });
+        if (result.errorCode) throwSocialCommandError(result.errorCode);
+        console.info('[about-me.profile] presentation-updated', { uid: command.value.uid });
+        return { ok: true, result: result.result };
+      }
+
+      if (command.value.action === 'create-avatar-upload') {
+        const result = await createAvatarUpload({
+          clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+          db: admin.firestore(), fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload, requestId: command.value.requestId, uid: command.value.uid,
+        });
+        if (result.errorCode) throwSocialCommandError(result.errorCode);
+        console.info('[about-me.avatar] authorization-created', { uid: command.value.uid, uploadId: result.result.uploadId });
+        return { ok: true, result: result.result };
+      }
+
+      if (command.value.action === 'finalize-avatar-upload') {
+        const result = await finalizeAvatarUpload({
+          bucket: admin.storage().bucket(),
+          clock: { nowMillis: () => Date.now() }, db: admin.firestore(), fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload, requestId: command.value.requestId,
+          safetyAdapter: directChatMediaSafetyAdapter, uid: command.value.uid,
+        });
+        if (result.errorCode) throwSocialCommandError(result.errorCode);
+        console.info('[about-me.avatar] finalized', { status: result.result.status, uid: command.value.uid, uploadId: result.result.uploadId });
+        return { ok: true, result: result.result };
+      }
+
+      if (command.value.action === 'remove-avatar') {
+        const result = await removeAvatar({
+          bucket: admin.storage().bucket(), db: admin.firestore(), fieldValue: admin.firestore.FieldValue,
+          requestId: command.value.requestId, uid: command.value.uid,
+        });
+        if (result.errorCode) throwSocialCommandError(result.errorCode);
+        return { ok: true, result: result.result };
       }
 
       if (command.value.action === 'search-users') {
@@ -710,6 +1013,46 @@ exports.socialCommand = onCall(
         return { ok: true, result: relationship.result };
       }
 
+      if (command.value.action === 'get-follow-status') {
+        const relationship = await getFollowStatus({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (relationship.errorCode) throwSocialCommandError(relationship.errorCode);
+        return { ok: true, result: relationship.result };
+      }
+
+      if (command.value.action === 'get-following') {
+        const overview = await getFollowingOverview({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (overview.errorCode) throwSocialCommandError(overview.errorCode);
+        return { ok: true, result: overview.result };
+      }
+
+      if (command.value.action === 'get-followers') {
+        const overview = await getFollowersOverview({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (overview.errorCode) throwSocialCommandError(overview.errorCode);
+        return { ok: true, result: overview.result };
+      }
+
+      if (command.value.action === 'get-blocked-users') {
+        const overview = await getBlockedUsers({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (overview.errorCode) throwSocialCommandError(overview.errorCode);
+        return { ok: true, result: overview.result };
+      }
+
       if (command.value.action === 'get-couples') {
         const overview = await getCoupleOverview({
           db: admin.firestore(),
@@ -728,6 +1071,16 @@ exports.socialCommand = onCall(
         });
         if (relationship.errorCode) throwSocialCommandError(relationship.errorCode);
         return { ok: true, result: relationship.result };
+      }
+
+      if (command.value.action === 'get-my-family') {
+        const family = await getMyFamily({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (family.errorCode) throwSocialCommandError(family.errorCode);
+        return { ok: true, result: family.result };
       }
 
       if (command.value.action === 'get-notification-settings') {
@@ -809,6 +1162,131 @@ exports.socialCommand = onCall(
         return { ok: true, result: gift.result };
       }
 
+      if (command.value.action === 'get-couple-effects') {
+        const effects = await getCoupleEffects({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (effects.errorCode) throwSocialCommandError(effects.errorCode);
+        return { ok: true, result: effects.result };
+      }
+
+      if (command.value.action === 'purchase-couple-effect') {
+        const purchase = await purchaseCoupleEffect({
+          clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (purchase.errorCode) throwSocialCommandError(purchase.errorCode);
+        return { ok: true, result: purchase.result };
+      }
+
+      if (command.value.action === 'equip-couple-effect') {
+        const equipped = await equipCoupleEffect({
+          clock: { nowMillis: () => Date.now() },
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (equipped.errorCode) throwSocialCommandError(equipped.errorCode);
+        return { ok: true, result: equipped.result };
+      }
+
+      if (command.value.action === 'unequip-couple-effect') {
+        const unequipped = await unequipCoupleEffect({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (unequipped.errorCode) throwSocialCommandError(unequipped.errorCode);
+        return { ok: true, result: unequipped.result };
+      }
+
+      if (command.value.action === 'create-cosmetic-custom-upload') {
+        const upload = await createCosmeticCustomUpload({
+          clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (upload.errorCode) throwSocialCommandError(upload.errorCode);
+        return { ok: true, result: upload.result };
+      }
+
+      if (command.value.action === 'finalize-cosmetic-custom-upload') {
+        const finalized = await finalizeCosmeticCustomUpload({
+          bucket: admin.storage().bucket(),
+          clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          safetyAdapter: directChatMediaSafetyAdapter,
+          uid: command.value.uid,
+        });
+        if (finalized.errorCode) throwSocialCommandError(finalized.errorCode);
+        return { ok: true, result: finalized.result };
+      }
+
+      if (command.value.action === 'attest-cosmetic-custom-submission') {
+        const attested = await attestCosmeticCustomSubmission({
+          clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (attested.errorCode) throwSocialCommandError(attested.errorCode);
+        return { ok: true, result: attested.result };
+      }
+
+      if (command.value.action === 'list-cosmetic-custom-submissions') {
+        const listed = await listCosmeticCustomSubmissions({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (listed.errorCode) throwSocialCommandError(listed.errorCode);
+        return { ok: true, result: listed.result };
+      }
+
+      if (command.value.action === 'equip-cosmetic-custom-asset') {
+        const equipped = await equipCosmeticCustomAsset({
+          clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (equipped.errorCode) throwSocialCommandError(equipped.errorCode);
+        return { ok: true, result: equipped.result };
+      }
+
+      if (command.value.action === 'unequip-cosmetic-custom-asset') {
+        const unequipped = await unequipCosmeticCustomAsset({
+          clock: { nowMillis: () => Date.now(), timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value) },
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (unequipped.errorCode) throwSocialCommandError(unequipped.errorCode);
+        return { ok: true, result: unequipped.result };
+      }
+
       if (command.value.action === 'get-representative-status') {
         const status = await getRepresentativeStatus({
           clock: { nowMillis: () => Date.now() }, db: admin.firestore(), input: command.value.payload,
@@ -851,6 +1329,106 @@ exports.socialCommand = onCall(
         return { ok: true, result: gift.result };
       }
 
+      if (command.value.action === 'quick-match') {
+        const match = await quickMatch({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (match.errorCode) throwSocialCommandError(match.errorCode);
+        return { ok: true, result: match.result };
+      }
+
+      if (command.value.action === 'claim-lucky-bag') {
+        const bag = await claimLuckyBag({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (bag.errorCode) throwSocialCommandError(bag.errorCode);
+        return { ok: true, result: bag.result };
+      }
+
+      if (command.value.action === 'get-leaderboard') {
+        const board = await getLeaderboard({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (board.errorCode) throwSocialCommandError(board.errorCode);
+        return { ok: true, result: board.result };
+      }
+
+      if (command.value.action === 'get-vip-status') {
+        const vip = await getVipStatus({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          uid: command.value.uid,
+        });
+        if (vip.errorCode) throwSocialCommandError(vip.errorCode);
+        return { ok: true, result: vip.result };
+      }
+
+      if (command.value.action === 'get-ops-missions') {
+        const missions = await getOpsMissionsOverview({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (missions.errorCode) throwSocialCommandError(missions.errorCode);
+        return { ok: true, result: missions.result };
+      }
+
+      if (command.value.action === 'claim-ops-mission') {
+        const claim = await claimOpsMission({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (claim.errorCode) throwSocialCommandError(claim.errorCode);
+        return { ok: true, result: claim.result };
+      }
+
+      if (command.value.action === 'soft-match-enqueue') {
+        const soft = await softMatchEnqueue({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (soft.errorCode) throwSocialCommandError(soft.errorCode);
+        return { ok: true, result: soft.result };
+      }
+
+      if (command.value.action === 'soft-match-cancel') {
+        const soft = await softMatchCancel({
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (soft.errorCode) throwSocialCommandError(soft.errorCode);
+        return { ok: true, result: soft.result };
+      }
+
+      if (command.value.action === 'soft-match-status') {
+        const soft = await softMatchStatus({
+          db: admin.firestore(),
+          input: command.value.payload,
+          uid: command.value.uid,
+        });
+        if (soft.errorCode) throwSocialCommandError(soft.errorCode);
+        return { ok: true, result: soft.result };
+      }
+
       if ([
         'send-friend-request',
         'accept-friend-request',
@@ -871,6 +1449,20 @@ exports.socialCommand = onCall(
           throwSocialCommandError(mutation.errorCode);
         }
 
+        await deliverSocialNotificationSafely(command.value);
+        return { ok: true, result: mutation.result };
+      }
+
+      if (['follow-user', 'unfollow-user'].includes(command.value.action)) {
+        const mutation = await mutateFollow({
+          action: command.value.action,
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (mutation.errorCode) throwSocialCommandError(mutation.errorCode);
         await deliverSocialNotificationSafely(command.value);
         return { ok: true, result: mutation.result };
       }
@@ -905,6 +1497,29 @@ exports.socialCommand = onCall(
         });
         if (mutation.errorCode) throwSocialCommandError(mutation.errorCode);
         await deliverSocialNotificationSafely(command.value);
+        return { ok: true, result: mutation.result };
+      }
+
+      if ([
+        'create-family',
+        'invite-to-family',
+        'accept-family-invite',
+        'decline-family-invite',
+        'cancel-family-invite',
+        'join-family',
+        'leave-family',
+        'kick-family-member',
+        'dissolve-family',
+      ].includes(command.value.action)) {
+        const mutation = await mutateFamily({
+          action: command.value.action,
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: command.value.payload,
+          requestId: command.value.requestId,
+          uid: command.value.uid,
+        });
+        if (mutation.errorCode) throwSocialCommandError(mutation.errorCode);
         return { ok: true, result: mutation.result };
       }
 
@@ -959,6 +1574,37 @@ async function deliverSocialNotificationSafely(command) {
       errorMessage: error instanceof Error ? error.message : String(error),
       requestId: command.requestId,
       uid: command.uid,
+    });
+  }
+}
+
+async function deliverDirectChatNotificationSafely({ body, result, uid }) {
+  try {
+    const action = result?.result?.action;
+    const requestState = result?.result?.requestState;
+    const kind = action === 'send-message-request' || (action === 'send-direct-message' && requestState === 'pending')
+      ? 'direct-message-request'
+      : action === 'send-direct-message' && requestState === 'accepted'
+        ? 'direct-message'
+        : undefined;
+    if (!kind) return;
+    const payload = body && typeof body === 'object' ? body.payload : undefined;
+    await deliverDirectChatNotification({
+      actorUid: uid,
+      conversationId: result.result.conversationId,
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      kind,
+      messageKind: typeof payload?.kind === 'string' ? payload.kind : 'text',
+      recipientUid: result.result.targetUid,
+      requestId: result.result.requestId,
+      text: typeof payload?.text === 'string' ? payload.text : '',
+    });
+  } catch (error) {
+    console.error('[functions.directChatCommand] notification:error', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      requestId: result?.result?.requestId,
+      uid,
     });
   }
 }
@@ -1426,6 +2072,7 @@ exports.roomAttendanceCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomAttendanceCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -1434,6 +2081,10 @@ exports.roomAttendanceCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch {
       response.status(401).json({ error: 'Authentication is invalid.' });
       return;
@@ -1514,6 +2165,10 @@ exports.payrollProgress = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch {
       response.status(401).json({ error: 'Authentication is invalid.' });
       return;
@@ -1578,6 +2233,10 @@ exports.dailyLoginCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch {
       response.status(401).json({ error: 'Authentication is invalid.' });
       return;
@@ -1655,6 +2314,7 @@ exports.livekitToken = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'livekitToken'))) return;
 
     const idToken = extractBearerToken(request.headers);
 
@@ -1667,9 +2327,42 @@ exports.livekitToken = onRequest(
 
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('Invalid Firebase ID token:', error);
       response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    try {
+      const tokenRateLimit = await consumeVoiceRoomHttpRateLimit({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        fieldValue: admin.firestore.FieldValue,
+        requestId: '',
+        surface: 'livekit-token',
+        uid: decodedToken.uid,
+      });
+      if (!tokenRateLimit.ok) {
+        response.status(tokenRateLimit.status).json({
+          code: tokenRateLimit.code,
+          details: tokenRateLimit.details,
+          error: tokenRateLimit.error,
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('[functions.livekitToken] rate-limit:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        uid: decodedToken.uid,
+      });
+      response.status(500).json({ code: 'RATE_LIMIT_UNAVAILABLE', error: 'Voice admission is temporarily unavailable.' });
       return;
     }
 
@@ -1850,6 +2543,90 @@ exports.livekitToken = onRequest(
   },
 );
 
+exports.roomAdmissionCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    response.set('Cache-Control', 'no-store, max-age=0');
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomAdmissionCommand'))) return;
+
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ code: 'AUTH_REQUIRED', error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ code: 'ACCOUNT_RESTRICTED', error: 'Account deletion is pending.' });
+        return;
+      }
+    } catch (error) {
+      console.error('[functions.roomAdmissionCommand] invalid-token', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ code: 'AUTH_INVALID', error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const launchAccess = await resolveVoiceRoomHttpLaunchAccess(admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, launchAccess)) return;
+
+    try {
+      const result = await executeRoomAdmissionCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomAdmissionCommand] request:denied', {
+          action: request.body?.action,
+          code: result.code,
+          replayed: result.replayed === true,
+          roomId: request.body?.roomId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status || 409).json({
+          code: result.code,
+          error: result.error,
+          replayed: result.replayed === true,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      console.info('[functions.roomAdmissionCommand] request:success', {
+        action: result.result.action,
+        replayed: result.replayed === true,
+        requestId: result.result.requestId,
+        roomId: result.result.room.id,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomAdmissionCommand] request:error', {
+        action: request.body?.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        uid: decodedToken.uid,
+      });
+      response.status(500).json({ code: 'ADMISSION_FAILED', error: 'Room admission failed.' });
+    }
+  },
+);
+
 exports.roomCommand = onRequest(
   {
     cors: true,
@@ -1862,6 +2639,7 @@ exports.roomCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomCommand'))) return;
 
     const idToken = extractBearerToken(request.headers);
 
@@ -1874,6 +2652,10 @@ exports.roomCommand = onRequest(
 
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('Invalid Firebase ID token:', error);
       response.status(401).json({ error: 'Authentication is invalid.' });
@@ -2000,6 +2782,7 @@ exports.roomThemeCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomThemeCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2008,6 +2791,10 @@ exports.roomThemeCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomThemeCommand] invalid-token', error);
       response.status(401).json({ error: 'Authentication is invalid.' });
@@ -2057,6 +2844,7 @@ exports.roomTargetCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomTargetCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2065,6 +2853,10 @@ exports.roomTargetCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomTargetCommand] invalid-token', error);
       response.status(401).json({ error: 'Authentication is invalid.' });
@@ -2119,6 +2911,7 @@ exports.roomMediaCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomMediaCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2128,6 +2921,10 @@ exports.roomMediaCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomMediaCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2205,11 +3002,58 @@ exports.directChatCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.directChatCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       response.status(401).json({ code: 'AUTH_REQUIRED', error: 'Authentication is invalid.' });
+      return;
+    }
+    const appCheckResult = await verifyDirectChatAppCheck({
+      appCheck: admin.appCheck(),
+      headers: request.headers,
+      mode: directChatAppCheckMode.value(),
+    });
+    console.info('[functions.directChatCommand] app-check', {
+      mode: appCheckResult.mode,
+      reason: appCheckResult.reason,
+      verified: appCheckResult.verified,
+    });
+    if (!appCheckResult.ok) {
+      response.status(appCheckResult.status).json({ code: appCheckResult.code, error: appCheckResult.error });
+      return;
+    }
+    const outerRequestId = typeof request.body?.requestId === 'string' ? request.body.requestId.trim() : '';
+    try {
+      const httpRateLimit = await consumeDirectChatCommandHttpRateLimits({
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        fieldValue: admin.firestore.FieldValue,
+        headers: request.headers,
+        requestId: outerRequestId,
+        uid: decodedToken.uid,
+      });
+      if (!httpRateLimit.ok) {
+        response.status(httpRateLimit.status).json({
+          code: httpRateLimit.code,
+          error: httpRateLimit.error,
+          ...(httpRateLimit.details ? { details: httpRateLimit.details } : {}),
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('[functions.directChatCommand] rate-limit:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        uid: decodedToken.uid,
+      });
+      response.status(500).json({ code: 'INTERNAL', error: 'The personal chat request failed.' });
       return;
     }
     const normalized = normalizeDirectChatCommand(request.body, decodedToken.uid);
@@ -2240,6 +3084,13 @@ exports.directChatCommand = onRequest(
         requestId: result.result.requestId,
         uid: decodedToken.uid,
       });
+      if (result.replayed !== true) {
+        await deliverDirectChatNotificationSafely({
+          body: request.body,
+          result,
+          uid: decodedToken.uid,
+        });
+      }
       response.json(result);
     } catch (error) {
       console.error('[functions.directChatCommand] request:error', {
@@ -2263,6 +3114,7 @@ exports.roomChatCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomChatCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2272,6 +3124,10 @@ exports.roomChatCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomChatCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2342,6 +3198,7 @@ exports.roomOwnershipCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomOwnershipCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2351,6 +3208,10 @@ exports.roomOwnershipCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomOwnershipCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2425,6 +3286,7 @@ exports.roomGiftCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomGiftCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2434,6 +3296,10 @@ exports.roomGiftCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomGiftCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2527,6 +3393,7 @@ exports.roomEntryEffectCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomEntryEffectCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2536,6 +3403,10 @@ exports.roomEntryEffectCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomEntryEffectCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2600,6 +3471,103 @@ exports.roomEntryEffectCommand = onRequest(
   },
 );
 
+exports.roomReactionCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+    secrets: [liveKitUrl, liveKitApiKey, liveKitApiSecret],
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomReactionCommand'))) return;
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
+    } catch (error) {
+      console.error('[functions.roomReactionCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const launchAccess = await resolveVoiceRoomHttpLaunchAccess(admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, launchAccess)) return;
+    const command = normalizeRoomReactionBody(request.body);
+    try {
+      const result = await executeRoomReactionCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomReactionCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          roomId: command.roomId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+
+      const roomService = new RoomServiceClient(
+        liveKitUrl.value(),
+        liveKitApiKey.value(),
+        liveKitApiSecret.value(),
+      );
+      await roomService.sendData(
+        result.result.roomId,
+        encodeRoomReactionEnvelope(result.result.envelope),
+        DataPacket_Kind.RELIABLE,
+        { topic: result.result.topic },
+      );
+      console.info('[functions.roomReactionCommand] request:success', {
+        assetId: result.result.envelope.assetId,
+        eventId: result.result.envelope.eventId,
+        replayed: result.replayed === true,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomReactionCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken.uid,
+      });
+      response.status(503).json({
+        code: 'ROOM_REACTION_DELIVERY_FAILED',
+        error: 'The reaction could not be delivered.',
+      });
+    }
+  },
+);
+
 exports.roomGameCommand = onRequest(
   {
     cors: true,
@@ -2611,6 +3579,7 @@ exports.roomGameCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomGameCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2620,6 +3589,10 @@ exports.roomGameCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomGameCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2684,6 +3657,123 @@ exports.roomGameCommand = onRequest(
   },
 );
 
+exports.roomPkCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomPkCommand'))) return;
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
+    } catch (error) {
+      console.error('[functions.roomPkCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const launchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, launchAccess)) return;
+    const command = normalizeRoomPkBody(request.body);
+    try {
+      const result = await executeRoomPkCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomPkCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          pkId: command.pkId,
+          roomId: command.roomId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+      console.info('[functions.roomPkCommand] request:success', {
+        action: result.result.action,
+        pkId: result.result.session?.pkId || result.result.pkId || command.pkId,
+        replayed: result.replayed,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomPkCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken?.uid,
+      });
+      response.status(500).json({
+        code: 'ROOM_PK_FAILED',
+        error: 'Failed to execute room PK command.',
+      });
+    }
+  },
+);
+
+exports.finalizeExpiredRoomPkSessions = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 1 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const db = admin.firestore();
+    const { mapGrowthFeatures } = require('./growthRolloutCore');
+    const flags = mapGrowthFeatures(
+      (await db.doc('appConfig/growthFeatures').get()).data() || {},
+    );
+    if (flags.roomPk !== true) {
+      const forced = await forceFinalizeRoomPkOnFlagOff({
+        db,
+        fieldValue: admin.firestore.FieldValue,
+        limit: 20,
+      });
+      console.info('[functions.finalizeExpiredRoomPkSessions] flag-off finalize', forced);
+      return;
+    }
+    const result = await finalizeExpiredRoomPkSessions({
+      db,
+      fieldValue: admin.firestore.FieldValue,
+      limit: 20,
+    });
+    console.info('[functions.finalizeExpiredRoomPkSessions] complete', result);
+  },
+);
+
 exports.roomMusicCommand = onRequest(
   {
     cors: true,
@@ -2696,6 +3786,7 @@ exports.roomMusicCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomMusicCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2705,6 +3796,10 @@ exports.roomMusicCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomMusicCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2790,6 +3885,95 @@ exports.roomMusicCommand = onRequest(
   },
 );
 
+exports.roomWatchCommand = onRequest(
+  {
+    cors: true,
+    invoker: 'public',
+    region: 'us-central1',
+  },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).json({ error: 'Use POST.' });
+      return;
+    }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomWatchCommand'))) return;
+    const idToken = extractBearerToken(request.headers);
+    if (!idToken) {
+      response.status(401).json({ error: 'Authentication is required.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
+    } catch (error) {
+      console.error('[functions.roomWatchCommand] authentication:error', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      response.status(401).json({ error: 'Authentication is invalid.' });
+      return;
+    }
+
+    const roomWatchLaunchAccess = await resolveVoiceRoomHttpLaunchAccess(
+      admin.firestore(), decodedToken, request);
+    if (!sendVoiceRoomLaunchDenial(response, roomWatchLaunchAccess)) return;
+    const command = normalizeRoomWatchBody(request.body);
+    try {
+      const result = await executeRoomWatchCommand({
+        body: request.body,
+        clock: {
+          nowMillis: () => Date.now(),
+          timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+        },
+        db: admin.firestore(),
+        decodedToken,
+        fieldValue: admin.firestore.FieldValue,
+      });
+      if (!result.ok) {
+        console.info('[functions.roomWatchCommand] request:denied', {
+          action: command.action,
+          code: result.code,
+          itemId: command.itemId,
+          leaseId: command.leaseId,
+          roomId: command.roomId,
+          uid: decodedToken.uid,
+        });
+        response.status(result.status).json({
+          code: result.code,
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
+        return;
+      }
+
+      console.info('[functions.roomWatchCommand] request:success', {
+        action: result.result.action,
+        leaseId: result.result.leaseId || command.leaseId,
+        replayed: result.replayed,
+        requestId: result.result.requestId,
+        roomId: result.result.roomId,
+        uid: decodedToken.uid,
+      });
+      response.json(result);
+    } catch (error) {
+      console.error('[functions.roomWatchCommand] request:error', {
+        action: command.action,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        roomId: command.roomId,
+        uid: decodedToken?.uid,
+      });
+      response.status(500).json({
+        code: 'ROOM_WATCH_FAILED',
+        error: 'Failed to execute room watch command.',
+      });
+    }
+  },
+);
+
 exports.roomRecordingCommand = onRequest(
   {
     cors: true,
@@ -2801,6 +3985,7 @@ exports.roomRecordingCommand = onRequest(
       response.status(405).json({ error: 'Use POST.' });
       return;
     }
+    if (!(await verifyVoiceRequestAppCheck(request, response, 'roomRecordingCommand'))) return;
     const idToken = extractBearerToken(request.headers);
     if (!idToken) {
       response.status(401).json({ error: 'Authentication is required.' });
@@ -2810,6 +3995,10 @@ exports.roomRecordingCommand = onRequest(
     let decodedToken;
     try {
       decodedToken = await admin.auth().verifyIdToken(idToken, true);
+      if (decodedToken.accountDeletionPending === true) {
+        response.status(403).json({ error: 'Account deletion is pending.' });
+        return;
+      }
     } catch (error) {
       console.error('[functions.roomRecordingCommand] authentication:error', {
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -2876,6 +4065,24 @@ exports.cleanupCosmeticSubmissions = onSchedule(
     console.info('[functions.cleanupCosmeticSubmissions] complete', {
       purged: purged.length,
     });
+  },
+);
+
+/** Dry-run only: never apply. Owner apply path is scripts/reconcileCosmeticAssetRegistry.js. */
+exports.reconcileCosmeticAssetRegistry = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 24 hours',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await reconcileCosmeticAssetRegistryBatch({
+      apply: false,
+      db: admin.firestore(),
+      fieldValue: admin.firestore.FieldValue,
+      limit: 100,
+    });
+    console.info('[functions.reconcileCosmeticAssetRegistry] dry-run complete', result);
   },
 );
 
@@ -2952,6 +4159,33 @@ exports.cleanupDirectChatUploads = onSchedule(
   },
 );
 
+// The copy pass runs first on purpose: it is what releases held media for deletion, so ordering it
+// ahead of the message purge means reported bytes are isolated before the originals are eligible.
+exports.cleanupDirectChatRetention = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const bucket = admin.storage().bucket();
+    const clock = {
+      nowMillis: () => Date.now(),
+      timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+    };
+    const db = admin.firestore();
+    const evidenceMedia = await copyDirectChatEvidenceMedia({ bucket, clock, db });
+    const messages = await cleanupDirectChatMessages({ bucket, clock, db });
+    const evidenceCases = await cleanupDirectChatEvidence({
+      bucket,
+      clock,
+      db,
+      fieldValue: { delete: () => admin.firestore.FieldValue.delete() },
+    });
+    console.info('[functions.cleanupDirectChatRetention] complete', { evidenceCases, evidenceMedia, messages });
+  },
+);
+
 exports.cleanupRoomEntryEffects = onSchedule(
   {
     region: 'us-central1',
@@ -2967,6 +4201,24 @@ exports.cleanupRoomEntryEffects = onSchedule(
       db: admin.firestore(),
     });
     console.info('[functions.cleanupRoomEntryEffects] complete', result);
+  },
+);
+
+exports.cleanupRoomReactions = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Baghdad',
+  },
+  async () => {
+    const result = await cleanupExpiredRoomReactionRecords({
+      clock: {
+        nowMillis: () => Date.now(),
+        timestampFromMillis: (value) => admin.firestore.Timestamp.fromMillis(value),
+      },
+      db: admin.firestore(),
+    });
+    console.info('[functions.cleanupRoomReactions] complete', result);
   },
 );
 
@@ -2995,6 +4247,37 @@ exports.cleanupRoomMusic = onSchedule(
     const expired = await expireRoomMusicLeases({ db });
     const cleaned = await cleanupExpiredRoomMusicRecords({ db });
     console.info('[functions.cleanupRoomMusic] complete', { cleaned, expired });
+  },
+);
+
+exports.cleanupRoomWatch = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 1 minutes',
+    timeoutSeconds: 120,
+  },
+  async () => {
+    const db = admin.firestore();
+    const expired = await expireRoomWatchLeases({ db });
+    const cleaned = await cleanupExpiredRoomWatchRecords({ db });
+    console.info('[functions.cleanupRoomWatch] complete', { cleaned, expired });
+  },
+);
+
+exports.cleanupSoftMatch = onSchedule(
+  {
+    region: 'us-central1',
+    schedule: 'every 5 minutes',
+    timeoutSeconds: 120,
+  },
+  async () => {
+    const db = admin.firestore();
+    const expired = await expireSoftMatchQueueAndSessions({
+      db,
+      fieldValue: admin.firestore.FieldValue,
+    });
+    const cleaned = await cleanupExpiredSoftMatchRecords({ db });
+    console.info('[functions.cleanupSoftMatch] complete', { cleaned, expired });
   },
 );
 
@@ -3346,6 +4629,119 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'push-audience-estimate') {
+      const estimate = normalizeAdminPushEstimateInput(request.body);
+      if (!estimate.ok) { response.status(estimate.status).json({ error: estimate.error }); return; }
+      try {
+        const result = await estimateAdminPushAudience({
+          audience: estimate.value.audience,
+          auth: admin.auth(),
+          db: admin.firestore(),
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        console.error('[functions.adminDashboard] push-audience-estimate:error', error);
+        response.status(500).json({ error: 'Failed to estimate push audience.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'push-campaigns-list') {
+      try {
+        const campaigns = await listAdminPushCampaigns({ db: admin.firestore() });
+        response.json({ ok: true, action: dashboardRequest.value.action, campaigns });
+      } catch (error) {
+        console.error('[functions.adminDashboard] push-campaigns-list:error', error);
+        response.status(500).json({ error: 'Failed to load push campaigns.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'push-notification-send') {
+      const sendInput = normalizeAdminPushSendInput(request.body);
+      if (!sendInput.ok) { response.status(sendInput.status).json({ error: sendInput.error }); return; }
+      const freshness = assertFreshAdminAuth(decodedToken);
+      if (!freshness.ok) {
+        response.status(freshness.status).json({ error: freshness.error, code: freshness.code });
+        return;
+      }
+      try {
+        const result = await createAdminPushCampaign({
+          auth: admin.auth(),
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: sendInput.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error?.status || 500;
+        console.error('[functions.adminDashboard] push-notification-send:error', error);
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to send push notification.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'direct-chat-retention-get') {
+      try {
+        const retention = await resolveDirectChatRetentionPolicy(admin.firestore());
+        response.json({ ok: true, action: dashboardRequest.value.action, retention });
+      } catch (error) {
+        console.error('Failed to resolve direct chat retention policy:', error);
+        response.status(500).json({ error: 'Failed to resolve direct chat retention policy.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'direct-chat-retention-set') {
+      const retentionUpdate = normalizeAdminDirectChatRetentionSet(request.body);
+      if (!retentionUpdate.ok) {
+        response.status(retentionUpdate.status).json({ error: retentionUpdate.error });
+        return;
+      }
+      try {
+        const result = await executeDirectChatRetentionPolicySet(
+          admin.firestore(),
+          decodedToken,
+          retentionUpdate.value,
+          admin.firestore.FieldValue,
+        );
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error?.status || 500;
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to update direct chat retention policy.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'direct-chat-ops-status') {
+      try {
+        const status = await resolveDirectChatOpsStatus(admin.firestore());
+        response.json({ ok: true, action: dashboardRequest.value.action, status });
+      } catch (error) {
+        console.error('Failed to resolve direct chat ops status:', error);
+        response.status(500).json({ error: 'Failed to resolve direct chat ops status.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'cosmetics-renderer-disable') {
+      const flagUpdate = normalizeAdminCosmeticsRendererDisable(request.body);
+      if (!flagUpdate.ok) { response.status(flagUpdate.status).json({ error: flagUpdate.error }); return; }
+      try {
+        const result = await executeAdminCosmeticsRendererDisable(admin.firestore(), decodedToken, flagUpdate.value);
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error?.status || 500;
+        response.status(status).json({ error: status >= 500 ? 'Failed to disable cosmetics renderer.' : error.message });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'room-gift-policy-update') {
       const policyUpdate = normalizeRoomGiftPolicyUpdate(request.body);
       if (!policyUpdate.ok) {
@@ -3400,11 +4796,55 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'account-deletion-jobs') {
+      try {
+        const jobs = await dashboardDb.collection('accountLifecycles').limit(100).get();
+        response.json({
+          jobs: jobs.docs.map((document) => {
+            const data = document.data();
+            return {
+              hold: data.hold === true,
+              lastError: typeof data.lastError === 'string' ? data.lastError : '',
+              purgeAfter: readAdminTimestampIso(data.purgeAfter),
+              requestedAt: readAdminTimestampIso(data.requestedAt),
+              retryCount: Number(data.retryCount || 0),
+              state: typeof data.state === 'string' ? data.state : 'unknown',
+              uid: document.id,
+              updatedAt: readAdminTimestampIso(data.updatedAt),
+            };
+          }).sort((left, right) => left.purgeAfter.localeCompare(right.purgeAfter)),
+          ok: true,
+        });
+      } catch (error) {
+        console.error('Failed to list account deletion jobs:', error);
+        response.status(500).json({ error: 'Failed to list account deletion jobs.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'account-deletion-retry') {
+      const targetUid = typeof request.body?.targetUid === 'string' ? request.body.targetUid.trim() : '';
+      if (!targetUid || !/^[A-Za-z0-9_-]{16,80}$/.test(String(request.body?.requestId || ''))) {
+        response.status(400).json({ error: 'A targetUid and requestId are required.' });
+        return;
+      }
+      const ref = dashboardDb.doc(`accountLifecycles/${targetUid}`);
+      const job = await ref.get();
+      if (!job.exists || job.data()?.state !== 'failed' || job.data()?.hold === true) {
+        response.status(409).json({ error: 'Only failed jobs without a legal hold can be retried.' });
+        return;
+      }
+      await ref.set({ lastError: admin.firestore.FieldValue.delete(), purgeAfter: admin.firestore.Timestamp.now(), state: 'deletion-pending', updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      await dashboardDb.doc(`adminAuditEvents/deletion_${request.body.requestId}`).create({ action: 'account-deletion-retry', actorEmail: decodedToken.email || '', actorUid: decodedToken.uid, createdAt: admin.firestore.FieldValue.serverTimestamp(), kind: 'account-lifecycle', targetUid });
+      response.json({ ok: true });
+      return;
+    }
+
     if (dashboardRequest.value.action === 'user-detail') {
       const lookup = normalizeAdminUserLookup(request.body);
       if (!lookup.ok) { response.status(lookup.status).json({ error: lookup.error }); return; }
       try {
-        const detail = await resolveAdminUserDetail(dashboardDb, admin.auth(), lookup.value.targetUid);
+        const detail = await resolveAdminUserDetail(dashboardDb, admin.auth(), lookup.value.targetUid, admin.storage().bucket());
         const scopeCheck = assertUserInOperatorScope(operatorScope, detail.profile);
         if (!scopeCheck.ok) {
           response.status(scopeCheck.status).json({ error: scopeCheck.error, code: scopeCheck.code });
@@ -3438,7 +4878,7 @@ exports.adminDashboard = onRequest(
       const userAction = normalizeAdminUserAction(request.body);
       if (!userAction.ok) { response.status(userAction.status).json({ error: userAction.error }); return; }
       try {
-        const eventId = await executeAdminUserAction(dashboardDb, admin.auth(), decodedToken, userAction.value, operatorScope);
+        const eventId = await executeAdminUserAction(dashboardDb, admin.auth(), admin.storage().bucket(), decodedToken, userAction.value, operatorScope);
         response.json({ ok: true, action: dashboardRequest.value.action, eventId });
       } catch (error) {
         const status = error && Number.isInteger(error.status) ? error.status : 500;
@@ -3705,6 +5145,75 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'cosmetic-custom-submissions') {
+      const query = normalizeAdminCustomSubmissionQuery(request.body);
+      if (!query.ok) {
+        response.status(query.status).json({ error: query.error });
+        return;
+      }
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          ...(await listAdminCosmeticCustomSubmissions({
+            db: admin.firestore(),
+            input: query.value,
+          })),
+        });
+      } catch (error) {
+        console.error('Failed to list custom cosmetic submissions:', error);
+        response.status(500).json({ error: 'Failed to list custom cosmetic submissions.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'cosmetic-custom-submission-preview') {
+      const preview = normalizeAdminCustomSubmissionPreview(request.body);
+      if (!preview.ok) {
+        response.status(preview.status).json({ error: preview.error });
+        return;
+      }
+      try {
+        const result = await previewAdminCosmeticCustomSubmission({
+          bucket: admin.storage().bucket(),
+          db: admin.firestore(),
+          decodedToken,
+          fieldValue: admin.firestore.FieldValue,
+          input: preview.value,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...result });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+        if (status >= 500) console.error('Failed to preview custom cosmetic submission:', error);
+        response.status(status).json({
+          error: status >= 500 ? 'Failed to preview custom cosmetic submission.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'cosmetic-custom-eligibility') {
+      const query = normalizeAdminCustomEligibilityQuery(request.body);
+      if (!query.ok) {
+        response.status(query.status).json({ error: query.error });
+        return;
+      }
+      try {
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          ...(await getAdminCosmeticCustomEligibility({
+            db: admin.firestore(),
+            input: query.value,
+          })),
+        });
+      } catch (error) {
+        console.error('Failed to load custom cosmetic eligibility:', error);
+        response.status(500).json({ error: 'Failed to load custom cosmetic eligibility.' });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'room-theme') {
       const lookup = normalizeAdminRoomThemeLookup(request.body);
       if (!lookup.ok) {
@@ -3787,6 +5296,45 @@ exports.adminDashboard = onRequest(
         response.status(status).json({
           error: status >= 500 ? 'Failed to mutate Daily Login campaign.' : error.message,
         });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'ops-events') {
+      try {
+        const overview = await getAdminOpsEvents({ db: admin.firestore() });
+        response.json({
+          ok: true,
+          action: dashboardRequest.value.action,
+          ...(overview.result || {}),
+        });
+      } catch (error) {
+        console.error('Failed to load ops events:', error);
+        response.status(500).json({ error: 'Failed to load ops events.' });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'ops-events-mutate') {
+      try {
+        const mutation = await mutateAdminOpsEvent({
+          actorUid: decodedToken.uid,
+          db: admin.firestore(),
+          fieldValue: admin.firestore.FieldValue,
+          input: request.body || {},
+        });
+        if (mutation.errorCode) {
+          const status = mutation.errorCode === 'INVALID_REQUEST' ? 400
+            : mutation.errorCode === 'NOT_FOUND' ? 404
+              : mutation.errorCode === 'REQUEST_CONFLICT' ? 409
+                : 500;
+          response.status(status).json({ error: mutation.errorCode });
+          return;
+        }
+        response.json({ ok: true, action: dashboardRequest.value.action, ...mutation.result });
+      } catch (error) {
+        console.error('Failed to mutate ops events:', error);
+        response.status(500).json({ error: 'Failed to mutate ops events.' });
       }
       return;
     }
@@ -4114,6 +5662,71 @@ exports.adminDashboard = onRequest(
       return;
     }
 
+    if (dashboardRequest.value.action === 'direct-chat-evidence') {
+      const evidenceRequest = normalizeDirectChatEvidenceRequest(request.body);
+
+      if (!evidenceRequest.ok) {
+        response.status(evidenceRequest.status).json({ error: evidenceRequest.error });
+        return;
+      }
+
+      try {
+        const evidence = await resolveDirectChatEvidence({
+          assertReportScope: assertReportInOperatorScope,
+          bucket: admin.storage().bucket(),
+          db: dashboardDb,
+          decodedToken,
+          request: evidenceRequest.value,
+          scope: operatorScope,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, ...evidence });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+
+        if (status >= 500) {
+          console.error('Failed to resolve direct chat evidence:', error);
+        }
+
+        response.status(status).json({
+          ...(error?.code ? { code: error.code } : {}),
+          error: status >= 500 ? 'Failed to resolve direct chat evidence.' : error.message,
+        });
+      }
+      return;
+    }
+
+    if (dashboardRequest.value.action === 'direct-chat-action') {
+      const directChatAction = normalizeDirectChatModerationAction(request.body);
+
+      if (!directChatAction.ok) {
+        response.status(directChatAction.status).json({ error: directChatAction.error });
+        return;
+      }
+
+      try {
+        const eventId = await executeDirectChatModerationAction({
+          action: directChatAction.value,
+          assertReportScope: assertReportInOperatorScope,
+          db: dashboardDb,
+          decodedToken,
+          scope: operatorScope,
+        });
+        response.json({ ok: true, action: dashboardRequest.value.action, eventId });
+      } catch (error) {
+        const status = error && Number.isInteger(error.status) ? error.status : 500;
+
+        if (status >= 500) {
+          console.error('Failed to execute direct chat moderation action:', error);
+        }
+
+        response.status(status).json({
+          ...(error?.code ? { code: error.code } : {}),
+          error: status >= 500 ? 'Failed to execute direct chat moderation action.' : error.message,
+        });
+      }
+      return;
+    }
+
     if (dashboardRequest.value.action === 'room-action') {
       const roomAction = normalizeAdminRoomAction(request.body);
 
@@ -4415,6 +6028,22 @@ async function executeAdminCoupleDissolve(
         throw Object.assign(new Error('Couple records are inconsistent and require manual review.'), { status: 409 });
       }
 
+      const clearState = await prepareDissolutionClear({
+        couple: coupleSnapshot.data(),
+        coupleId,
+        db,
+        transaction,
+      });
+      applyDissolutionClear({
+        auditActorUid: decodedToken.uid,
+        auditReason: input.reason,
+        clearState,
+        coupleId,
+        db,
+        fieldValue: admin.firestore.FieldValue,
+        memberUids: [input.targetUid, partnerUid].sort(),
+        transaction,
+      });
       transaction.delete(coupleRef);
       transaction.delete(membershipRef);
       transaction.delete(partnerMembershipRef);
@@ -4502,6 +6131,8 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
       db.doc(`cosmeticAssetApprovals/${reference.assetId}__${reference.assetVersionId}`),
     ]);
     const physicalReceiptRef = input.presentation.animationEnabled
+      && input.presentation.approvalMode === 'strict'
+      && input.presentation.physicalApprovalReceiptId
       ? db.doc(`giftPresentationApprovalReceipts/${input.presentation.physicalApprovalReceiptId}`)
       : null;
     const [catalogSnapshot, auditSnapshot, ...presentationSnapshots] = await Promise.all([
@@ -4517,7 +6148,10 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
       }
       throw Object.assign(new Error('Admin request ID conflicts with an existing operation.'), { status: 409 });
     }
-    if (catalogSnapshot.exists && input.expectedUpdatedAt && readAdminTimestampIso(catalogSnapshot.data()?.updatedAt) !== input.expectedUpdatedAt) {
+    if (catalogSnapshot.exists && !isExpectedAdminGiftRevisionCurrent(
+      input.expectedUpdatedAt,
+      readAdminTimestampIso(catalogSnapshot.data()?.updatedAt),
+    )) {
       throw Object.assign(new Error('Gift changed after it was opened. Refresh before saving.'), { status: 409 });
     }
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
@@ -4533,48 +6167,61 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
         };
         offset += 3;
       }
-      const existingReceipt = presentationSnapshots[offset];
-      if (!existingReceipt?.exists && !input.physicalApproval) {
-        throw Object.assign(new Error('A new Android and iOS physical approval receipt is required.'), { status: 409 });
+      if (physicalReceiptRef) {
+        const existingReceipt = presentationSnapshots[offset];
+        if (!existingReceipt?.exists && !input.physicalApproval) {
+          throw Object.assign(new Error('A new Android and iOS physical approval receipt is required.'), { status: 409 });
+        }
+        const proposedReceipt = existingReceipt?.exists ? existingReceipt.data() : {
+          androidPassed: true,
+          androidDevice: input.physicalApproval.androidDevice,
+          audioAssetId: input.presentation.audioAsset?.assetId || '',
+          audioAssetVersionId: input.presentation.audioAsset?.assetVersionId || '',
+          audioChecksum: records.audio?.version?.sha256 || '',
+          createdAt: timestamp,
+          copyTemplateVersion: ROOM_EFFECT_COPY_TEMPLATE_VERSION,
+          controlsSafeZonePassed: input.physicalApproval.controlsSafeZonePassed,
+          durationMs: input.presentation.durationMs,
+          fallbackAssetId: input.presentation.fallbackAsset.assetId,
+          fallbackAssetVersionId: input.presentation.fallbackAsset.assetVersionId,
+          fallbackChecksum: records.fallback?.version?.sha256 || '',
+          giftId: input.giftId,
+          id: input.presentation.physicalApprovalReceiptId,
+          hapticPolicy: input.presentation.hapticPolicy,
+          iosPassed: true,
+          iosDevice: input.physicalApproval.iosDevice,
+          notes: input.physicalApproval.notes,
+          minimumClientVersion: input.presentation.minimumClientVersion,
+          performanceTier: input.presentation.performanceTier,
+          presentationSurface: resolveRoomEffectSurface('room-gift', input.presentation.tier),
+          reviewerEmail: decodedToken.email || '',
+          reviewerUid: decodedToken.uid,
+          status: 'passed',
+          soundPolicy: input.presentation.soundPolicy,
+          testedClientVersion: input.physicalApproval.testedClientVersion,
+          tier: input.presentation.tier,
+          visualAssetId: input.presentation.visualAsset.assetId,
+          visualAssetVersionId: input.presentation.visualAsset.assetVersionId,
+          visualChecksum: records.visual?.version?.sha256 || '',
+        };
+        records.physicalReceipt = proposedReceipt;
+        const inspected = inspectGiftPresentation({
+          presentation: input.presentation,
+          records,
+        });
+        if (!inspected.ok) {
+          throw Object.assign(new Error('Gift presentation approval failed: ' + inspected.code + '.'), { status: 409 });
+        }
+        if (!existingReceipt?.exists) transaction.create(physicalReceiptRef, proposedReceipt);
+      } else {
+        const inspected = inspectGiftPresentation({
+          presentation: input.presentation,
+          records,
+        });
+        if (!inspected.ok) {
+          throw Object.assign(new Error('Gift presentation approval failed: ' + inspected.code + '.'), { status: 409 });
+        }
       }
-      const proposedReceipt = existingReceipt?.exists ? existingReceipt.data() : {
-        androidPassed: true,
-        androidDevice: input.physicalApproval.androidDevice,
-        audioAssetId: input.presentation.audioAsset?.assetId || '',
-        audioAssetVersionId: input.presentation.audioAsset?.assetVersionId || '',
-        audioChecksum: records.audio?.version?.sha256 || '',
-        createdAt: timestamp,
-        durationMs: input.presentation.durationMs,
-        fallbackAssetId: input.presentation.fallbackAsset.assetId,
-        fallbackAssetVersionId: input.presentation.fallbackAsset.assetVersionId,
-        fallbackChecksum: records.fallback?.version?.sha256 || '',
-        giftId: input.giftId,
-        id: input.presentation.physicalApprovalReceiptId,
-        hapticPolicy: input.presentation.hapticPolicy,
-        iosPassed: true,
-        iosDevice: input.physicalApproval.iosDevice,
-        notes: input.physicalApproval.notes,
-        minimumClientVersion: input.presentation.minimumClientVersion,
-        performanceTier: input.presentation.performanceTier,
-        reviewerEmail: decodedToken.email || '',
-        reviewerUid: decodedToken.uid,
-        status: 'passed',
-        soundPolicy: input.presentation.soundPolicy,
-        testedClientVersion: input.physicalApproval.testedClientVersion,
-        tier: input.presentation.tier,
-        visualAssetId: input.presentation.visualAsset.assetId,
-        visualAssetVersionId: input.presentation.visualAsset.assetVersionId,
-        visualChecksum: records.visual?.version?.sha256 || '',
-      };
-      records.physicalReceipt = proposedReceipt;
-      const inspected = inspectApprovedGiftPresentation({
-        presentation: input.presentation,
-        records,
-      });
-      if (!inspected.ok) {
-        throw Object.assign(new Error(`Gift presentation approval failed: ${inspected.code}.`), { status: 409 });
-      }
-      if (!existingReceipt?.exists) transaction.create(physicalReceiptRef, proposedReceipt);
     }
     transaction.set(catalogRef, {
       createdAt: catalogSnapshot.exists && isTimestampLike(catalogSnapshot.data().createdAt)
@@ -4589,6 +6236,7 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
       presentation: input.presentation,
       scoreValue: input.scoreValue,
       status: input.status,
+      theater: input.theater || { luckyTableId: 'default', tags: [] },
       updatedAt: timestamp,
     });
     transaction.create(auditRef, {
@@ -4604,12 +6252,26 @@ async function executeAdminGiftCatalogUpsert(db, decodedToken, input) {
       reason: input.reason,
       scoreValue: input.scoreValue,
       status: input.status,
+      theater: input.theater || { luckyTableId: 'default', tags: [] },
     });
     return auditRef.id;
   });
 }
 
 async function resolveAdminOverview(db, scope = { ok: true, regionCodes: null }) {
+  const [growthRolloutSnapshot, growthTelemetry] = await Promise.all([
+    db.doc('appRuntime/growthRollout').get(),
+    readGrowthTelemetry({ db }),
+  ]);
+  const growthRollout = growthRolloutSnapshot.exists ? growthRolloutSnapshot.data() : {};
+  const growthHealth = buildGrowthHealthSummary({
+    rollout: {
+      stageId: Number.isInteger(growthRollout.stageId) ? growthRollout.stageId : 0,
+      stageName: typeof growthRollout.stageName === 'string' ? growthRollout.stageName : 'dark',
+    },
+    telemetry: growthTelemetry,
+  });
+
   if (scope.regionCodes) {
     const [users, rooms, moderationEvents, reports, auditEvents] = await Promise.all([
       db.collection('publicProfiles').where('countryCode', 'in', scope.regionCodes).limit(1000).get(),
@@ -4623,6 +6285,7 @@ async function resolveAdminOverview(db, scope = { ok: true, regionCodes: null })
       activeRooms: roomRows.filter((room) => room.status === 'active').length,
       adminAuditEvents: auditEvents.size,
       gameRooms: roomRows.filter((room) => room.type === 'game').length,
+      growthHealth,
       moderationEvents: moderationEvents.size,
       privateRooms: roomRows.filter((room) => room.visibility === 'private').length,
       reports: reports.size,
@@ -4651,6 +6314,7 @@ async function resolveAdminOverview(db, scope = { ok: true, regionCodes: null })
     activeRooms: activeRoomsSnapshot,
     adminAuditEvents: auditEventsSnapshot,
     gameRooms: gameRoomsSnapshot,
+    growthHealth,
     moderationEvents: moderationEventsSnapshot,
     privateRooms: privateRoomsSnapshot,
     reports: reportsSnapshot,
@@ -4845,12 +6509,12 @@ async function resolveAdminUserSummary(db, scope = { ok: true, regionCodes: null
     getCollectionCount(db.collection('publicProfiles').where('moderationStatus', '==', 'active')),
     getCollectionCount(db.collection('publicProfiles').where('moderationStatus', '==', 'suspended')),
     getCollectionCount(db.collection('publicProfiles').where('moderationStatus', '==', 'removed')),
-    getCollectionCount(db.collection('publicProfiles').where('avatarModerationStatus', '==', 'pending')),
+    getCollectionCount(db.collection('avatarSubmissions').where('status', '==', 'pending')),
   ]);
   return { active, pendingAvatars, removed, suspended, total };
 }
 
-async function resolveAdminUserDetail(db, auth, targetUid) {
+async function resolveAdminUserDetail(db, auth, targetUid, bucket) {
   const optionalErrors = {};
   const safeDetailQuery = async (section, promise) => {
     try { return await promise; }
@@ -4905,6 +6569,25 @@ async function resolveAdminUserDetail(db, auth, targetUid) {
   }
   const wallet = walletSnapshot.exists ? walletSnapshot.data() : {};
   const restrictions = restrictionsSnapshot.exists ? restrictionsSnapshot.data() : {};
+  const avatarSubmissions = await safeDetailQuery('avatar-review', db.collection('avatarSubmissions').where('uid', '==', targetUid).limit(25).get());
+  const pendingAvatar = avatarSubmissions.docs
+    .filter((document) => document.data()?.status === 'pending')
+    .sort((left, right) => (right.data()?.updatedAt?.toMillis?.() || 0) - (left.data()?.updatedAt?.toMillis?.() || 0))[0];
+  let avatarSubmission = null;
+  if (pendingAvatar) {
+    const data = pendingAvatar.data();
+    const [previewUrl] = await bucket.file(data.sourcePath).getSignedUrl({ action: 'read', expires: Date.now() + 10 * 60 * 1000 }).catch(() => ['']);
+    avatarSubmission = {
+      contentType: data.contentType || '',
+      createdAt: readAdminTimestampIso(data.createdAt),
+      moderationReason: data.moderationReason || '',
+      previewUrl,
+      scanner: data.scanner || 'google-vision-safe-search',
+      sizeBytes: Number(data.sizeBytes || 0),
+      status: data.status || '',
+      uploadId: pendingAvatar.id,
+    };
+  }
   return {
     account: {
       createdAt: authUser.metadata?.creationTime ? new Date(authUser.metadata.creationTime).toISOString() : '',
@@ -4914,6 +6597,7 @@ async function resolveAdminUserDetail(db, auth, targetUid) {
       tokensValidAfterAt: authUser.tokensValidAfterTime ? new Date(authUser.tokensValidAfterTime).toISOString() : '',
     },
     activity: auditSnapshot.docs.map((doc) => mapAdminAuditEventDocument(doc.id, doc.data())).filter(Boolean),
+    avatarSubmission,
     couple: {
       coupleId: typeof couple?.coupleId === 'string' ? couple.coupleId : '',
       partner,
@@ -4963,7 +6647,7 @@ async function resolveAdminUserOperationalContext(db, targetUid) {
     try { return await promise; }
     catch (error) { console.error('Failed to resolve optional admin user context section:', { message: error?.message || 'unknown', section, targetUid }); errors[section] = 'تعذّر تحميل هذا السياق التشغيلي. يمكنك متابعة بقية الملف والمحاولة مجددًا.'; return fallback; }
   };
-  const [reportedBySnapshot, reportedAgainstSnapshot, hostedRoomsSnapshot, membershipsSnapshot, roomModerationSnapshot, friendshipsSnapshot, incomingFriendSnapshot, outgoingFriendSnapshot, incomingCoupleSnapshot, outgoingCoupleSnapshot, outgoingBlocksSnapshot, blockScanSnapshot, giftsSentSnapshot, giftsReceivedSnapshot, ownershipsSnapshot, storeGiftsSentSnapshot, storeGiftsReceivedSnapshot, transfersSentSnapshot, rechargesReceivedSnapshot] = await Promise.all([
+  const [reportedBySnapshot, reportedAgainstSnapshot, hostedRoomsSnapshot, membershipsSnapshot, roomModerationSnapshot, friendshipsSnapshot, incomingFriendSnapshot, outgoingFriendSnapshot, followingSnapshot, followersSnapshot, incomingCoupleSnapshot, outgoingCoupleSnapshot, outgoingBlocksSnapshot, blockScanSnapshot, giftsSentSnapshot, giftsReceivedSnapshot, ownershipsSnapshot, storeGiftsSentSnapshot, storeGiftsReceivedSnapshot, transfersSentSnapshot, rechargesReceivedSnapshot, directChat] = await Promise.all([
     safeQuery('reports', db.collection('reports').where('reporterUid', '==', targetUid).orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('reports', db.collection('reports').where('targetUid', '==', targetUid).orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('rooms', db.collection('rooms').where('hostId', '==', targetUid).orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
@@ -4972,6 +6656,8 @@ async function resolveAdminUserOperationalContext(db, targetUid) {
     safeQuery('social', db.collection('friendships').where('memberUids', 'array-contains', targetUid).orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('social', db.collection('friendRequests').where('recipientUid', '==', targetUid).where('status', '==', 'pending').orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('social', db.collection('friendRequests').where('senderUid', '==', targetUid).where('status', '==', 'pending').orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
+    safeQuery('social', db.collection(`following/${targetUid}/items`).orderBy('createdAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
+    safeQuery('social', db.collection(`followers/${targetUid}/items`).orderBy('createdAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('social', db.collection('coupleRequests').where('recipientUid', '==', targetUid).where('status', '==', 'pending').orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('social', db.collection('coupleRequests').where('senderUid', '==', targetUid).where('status', '==', 'pending').orderBy('updatedAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('social', db.collection(`blocks/${targetUid}/blocked`).limit(ADMIN_USER_CONTEXT_LIMIT).get()),
@@ -4983,6 +6669,11 @@ async function resolveAdminUserOperationalContext(db, targetUid) {
     safeQuery('store', db.collection('storeGiftEvents').where('recipientUid', '==', targetUid).orderBy('createdAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('transfers', db.collection(`representativeTransferReceipts/${targetUid}/items`).orderBy('createdAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
     safeQuery('transfers', db.collection(`walletRechargeReceipts/${targetUid}/items`).orderBy('createdAt', 'desc').limit(ADMIN_USER_CONTEXT_LIMIT).get()),
+    resolveAdminUserDirectChatContext(db, targetUid).catch((error) => {
+      console.error('Failed to resolve optional admin user direct-chat context:', { message: error?.message || 'unknown', targetUid });
+      errors.directChat = 'تعذّر تحميل قيود الرسائل المباشرة. يمكنك متابعة بقية الملف والمحاولة مجددًا.';
+      return { recentAudits: [], restriction: null };
+    }),
   ]);
 
   const reportMap = new Map([...reportedBySnapshot.docs, ...reportedAgainstSnapshot.docs].map((doc) => [doc.id, mapAdminReportDocument(doc.id, doc.data())]));
@@ -5009,6 +6700,8 @@ async function resolveAdminUserOperationalContext(db, targetUid) {
     ...friendshipsSnapshot.docs.map((doc) => mapUserRelationship(doc.id, doc.data(), targetUid, 'friend')),
     ...incomingFriendSnapshot.docs.map((doc) => mapUserRelationship(doc.id, doc.data(), targetUid, 'friend-request-incoming')),
     ...outgoingFriendSnapshot.docs.map((doc) => mapUserRelationship(doc.id, doc.data(), targetUid, 'friend-request-outgoing')),
+    ...followingSnapshot.docs.map((doc) => mapUserRelationship(doc.id, doc.data(), targetUid, 'following')),
+    ...followersSnapshot.docs.map((doc) => mapUserRelationship(doc.id, doc.data(), targetUid, 'follower')),
     ...incomingCoupleSnapshot.docs.map((doc) => mapUserRelationship(doc.id, doc.data(), targetUid, 'couple-request-incoming')),
     ...outgoingCoupleSnapshot.docs.map((doc) => mapUserRelationship(doc.id, doc.data(), targetUid, 'couple-request-outgoing')),
   ]);
@@ -5045,6 +6738,7 @@ async function resolveAdminUserOperationalContext(db, targetUid) {
   ]).map(decoratePeer);
 
   return {
+    directChat,
     errors,
     limits: { blocksScanned: ADMIN_USER_BLOCK_SCAN_LIMIT, perSection: ADMIN_USER_CONTEXT_LIMIT },
     reports: { items: reports, sampled: reportedBySnapshot.size >= ADMIN_USER_CONTEXT_LIMIT || reportedAgainstSnapshot.size >= ADMIN_USER_CONTEXT_LIMIT, summary: summarizeUserReports(reports) },
@@ -5178,7 +6872,7 @@ async function assertUserTargetAccess(db, scope, targetUid) {
   }
 }
 
-async function executeAdminUserAction(db, auth, decodedToken, action, scope = { ok: true, regionCodes: null }) {
+async function executeAdminUserAction(db, auth, bucket, decodedToken, action, scope = { ok: true, regionCodes: null }) {
   if (['ban', 'force-sign-out', 'suspend', 'unban', 'unsuspend'].includes(action.action)) {
     const freshness = assertFreshAdminAuth(decodedToken);
     if (!freshness.ok) {
@@ -5188,6 +6882,23 @@ async function executeAdminUserAction(db, auth, decodedToken, action, scope = { 
       });
     }
   }
+  let avatarResolution;
+  if (action.action === 'avatar-approve' || action.action === 'avatar-reject') {
+    const submissions = await db.collection('avatarSubmissions').where('uid', '==', action.targetUid).limit(25).get();
+    const pending = submissions.docs
+      .filter((document) => document.data()?.status === 'pending')
+      .sort((left, right) => (right.data()?.updatedAt?.toMillis?.() || 0) - (left.data()?.updatedAt?.toMillis?.() || 0))[0];
+    if (!pending) throw createHttpError(409, 'No pending avatar submission is available for review.');
+    avatarResolution = { ref: pending.ref, sourcePath: pending.data().sourcePath, uploadId: pending.id };
+    if (action.action === 'avatar-approve') {
+      const [sourceBytes] = await bucket.file(avatarResolution.sourcePath).download();
+      const canonical = await require('sharp')(sourceBytes).rotate().resize(512, 512, { fit: 'cover', position: 'attention' }).webp({ quality: 86 }).toBuffer();
+      avatarResolution.publishedPath = `avatars-public/${action.targetUid}/${avatarResolution.uploadId}.webp`;
+      const downloadToken = require('node:crypto').randomUUID();
+      await bucket.file(avatarResolution.publishedPath).save(canonical, { contentType: 'image/webp', metadata: { cacheControl: 'public,max-age=31536000,immutable', metadata: { firebaseStorageDownloadTokens: downloadToken, ownerUid: action.targetUid, uploadId: avatarResolution.uploadId } }, resumable: false });
+      avatarResolution.avatarUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(avatarResolution.publishedPath)}?alt=media&token=${downloadToken}`;
+    }
+  }
   const eventId = await db.runTransaction(async (transaction) => {
     const auditRef = db.doc(`adminAuditEvents/user_${action.requestId}`);
     const userRef = db.doc(`users/${action.targetUid}`);
@@ -5195,17 +6906,21 @@ async function executeAdminUserAction(db, auth, decodedToken, action, scope = { 
     const restrictionRef = db.doc(`adminUserRestrictions/${action.targetUid}`);
     const noteRef = db.doc(`adminUserNotes/${action.requestId}`);
     const targetOperatorRef = db.doc(`adminProfiles/${action.targetUid}`);
-    const [auditSnapshot, userSnapshot, profileSnapshot, restrictionSnapshot, targetOperatorSnapshot] = await Promise.all([
+    const [auditSnapshot, userSnapshot, profileSnapshot, restrictionSnapshot, targetOperatorSnapshot, avatarSubmissionSnapshot] = await Promise.all([
       transaction.get(auditRef),
       transaction.get(userRef),
       transaction.get(profileRef),
       transaction.get(restrictionRef),
       transaction.get(targetOperatorRef),
+      avatarResolution ? transaction.get(avatarResolution.ref) : Promise.resolve(null),
     ]);
     if (auditSnapshot.exists) {
       const previous = auditSnapshot.data();
       if (previous.actorUid === decodedToken.uid && previous.targetUid === action.targetUid && previous.action === `user-${action.action}`) return auditRef.id;
       throw createHttpError(409, 'This request identifier was already used.');
+    }
+    if (avatarResolution && (!avatarSubmissionSnapshot?.exists || avatarSubmissionSnapshot.data()?.status !== 'pending')) {
+      throw createHttpError(409, 'This avatar submission was already resolved.');
     }
     if (!userSnapshot.exists) throw createHttpError(404, 'Target user was not found.');
     const profileRequiredActions = ['avatar-approve', 'avatar-reject', 'ban', 'mute', 'suspend', 'unban', 'unmute', 'unsuspend'];
@@ -5241,12 +6956,21 @@ async function executeAdminUserAction(db, auth, decodedToken, action, scope = { 
     } else if (action.action === 'unban') {
       if (profile.moderationStatus !== 'removed') throw createHttpError(409, 'Only banned users can be restored.');
       update.moderationStatus = 'active';
-    } else if (action.action === 'avatar-approve') {
+    } else if (action.action === 'avatar-approve' && avatarResolution) {
       update.avatarModerationStatus = 'clear';
-    } else if (action.action === 'avatar-reject') {
-      update.avatarModerationStatus = 'removed';
+      update.avatarUrl = avatarResolution.avatarUrl;
     }
     if (Object.keys(update).length > 1) transaction.update(profileRef, update);
+    if (avatarResolution) {
+      transaction.update(avatarResolution.ref, {
+        ...(action.action === 'avatar-approve' ? { avatarUrl: avatarResolution.avatarUrl, publishedPath: avatarResolution.publishedPath } : {}),
+        moderationReason: action.reason,
+        reviewedAt: timestamp,
+        reviewedBy: decodedToken.uid,
+        status: action.action === 'avatar-approve' ? 'approved' : 'rejected',
+        updatedAt: timestamp,
+      });
+    }
     if (action.action === 'mute') {
       transaction.update(profileRef, { updatedAt: timestamp });
       transaction.set(restrictionRef, {
@@ -5314,6 +7038,7 @@ async function executeAdminUserAction(db, auth, decodedToken, action, scope = { 
   } else if (['force-sign-out', 'suspend'].includes(action.action)) {
     await auth.revokeRefreshTokens(action.targetUid);
   }
+  if (avatarResolution?.sourcePath) await bucket.file(avatarResolution.sourcePath).delete({ ignoreNotFound: true }).catch(() => undefined);
   return eventId;
 }
 
@@ -6054,15 +7779,41 @@ async function recordAdminClientError(db, decodedToken, input) {
 }
 
 async function resolveAdminSettings(db, auth, decodedToken) {
-  const [user, preferencesSnapshot, featuresSnapshot, historySnapshot, roomGiftPolicy] = await Promise.all([
+  const [
+    user,
+    preferencesSnapshot,
+    featuresSnapshot,
+    cosmeticsSnapshot,
+    cosmeticsRolloutSnapshot,
+    historySnapshot,
+    roomGiftPolicy,
+  ] = await Promise.all([
     auth.getUser(decodedToken.uid),
     db.doc(`adminPreferences/${decodedToken.uid}`).get(),
     db.doc('appConfig/socialFeatures').get(),
+    db.doc('appConfig/cosmeticsFeatures').get(),
+    db.doc('appRuntime/cosmeticsRollout').get(),
     db.collection('adminAuditEvents').where('kind', '==', 'administrator-security').orderBy('createdAt', 'desc').limit(20).get(),
     resolveRoomGiftPolicy(db),
   ]);
   const saved = preferencesSnapshot.exists ? preferencesSnapshot.data() : {};
+  const rollout = cosmeticsRolloutSnapshot.exists ? cosmeticsRolloutSnapshot.data() : {};
   return {
+    cosmeticsRendererFlags: {
+      cosmetics_couple_effects: cosmeticsSnapshot.data()?.cosmetics_couple_effects === true,
+      cosmetics_couple_entrances: cosmeticsSnapshot.data()?.cosmetics_couple_entrances === true,
+      cosmetics_custom_submissions: cosmeticsSnapshot.data()?.cosmetics_custom_submissions === true,
+      cosmetics_custom_rendering: cosmeticsSnapshot.data()?.cosmetics_custom_rendering === true,
+    },
+    cosmeticsRollout: {
+      stageId: Number.isInteger(rollout?.stageId) ? rollout.stageId : 0,
+      stageName: typeof rollout?.stageName === 'string' && rollout.stageName.trim()
+        ? rollout.stageName.trim()
+        : 'dark',
+      updatedAt: readAdminTimestampIso(rollout?.updatedAt) || '',
+      updatedBy: typeof rollout?.updatedBy === 'string' ? rollout.updatedBy : '',
+      writesCosmeticsFeatures: false,
+    },
     featureFlags: mergeSocialFeatureFlags(featuresSnapshot.exists ? featuresSnapshot.data() : {}),
     featureFlagsUpdatedAt: featuresSnapshot.exists ? readAdminTimestampIso(featuresSnapshot.data()?.updatedAt) || 'missing' : 'missing',
     history: historySnapshot.docs.map((doc) => mapAdminAuditEventDocument(doc.id, doc.data())).filter(Boolean),
@@ -6086,6 +7837,39 @@ async function resolveAdminSettings(db, auth, decodedToken) {
       tokensValidAfterAt: user.tokensValidAfterTime || '',
     },
   };
+}
+
+async function executeAdminCosmeticsRendererDisable(db, decodedToken, input) {
+  const configRef = db.doc('appConfig/cosmeticsFeatures');
+  const auditRef = db.doc(`adminAuditEvents/cosmetics_flag_${input.requestId}`);
+  return db.runTransaction(async (transaction) => {
+    const auditSnapshot = await transaction.get(auditRef);
+    if (auditSnapshot.exists) {
+      const existing = auditSnapshot.data();
+      if (existing?.actorUid === decodedToken.uid && existing?.flag === input.flag) return { eventId: auditRef.id };
+      throw Object.assign(new Error('Admin request ID conflicts with an existing operation.'), { status: 409 });
+    }
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+    transaction.set(configRef, {
+      [input.flag]: false,
+      updatedAt: timestamp,
+      updatedBy: decodedToken.uid,
+    }, { merge: true });
+    transaction.create(auditRef, {
+      action: 'cosmetics-renderer-emergency-disable',
+      actorEmail: decodedToken.email || '',
+      actorUid: decodedToken.uid,
+      after: false,
+      createdAt: timestamp,
+      flag: input.flag,
+      kind: 'administrator-security',
+      note: input.reason,
+      source: 'admin-dashboard',
+      status: 'completed',
+      targetUid: input.flag,
+    });
+    return { eventId: auditRef.id };
+  });
 }
 
 async function executeAdminSettingsUpdate(db, decodedToken, input) {

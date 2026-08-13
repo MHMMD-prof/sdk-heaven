@@ -21,25 +21,23 @@ import {
 
 import { ScreenContainer } from '../components/ScreenContainer';
 import {
+  requestCoupleEffects,
   requestMyStoreItems,
+  requestPurchaseCoupleEffect,
   requestStoreCatalog,
   requestStoreGift,
   requestStorePurchase,
 } from '../social/requestSocialCommand';
 import type { CustomerStoreCatalogItem, CustomerStoreResult, MyStoreItem } from '../social/types';
 import type { StoreCategory, StoreCurrency } from '../store/contracts';
-import {
-  isMockStoreItemId,
-  mockMyStoreItems,
-  mockStoreCatalogItems,
-  mockStoreFeaturedItemId,
-} from '../store/mockStoreData';
 import { resolveStoreArtwork } from '../store/storeArtwork';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
 import { useVoiceRooms } from '../voice/useVoiceRooms';
 import { activeVoiceProviderConfig } from '../voice/activeVoiceProviderConfig';
 import { requestRoomThemeCommand } from '../voice/requestRoomThemeCommand';
+import { useCosmeticsFeatureFlags } from '../cosmetics/featureFlags';
+import type { CoupleEffectsResult } from '../cosmetics/coupleEffects';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Store'>;
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -56,6 +54,7 @@ const categories: Array<{
   { key: 'nameplates', icon: { ios: 'rectangle.and.pencil.and.ellipsis', android: 'label', web: 'label' }, label: 'لوحات الاسم', subtitle: 'اسم مقروء ومميز' },
   { key: 'cosmetic-badges', icon: { ios: 'seal.fill', android: 'verified', web: 'verified' }, label: 'الشارات التجميلية', subtitle: 'منفصلة عن شارات الثقة' },
   { key: 'seat-effects', icon: { ios: 'mic.circle.fill', android: 'mic', web: 'mic' }, label: 'تأثيرات المقعد', subtitle: 'تحت حالات الميكروفون' },
+  { key: 'couple-effects', icon: { ios: 'heart.circle.fill', android: 'favorite', web: 'favorite' }, label: 'تأثيرات الارتباط', subtitle: 'مظهر مشترك لشريكي الارتباط' },
   { key: 'chat-themes', icon: { ios: 'paintpalette.fill', android: 'palette', web: 'palette' }, label: 'سمات الغرف', subtitle: 'مظهر ومقاعد جديدة لغرفك' },
   { key: 'cars', icon: { ios: 'car.fill', android: 'directions_car', web: 'directions_car' }, label: 'السيارات', subtitle: 'مقتنيات تظهر بجانبك' },
   { key: 'game-items', icon: { ios: 'gamecontroller.fill', android: 'sports_esports', web: 'sports_esports' }, label: 'عناصر اللعبة', subtitle: 'غيّر مظهر وتجربة اللعب' },
@@ -66,20 +65,15 @@ function getStoreCategory(category: StoreCategory) {
   return categories.find((entry) => entry.key === category);
 }
 
-const mockWallet = {
-  balances: { coins: 0, diamonds: 0 },
-  lifetimeCredit: { coins: 0, diamonds: 0 },
-  lifetimeDebit: { coins: 0, diamonds: 0 },
-  uid: 'mock-current-user',
-};
-
 export function StoreScreen({ navigation }: Props) {
+  const cosmeticsFlags = useCosmeticsFeatureFlags();
   const { rooms } = useVoiceRooms();
   const { width } = useWindowDimensions();
   const compact = width < 390;
   const [selectedCategory, setSelectedCategory] = useState<StoreCategory>();
   const [store, setStore] = useState<CustomerStoreResult>();
   const [owned, setOwned] = useState<MyStoreItem[]>([]);
+  const [coupleEffects, setCoupleEffects] = useState<CoupleEffectsResult>();
   const [selected, setSelected] = useState<CustomerStoreCatalogItem>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
@@ -88,31 +82,30 @@ export function StoreScreen({ navigation }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    const [catalog, inventory] = await Promise.all([requestStoreCatalog(), requestMyStoreItems()]);
-    if (!catalog.ok) {
-      setStore({
-        featuredItemId: mockStoreFeaturedItemId,
-        items: mockStoreCatalogItems,
-        wallet: mockWallet,
-      });
-    } else {
-      const realItemIds = new Set(catalog.result.items.map((item) => item.itemId));
-      const mockItems = mockStoreCatalogItems.filter((item) => !realItemIds.has(item.itemId));
-      setStore({
-        ...catalog.result,
-        featuredItemId: catalog.result.featuredItemId || mockStoreFeaturedItemId,
-        items: [...catalog.result.items, ...mockItems],
-      });
+    try {
+      const [catalog, inventory, pairInventory] = await Promise.all([
+        requestStoreCatalog(),
+        requestMyStoreItems(),
+        cosmeticsFlags.coupleEffects ? requestCoupleEffects() : Promise.resolve(undefined),
+      ]);
+      if (!catalog.ok) {
+        setStore(undefined);
+        setOwned([]);
+        setError(catalog.error.messageAr);
+        return;
+      }
+      setStore(catalog.result);
+      if (inventory.ok) setOwned(inventory.result.items);
+      else setError(inventory.error.messageAr);
+      setCoupleEffects(pairInventory?.ok ? pairInventory.result : undefined);
+    } catch {
+      setStore(undefined);
+      setOwned([]);
+      setError('تعذر الاتصال بالمتجر. تحقق من الاتصال وحاول مرة أخرى.');
+    } finally {
+      setLoading(false);
     }
-    if (!inventory.ok) {
-      setOwned(mockMyStoreItems);
-    } else {
-      const realOwnershipItemIds = new Set(inventory.result.items.map((row) => row.ownership.itemId));
-      const mockOwnerships = mockMyStoreItems.filter((row) => !realOwnershipItemIds.has(row.ownership.itemId));
-      setOwned([...inventory.result.items, ...mockOwnerships]);
-    }
-    setLoading(false);
-  }, []);
+  }, [cosmeticsFlags.coupleEffects]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -125,7 +118,10 @@ export function StoreScreen({ navigation }: Props) {
     return () => subscription.remove();
   }, [selectedCategory]);
 
-  const ownedIds = useMemo(() => new Set(owned.map((row) => row.ownership.itemId)), [owned]);
+  const ownedIds = useMemo(() => new Set([
+    ...owned.map((row) => row.ownership.itemId),
+    ...(coupleEffects?.items.map((row) => row.itemId) || []),
+  ]), [coupleEffects?.items, owned]);
   const catalogItems = store?.items || [];
   const featuredItem = useMemo(() => {
     if (!catalogItems.length) return undefined;
@@ -134,6 +130,10 @@ export function StoreScreen({ navigation }: Props) {
   const visibleItems = useMemo(
     () => selectedCategory ? catalogItems.filter((item) => item.category === selectedCategory) : [],
     [catalogItems, selectedCategory],
+  );
+  const visibleCategories = useMemo(
+    () => categories.filter((entry) => entry.key !== 'couple-effects' || cosmeticsFlags.coupleEffects),
+    [cosmeticsFlags.coupleEffects],
   );
   async function purchase(item: CustomerStoreCatalogItem, currency: StoreCurrency) {
     if (item.category === 'chat-themes') {
@@ -178,9 +178,14 @@ export function StoreScreen({ navigation }: Props) {
       );
       return;
     }
-    if (isMockStoreItemId(item.itemId)) {
+    if (item.category === 'couple-effects') {
+      setBusy(`${item.itemId}:${currency}`);
+      const response = await requestPurchaseCoupleEffect(item.itemId, currency);
+      setBusy('');
+      if (!response.ok) { Alert.alert('تعذر إتمام الشراء', response.error.messageAr); return; }
       setSelected(undefined);
-      Alert.alert('عنصر تجريبي', 'تمت معاينة الشراء محلياً فقط، ولم يُخصم أي رصيد من حسابك.');
+      Alert.alert('تم الشراء', `تمت إضافة ${item.name.ar} إلى مقتنيات الارتباط وتجهيزه لكما.`);
+      await load();
       return;
     }
     setBusy(`${item.itemId}:${currency}`);
@@ -193,13 +198,8 @@ export function StoreScreen({ navigation }: Props) {
   }
 
   async function gift(item: CustomerStoreCatalogItem, currency: StoreCurrency, recipientPublicId: string) {
-    if (item.category === 'chat-themes') {
+    if (item.category === 'chat-themes' || item.category === 'couple-effects') {
       Alert.alert('الإهداء غير متاح', 'إهداء سمات الغرف غير مدعوم في الإصدار الأول.');
-      return;
-    }
-    if (isMockStoreItemId(item.itemId)) {
-      setSelected(undefined);
-      Alert.alert('هدية تجريبية', `تمت محاكاة إرسال ${item.name.ar} إلى الحساب ${recipientPublicId} من دون خصم الرصيد.`);
       return;
     }
     setBusy(`gift:${item.itemId}:${currency}`);
@@ -262,7 +262,7 @@ export function StoreScreen({ navigation }: Props) {
                 </View>
 
                 <View style={styles.showroomGrid}>
-                  {categories.map((entry) => {
+                  {visibleCategories.map((entry) => {
                     const items = catalogItems.filter((item) => item.category === entry.key);
                     const previewItem = items.find((item) => item.availability === 'available' && !item.soldOut) || items[0];
                     return (
@@ -514,18 +514,24 @@ function PreviewModal({ busy, item, onClose, onGift, onPurchase, owned, wallet }
               ) : (
                 <>
                   {owned ? (
-                    <Text style={styles.ownedHint}>تملك هذا العنصر؛ يمكنك شراء نسخة أخرى كهدية فقط.</Text>
+                    <Text style={styles.ownedHint}>
+                      {item.category === 'couple-effects'
+                        ? 'هذا التأثير مملوك لعلاقة الارتباط الحالية.'
+                        : 'تملك هذا العنصر؛ يمكنك شراء نسخة أخرى كهدية فقط.'}
+                    </Text>
                   ) : (
                     <View style={styles.purchaseChoices}>
                       {item.prices.coins ? <PurchaseButton busy={busy === `${item.itemId}:coins`} currency="coins" disabled={Boolean(busy) || (wallet?.wallet.balances.coins || 0) < item.prices.coins} value={item.prices.coins} onPress={() => confirm('coins', item.prices.coins!)} /> : null}
                       {item.prices.diamonds ? <PurchaseButton busy={busy === `${item.itemId}:diamonds`} currency="diamonds" disabled={Boolean(busy) || (wallet?.wallet.balances.diamonds || 0) < item.prices.diamonds} value={item.prices.diamonds} onPress={() => confirm('diamonds', item.prices.diamonds!)} /> : null}
                     </View>
                   )}
-                  <Pressable disabled={Boolean(busy)} onPress={() => setGiftMode((value) => !value)} style={styles.giftToggle}>
-                    <SymbolView name={{ ios: 'gift.fill', android: 'redeem', web: 'redeem' }} size={19} tintColor="#FFE6A1" />
-                    <Text style={styles.giftToggleText}>{giftMode ? 'إلغاء الإهداء' : 'إهداء لصديق'}</Text>
-                  </Pressable>
-                  {giftMode ? (
+                  {item.category !== 'couple-effects' ? (
+                    <Pressable disabled={Boolean(busy)} onPress={() => setGiftMode((value) => !value)} style={styles.giftToggle}>
+                      <SymbolView name={{ ios: 'gift.fill', android: 'redeem', web: 'redeem' }} size={19} tintColor="#FFE6A1" />
+                      <Text style={styles.giftToggleText}>{giftMode ? 'إلغاء الإهداء' : 'إهداء لصديق'}</Text>
+                    </Pressable>
+                  ) : null}
+                  {giftMode && item.category !== 'couple-effects' ? (
                     <View style={styles.giftForm}>
                       <TextInput
                         keyboardType="number-pad"

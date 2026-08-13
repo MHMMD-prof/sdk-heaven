@@ -5,6 +5,9 @@ function buildDirectChatReconciliation({ conversation, latestMessage, now, proje
   if (!conversation || !Array.isArray(conversation.memberUids) || conversation.memberUids.length !== 2) {
     return { repairable: false, report: { drifted: true, reasons: ['conversation-invalid'] } };
   }
+  // lastSequence is the allocator for new messages and the ceiling every projection clamps
+  // against, so retention ageing out the newest rows must never pull it backwards.
+  const retentionFloor = safeSequence(conversation.retentionPurgedThroughSequence);
   const normalizedConversation = {
     ...conversation,
     lastMessageId: latestMessage?.id || '',
@@ -13,7 +16,11 @@ function buildDirectChatReconciliation({ conversation, latestMessage, now, proje
       : '',
     lastMessagePreview: previewMessage(latestMessage),
     lastMessageSenderUid: latestMessage?.senderUid || '',
-    lastSequence: Number.isSafeInteger(latestMessage?.sequence) ? latestMessage.sequence : 0,
+    lastSequence: Math.max(
+      Number.isSafeInteger(latestMessage?.sequence) ? latestMessage.sequence : 0,
+      retentionFloor,
+    ),
+    retentionPurgedThroughSequence: retentionFloor,
   };
   const conversationReasons = [];
   for (const field of ['lastMessageId', 'lastMessageKind', 'lastMessagePreview', 'lastMessageSenderUid', 'lastSequence']) {
@@ -56,6 +63,10 @@ function buildDirectChatReconciliation({ conversation, latestMessage, now, proje
       reasons,
     },
   };
+}
+
+function safeSequence(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 function previewMessage(message) {

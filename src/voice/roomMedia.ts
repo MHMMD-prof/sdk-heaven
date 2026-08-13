@@ -7,6 +7,7 @@ import { VoiceRoom } from '../types/voice';
 import { debugError, debugLog } from '../utils/debugLog';
 import { VoiceProviderConfig } from './types';
 import { useVoiceProviderConfig } from './useVoiceProviderConfig';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomMediaCommandAction =
   | 'submit-room-image'
@@ -177,6 +178,7 @@ export async function requestRoomMediaCommand(
         headers: {
           Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
+          ...(await getVoiceAppCheckHeader()),
         },
         method: 'POST',
         signal: controller.signal,

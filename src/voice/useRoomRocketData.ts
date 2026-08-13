@@ -17,6 +17,7 @@ import {
 import { createRoomSupportPeriodIds } from './roomRocketPeriod';
 
 export type RoomRocketData = {
+  campaignAvailable: boolean;
   cycle?: RoomRocketCycleV1;
   error: boolean;
   loading: boolean;
@@ -27,6 +28,7 @@ export type RoomRocketData = {
 };
 
 const EMPTY_DATA: RoomRocketData = {
+  campaignAvailable: false,
   error: false,
   loading: false,
   renderingEnabled: false,
@@ -144,11 +146,15 @@ export function useRoomRocketData({
     : config
       ? isClientVersionCompatible(config.minimumClientVersion, clientVersion)
       : false;
+  const campaignAvailable = config?.renderingEnabled === true && compatible && Boolean(template);
   return {
+    campaignAvailable,
     cycle,
     error,
     loading,
-    renderingEnabled: config?.renderingEnabled === true && compatible,
+    // Supporter rankings are useful on their own. Keep the launcher available
+    // while a Rocket campaign is awaiting approved artwork/publication.
+    renderingEnabled: true,
     template,
     today,
     week,

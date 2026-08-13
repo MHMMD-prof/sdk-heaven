@@ -11,6 +11,7 @@ function buildDirectChatProjection({
   const lastSequence = safeSequence(conversation?.lastSequence);
   const lastReadSequence = Math.min(safeSequence(existing?.lastReadSequence), lastSequence);
   const clearedThroughSequence = Math.min(safeSequence(existing?.clearedThroughSequence), lastSequence);
+  const retentionPurgedThroughSequence = Math.min(safeSequence(conversation?.retentionPurgedThroughSequence), lastSequence);
   const existingUnread = safeSequence(existing?.unreadCount);
   const boundedIncrement = Number.isSafeInteger(unreadIncrement) ? unreadIncrement : 0;
   const unreadCount = Math.max(0, existingUnread + boundedIncrement);
@@ -30,6 +31,7 @@ function buildDirectChatProjection({
     recipientUid: readString(conversation.recipientUid, 128),
     requestState: readString(conversation.requestState, 24) || 'none',
     requesterUid: readString(conversation.requesterUid, 128),
+    retentionPurgedThroughSequence,
     unreadCount,
     updatedAt: now,
   };
@@ -68,6 +70,9 @@ function resolveDirectChatProjectionDrift({ conversation, projection }) {
   if (projection.ownerUid === projection.peerUid) reasons.push('peerUid');
   if (safeSequence(projection.lastReadSequence) > safeSequence(conversation.lastSequence)) reasons.push('lastReadSequence');
   if (safeSequence(projection.clearedThroughSequence) > safeSequence(conversation.lastSequence)) reasons.push('clearedThroughSequence');
+  if (safeSequence(projection.retentionPurgedThroughSequence) !== safeSequence(conversation.retentionPurgedThroughSequence)) {
+    reasons.push('retentionPurgedThroughSequence');
+  }
   if (!Number.isSafeInteger(projection.unreadCount) || projection.unreadCount < 0) reasons.push('unreadCount');
   return { drifted: reasons.length > 0, reasons };
 }
@@ -90,9 +95,20 @@ function mapDirectChatProjection(value, ownerUid) {
     recipientUid: readString(value.recipientUid, 128),
     requestState: readString(value.requestState, 24) || 'none',
     requesterUid: readString(value.requesterUid, 128),
+    retentionPurgedThroughSequence: safeSequence(value.retentionPurgedThroughSequence),
     unreadCount: safeSequence(value.unreadCount),
     updatedAt: value.updatedAt,
   };
+}
+
+// Retention deletes rows for both participants, so the floor a thread reads from is the higher of
+// the member's own delete-for-me marker and the conversation-wide retention watermark.
+function resolveDirectChatThreadFloor(projection, conversation) {
+  return Math.max(
+    safeSequence(projection?.clearedThroughSequence),
+    safeSequence(conversation?.retentionPurgedThroughSequence),
+    safeSequence(projection?.retentionPurgedThroughSequence),
+  );
 }
 
 function mapDirectChatMessage(value, clearedThroughSequence = 0) {
@@ -147,5 +163,6 @@ module.exports = {
   mapDirectChatProjection,
   resolveDirectChatMarkRead,
   resolveDirectChatProjectionDrift,
+  resolveDirectChatThreadFloor,
   safeSequence,
 };

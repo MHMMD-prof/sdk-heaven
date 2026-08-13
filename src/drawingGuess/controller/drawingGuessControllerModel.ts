@@ -67,34 +67,71 @@ export const createLocalSimulatedDrawingGuessState = ({
   });
 };
 
+export const resolveOnlineBootstrapMatchId = ({
+  createMatchId,
+  hostUid,
+  localPlayerId,
+  roomCode,
+  sessionId,
+}: {
+  createMatchId: () => string;
+  hostUid?: string;
+  localPlayerId: string;
+  roomCode: string;
+  sessionId?: string;
+}) => {
+  const resolvedHostId = hostUid?.trim() || localPlayerId;
+  if (resolvedHostId === localPlayerId) {
+    return createMatchId();
+  }
+
+  const pendingKey = sessionId?.trim() || roomCode.trim() || 'online';
+  return `pending-${pendingKey}`;
+};
+
 export const createOnlineDrawingGuessState = ({
+  displayName = 'You',
+  hostId,
   localPlayerId,
   matchId,
   now,
   roomCode,
 }: {
+  displayName?: string;
+  hostId?: string;
   roomCode: string;
   localPlayerId: string;
   matchId: string;
   now: number;
 }) => {
-  let state = createInitialDrawingGuessState({ roomId: roomCode, matchId });
+  const resolvedDisplayName = displayName.trim() || 'You';
+  const resolvedHostId = hostId?.trim() || localPlayerId;
+  let state: DrawingGuessState = {
+    ...createInitialDrawingGuessState({ roomId: roomCode, matchId }),
+    hostId: resolvedHostId,
+  };
 
   state = drawingGuessReducer(state, {
     type: 'player-joined',
     player: {
       id: localPlayerId,
-      displayName: 'You',
-      avatarLabel: 'Y',
+      displayName: resolvedDisplayName,
+      avatarLabel: resolvedDisplayName.charAt(0).toUpperCase() || 'Y',
       role: 'player',
       joinedAt: now,
     },
   });
 
-  return drawingGuessReducer(state, {
-    type: 'connection-status-changed',
-    status: 'connecting',
-  });
+  return drawingGuessReducer(
+    {
+      ...state,
+      hostId: resolvedHostId,
+    },
+    {
+      type: 'connection-status-changed',
+      status: 'connecting',
+    },
+  );
 };
 
 export const createDrawingGuessViewModel = ({
@@ -129,6 +166,7 @@ export const createDrawingGuessViewModel = ({
   const isHost = state.hostId === localPlayerId;
   const isDrawer = state.drawerId === localPlayerId;
   const isShowcaseMode = transportMode === 'mock' && launchSource === 'games';
+  const isVoiceRoomSession = launchSource === 'voice-room';
   const connectedPlayerCount = state.players.filter(
     (player) => player.isConnected && player.role === 'player',
   ).length;
@@ -148,6 +186,10 @@ export const createDrawingGuessViewModel = ({
     state.phase === 'drawing' &&
     state.eligibleGuesserIds.includes(localPlayerId) &&
     !hasLocalPlayerGuessedCorrectly;
+  const canStart =
+    isHost &&
+    state.phase === 'lobby' &&
+    connectedPlayerCount >= DRAWING_GUESS_RULES.minPlayers;
   const playerNameById = Object.fromEntries(
     state.players.map((player) => [player.id, player.displayName]),
   );
@@ -215,10 +257,7 @@ export const createDrawingGuessViewModel = ({
       text: prompt.text,
       categoryLabel: drawingGuessPromptCategoryLabels[prompt.category],
     })),
-    canStart:
-      isHost &&
-      state.phase === 'lobby' &&
-      connectedPlayerCount >= DRAWING_GUESS_RULES.minPlayers,
+    canStart,
     canChoosePrompt: isDrawer && state.phase === 'prompt-select',
     canDraw: !isRecoveringSnapshot && isDrawer && state.phase === 'drawing',
     canGuess: canSubmitGuess,
@@ -229,13 +268,29 @@ export const createDrawingGuessViewModel = ({
     transportMode,
     isOnlineRoom: transportMode === 'livekit',
     isShowcaseMode,
-    showOnlineControls: !isShowcaseMode,
+    isVoiceRoomSession,
+    showOnlineControls: !isShowcaseMode && !isVoiceRoomSession,
+    showRoomResetControls: !isVoiceRoomSession,
     canUseSimulatedGuessControls: !isShowcaseMode && transportMode === 'mock',
     eligibleGuesserIds: state.eligibleGuesserIds,
     roundScoreDeltas: state.roundScoreDeltas,
     hasLocalPlayerGuessedCorrectly,
     roundEndReason: state.roundEndReason,
-    onlineStatusLabel: transportMode === 'livekit' ? 'Online LiveKit room' : 'Local game',
+    onlineStatusLabel: isVoiceRoomSession
+      ? 'Voice room match'
+      : transportMode === 'livekit'
+        ? 'Online LiveKit room'
+        : 'Local game',
+    lobbyStatusLabel: getLobbyStatusLabel({
+      canStart,
+      connectedPlayerCount,
+      isHost,
+      isRecoveringSnapshot,
+      isShowcaseMode,
+      isVoiceRoomSession,
+      lastTransportError,
+      transportMode,
+    }),
     launchTitle:
       launchTitle ??
       (isShowcaseMode ? 'Drawing Guess' : `${transportMode === 'livekit' ? 'Online' : 'Local'} room ${roomCode}`),
@@ -256,6 +311,64 @@ export const createDrawingGuessViewModel = ({
           ? `Recovering ${transportMode === 'livekit' ? 'online' : 'local'} room`
           : getDrawingGuessConnectionLabel(state.connectionStatus, transportMode),
   };
+};
+
+const getLobbyStatusLabel = ({
+  canStart,
+  connectedPlayerCount,
+  isHost,
+  isRecoveringSnapshot,
+  isShowcaseMode,
+  isVoiceRoomSession,
+  lastTransportError,
+  transportMode,
+}: {
+  canStart: boolean;
+  connectedPlayerCount: number;
+  isHost: boolean;
+  isRecoveringSnapshot: boolean;
+  isShowcaseMode: boolean;
+  isVoiceRoomSession: boolean;
+  lastTransportError?: string;
+  transportMode: DrawingGuessViewModel['transportMode'];
+}) => {
+  if (lastTransportError) {
+    return isVoiceRoomSession
+      ? 'Fix the connection issue above, then reopen the game from the voice room invite.'
+      : 'Fix the connection issue above, then create or join the room again.';
+  }
+
+  if (isRecoveringSnapshot) {
+    return isVoiceRoomSession
+      ? 'Joining the shared voice-room match…'
+      : 'Recovering the online room…';
+  }
+
+  if (isVoiceRoomSession) {
+    if (!isHost) {
+      return 'You joined from the voice room. Wait for the host to start the match.';
+    }
+    if (!canStart) {
+      return connectedPlayerCount < 2
+        ? 'Waiting for another player to join from the voice room invite.'
+        : 'Waiting for enough ready players.';
+    }
+    return 'Players are ready. Start the match when you want to begin.';
+  }
+
+  if (transportMode === 'livekit' && !canStart) {
+    return 'Waiting for at least two connected players before the host can start.';
+  }
+
+  if (transportMode === 'livekit') {
+    return 'Online room uses LiveKit data packets for preview strokes, committed strokes, guesses, and snapshots.';
+  }
+
+  if (isShowcaseMode) {
+    return 'Draw the secret prompt, race the guesses, and climb the final scoreboard.';
+  }
+
+  return 'Draw the secret prompt, race the guesses, and climb the final scoreboard.';
 };
 
 const getTimerUrgency = (

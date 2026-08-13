@@ -43,6 +43,40 @@ describe('adminRoomThemeCore', () => {
       themeId: 'desert-lanterns',
     })).toMatchObject({ ok: false });
   });
+
+  it('preserves a responsive V3 scene during admin publication', () => {
+    const candidate = manifest('desert-lanterns');
+    const layouts = structuredClone(candidate.layouts);
+    candidate.manifestVersion = 3;
+    candidate.motion = { ambient: [], background: null };
+    candidate.scene = {
+      background: { fit: 'cover', focalX: 0.5, focalY: 0.42 },
+      stage: { fit: 'cover', focalX: 0.5, focalY: 0.5 },
+      profiles: {
+        compact: { layouts: structuredClone(layouts) },
+        standard: { layouts: structuredClone(layouts) },
+        tall: { layouts: structuredClone(layouts) },
+      },
+    };
+
+    expect(normalizeAdminRoomThemeMutation({
+      expectedRevision: 2,
+      manifest: candidate,
+      operation: 'publish',
+      reason: 'Publish responsive scene',
+      requestId: 'theme_publish_request_0003',
+      themeId: 'desert-lanterns',
+    })).toMatchObject({
+      ok: true,
+      value: {
+        manifest: {
+          manifestVersion: 3,
+          revision: 3,
+          scene: { profiles: { compact: {}, standard: {}, tall: {} } },
+        },
+      },
+    });
+  });
 });
 
 function manifest(themeId) {

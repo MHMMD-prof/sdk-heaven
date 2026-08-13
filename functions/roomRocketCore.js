@@ -103,7 +103,7 @@ function normalizeRocketAsset(input, slot) {
   const formats = slot === 'static'
     ? ['png', 'webp']
     : slot === 'animation'
-      ? ['animated-webp']
+      ? ['mp4', 'lottie-json', 'animated-webp']
       : ['mp3', 'm4a'];
   const limit = ROOM_ROCKET_ASSET_LIMITS[slot];
   if (

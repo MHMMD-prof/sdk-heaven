@@ -1,5 +1,6 @@
 import { debugError, debugLog } from '../utils/debugLog';
 import { VoiceProviderConfig } from './types';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 
 export type RoomChatCommandAction =
   | 'send-message'
@@ -42,6 +43,7 @@ export type RoomChatCommandRequest = {
 export type RoomChatCommandResult = {
   action: RoomChatCommandAction;
   messageId: string;
+  reportId?: string;
   requestId: string;
   roomId: string;
   status: 'applied';
@@ -101,6 +103,7 @@ export async function requestRoomChatCommand(
         headers: {
           Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
+          ...(await getVoiceAppCheckHeader()),
         },
         body: JSON.stringify({ ...request, requestId }),
         signal: controller.signal,

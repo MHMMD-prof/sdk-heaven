@@ -113,13 +113,30 @@ describe('adminClaimsCore', () => {
     });
   });
 
+  it('limits direct-message evidence to owner and super-moderator', () => {
+    // Working the report queue and reading private message content are deliberately
+    // different capabilities: moderator and support triage but never unmask DM content.
+    for (const role of ['owner', 'super-moderator']) {
+      expect(getAdminPermissions(role), role).toContain('reports:evidence');
+      expect(canAdminPerformAction(role, 'direct-chat-evidence'), role).toBe(true);
+      expect(canAdminPerformAction(role, 'direct-chat-action'), role).toBe(true);
+    }
+    for (const role of ['moderator', 'support', 'catalog-manager', 'auditor']) {
+      expect(getAdminPermissions(role), role).not.toContain('reports:evidence');
+      expect(canAdminPerformAction(role, 'direct-chat-evidence'), role).toBe(false);
+      expect(canAdminPerformAction(role, 'direct-chat-action'), role).toBe(false);
+    }
+    expect(canAdminPerformAction('moderator', 'report-action')).toBe(true);
+    expect(canAdminPerformAction('support', 'report-action')).toBe(true);
+  });
+
   it('keeps every dashboard action inside the permission contract', () => {
     expect(Object.keys(ADMIN_ACTION_PERMISSIONS).sort()).toEqual([...ADMIN_DASHBOARD_ACTIONS].sort());
     for (const action of ADMIN_DASHBOARD_ACTIONS) expect(canAdminPerformAction('owner', action), action).toBe(true);
   });
 
   it('keeps sensitive mutation boundaries out of read-only roles', () => {
-    const sensitiveActions = ['user-action', 'room-action', 'store-catalog-upsert', 'wallet-adjust', 'representative-reversal', 'feature-flag-update', 'room-gift-policy-update', 'daily-login-campaign-mutate'];
+    const sensitiveActions = ['user-action', 'room-action', 'store-catalog-upsert', 'wallet-adjust', 'representative-reversal', 'feature-flag-update', 'room-gift-policy-update', 'daily-login-campaign-mutate', 'direct-chat-retention-set', 'direct-chat-ops-status'];
     for (const action of sensitiveActions) expect(canAdminPerformAction('auditor', action), action).toBe(false);
     expect(canAdminPerformAction('auditor', 'daily-login-campaign')).toBe(true);
     expect(canAdminPerformAction('support', 'user-note')).toBe(true);

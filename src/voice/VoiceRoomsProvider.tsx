@@ -147,11 +147,13 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
   );
   const joinedRoomIds = useMemo(
     () =>
-      Object.entries(joinedRoomOverrides)
-        .filter(([, room]) => room.localMember?.id === authUser?.uid && room.localMember?.status !== 'removed')
-        .map(([roomId]) => roomId)
+      activePresenceRoomIds
+        .filter((roomId) => {
+          const room = joinedRoomOverrides[roomId];
+          return room?.localMember?.id === authUser?.uid && room.localMember?.status !== 'removed';
+        })
         .sort(),
-    [authUser?.uid, joinedRoomOverrides],
+    [activePresenceRoomIds, authUser?.uid, joinedRoomOverrides],
   );
   const joinedRoomIdsKey = joinedRoomIds.join('|');
   const activePresenceRoomIdsKey = activePresenceRoomIds.join('|');
@@ -692,11 +694,23 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       const room = joinedRoomOverridesRef.current[roomId];
 
-      if (room) {
-        await writeRoomPresence(room, 'stale');
+      try {
+        if (room) {
+          await writeRoomPresence(room, 'stale');
+        }
+      } finally {
+        delete presenceSessionIdsRef.current[roomId];
+        presenceJoinedRoomIdsRef.current.delete(roomId);
+
+        const { [roomId]: _removedBaseRoom, ...remainingBaseRooms } = joinedRoomBaseRef.current;
+        joinedRoomBaseRef.current = remainingBaseRooms;
+        setJoinedRoomOverrides((currentRooms) => {
+          if (!currentRooms[roomId]) return currentRooms;
+          const { [roomId]: _removedRoom, ...remainingRooms } = currentRooms;
+          joinedRoomOverridesRef.current = remainingRooms;
+          return remainingRooms;
+        });
       }
-      delete presenceSessionIdsRef.current[roomId];
-      presenceJoinedRoomIdsRef.current.delete(roomId);
     },
     [writeRoomPresence],
   );
@@ -708,6 +722,10 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
       }
       if (!voiceRoomFeatureFlags.newJoins) {
         throw new Error('إنشاء الغرف متوقف مؤقتاً.');
+      }
+
+      if (myActiveRoom?.status === 'active') {
+        throw new Error('Close your active room before creating another room.');
       }
 
       const roomRef = doc(collection(firebaseDb, 'rooms'));
@@ -783,7 +801,7 @@ export function VoiceRoomsProvider({ children }: PropsWithChildren) {
 
       return room;
     },
-    [authUser, recordVisitedRoom, voiceRoomFeatureFlags.newJoins],
+    [authUser, myActiveRoom, recordVisitedRoom, voiceRoomFeatureFlags.newJoins],
   );
 
   const createDraftRoom = useCallback(

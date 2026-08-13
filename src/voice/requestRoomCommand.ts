@@ -1,5 +1,6 @@
 import { VoiceProviderConfig } from './types';
 import { debugError, debugLog } from '../utils/debugLog';
+import { getVoiceAppCheckHeader } from './voiceRequestAppCheck';
 import {
   RoomChatMode,
   RoomEffectsPolicy,
@@ -133,6 +134,7 @@ export async function requestRoomCommand(
         headers: {
           Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
+          ...(await getVoiceAppCheckHeader()),
         },
         signal: controller.signal,
         body: JSON.stringify(payload),

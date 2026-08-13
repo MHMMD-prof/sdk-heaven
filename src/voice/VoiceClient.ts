@@ -12,6 +12,7 @@ export interface VoiceClient {
   muteMic(): Promise<void>;
   unmuteMic(): Promise<void>;
   setSpeakerEnabled(enabled: boolean): Promise<void>;
+  setBlockedParticipantIds(participantIds: Iterable<string>): void;
   executeRoomCommand(command: VoiceRoomCommand): Promise<VoiceRoomCommandResult>;
   getParticipants(): Promise<VoiceParticipant[]>;
   onEvent(listener: VoiceClientEventListener): () => void;

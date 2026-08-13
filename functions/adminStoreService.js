@@ -1,9 +1,14 @@
 const crypto = require('node:crypto');
+const { inspectApprovedCoupleEffect } = require('./coupleEffectsCore');
 const { getEquipmentCosmeticConfig, inspectApprovedEquipmentCosmeticReference } = require('./equipmentCosmeticsCore');
 const {
   createEntryPhysicalApprovalReceiptId,
   inspectApprovedEntryPresentation,
 } = require('./roomEntryPresentationCore');
+const {
+  ROOM_EFFECT_COPY_TEMPLATE_VERSION,
+  resolveRoomEffectSurface,
+} = require('./roomEffectPresentationCore');
 
 function stableFingerprint(item) {
   return crypto.createHash('sha256').update(JSON.stringify(sortValue(item))).digest('hex');
@@ -114,14 +119,39 @@ async function executeAdminStoreCatalogUpsert({ db, decodedToken, fieldValue, in
     if (item.cosmeticAsset) {
       const [summary, version, approval, ...remaining] = additionalSnapshots;
       const { assetId, assetVersionId: versionId } = item.cosmeticAsset;
-      if (!inspectApprovedEquipmentCosmeticReference({
+      let approved = inspectApprovedEquipmentCosmeticReference({
         approval: approval.exists ? approval.data() : undefined,
         assetId,
         category: item.category,
         summary: summary.exists ? summary.data() : undefined,
         version: version.exists ? version.data() : undefined,
         versionId,
-      }).ok) {
+      }).ok;
+      if (approved && item.category === 'couple-effects') {
+        let fallback;
+        if (version.data()?.format === 'lottie-json') {
+          const fallbackAssetId = version.data()?.fallbackAssetId || '_missing';
+          const fallbackVersionId = version.data()?.fallbackAssetVersionId || '_missing';
+          const [fallbackSummary, fallbackVersion, fallbackApproval] = await Promise.all([
+            transaction.get(db.doc(`cosmeticAssets/${fallbackAssetId}`)),
+            transaction.get(db.doc(`cosmeticAssets/${fallbackAssetId}/versions/${fallbackVersionId}`)),
+            transaction.get(db.doc(`cosmeticAssetApprovals/${fallbackAssetId}__${fallbackVersionId}`)),
+          ]);
+          fallback = {
+            approval: fallbackApproval.data(),
+            summary: fallbackSummary.data(),
+            version: fallbackVersion.data(),
+          };
+        }
+        approved = inspectApprovedCoupleEffect({
+          approval: approval.data(),
+          fallback,
+          reference: item.cosmeticAsset,
+          summary: summary.data(),
+          version: version.data(),
+        }).ok;
+      }
+      if (!approved) {
         const error = new Error('The exact cosmetic version must match this category and be approved and published before assignment.');
         error.status = 409;
         throw error;
@@ -272,6 +302,7 @@ function buildEntryPhysicalApprovalReceipt({
     audioAssetVersionId: presentation.audioAsset?.assetVersionId || '',
     audioChecksum: records.audio?.version?.sha256 || '',
     createdAt: fieldValue.serverTimestamp(),
+    copyTemplateVersion: ROOM_EFFECT_COPY_TEMPLATE_VERSION,
     durationMs: presentation.durationMs,
     fallbackAssetId: presentation.fallbackAsset.assetId,
     fallbackAssetVersionId: presentation.fallbackAsset.assetVersionId,
@@ -280,6 +311,7 @@ function buildEntryPhysicalApprovalReceipt({
     itemId,
     minimumClientVersion: presentation.minimumClientVersion,
     performanceTier: presentation.performanceTier,
+    presentationSurface: resolveRoomEffectSurface('room-entry'),
     reviewerEmail: actor.email || '',
     reviewerUid: actor.uid,
     soundPolicy: presentation.soundPolicy,

@@ -29,11 +29,25 @@ const {
 } = require('./roomGiftCore');
 const {
   createGiftComboId,
-  inspectApprovedGiftPresentation,
+  inspectGiftPresentation,
   isEligibleGlobalGiftCampaign,
   resolveGiftComboState,
   resolveGiftPresentationDelivery,
 } = require('./roomGiftPresentationCore');
+const {
+  buildGiftEffectCopySnapshot,
+  resolveRoomEffectSurface,
+} = require('./roomEffectPresentationCore');
+const {
+  publicLuckyOdds,
+  resolveGiftComboForTheater,
+  resolveGiftTheaterFlags,
+  resolveGiftTheaterKind,
+  resolveLuckyGiftRoll,
+  resolveMagicGiftTemplate,
+  resolvePublishedLuckyTable,
+  resolvePublishedMagicTemplates,
+} = require('./giftTheaterCore');
 const {
   ROOM_GIFT_RATE_LIMIT,
   ROOM_GIFT_RATE_WINDOW_MS,
@@ -89,20 +103,26 @@ async function executeRoomGiftCommand({
 async function getRoomGiftCenter({ command, db, decodedToken }) {
   const [
     featureSnapshot,
+    growthSnapshot,
     policySnapshot,
     roomSnapshot,
     actorMemberSnapshot,
     actorPublicSnapshot,
     walletSnapshot,
     catalogSnapshot,
+    luckyTableSnapshot,
+    magicTemplatesSnapshot,
   ] = await Promise.all([
     db.doc('appConfig/voiceRoomFeatures').get(),
+    db.doc('appConfig/growthFeatures').get(),
     db.doc('appConfig/roomGiftCommissionPolicy').get(),
     db.doc(`rooms/${command.roomId}`).get(),
     db.doc(`rooms/${command.roomId}/members/${decodedToken.uid}`).get(),
     db.doc(`publicProfiles/${decodedToken.uid}`).get(),
     db.doc(`walletSummaries/${decodedToken.uid}`).get(),
     db.collection('giftCatalog').where('status', '==', 'available').orderBy('price').limit(ROOM_GIFT_CATALOG_LIMIT).get(),
+    db.doc('appConfig/giftLuckyTable').get(),
+    db.doc('appConfig/magicGiftFrameTemplates').get(),
   ]);
 
   if (featureSnapshot.data()?.voice_room_gifts !== true) {
@@ -124,6 +144,11 @@ async function getRoomGiftCenter({ command, db, decodedToken }) {
   const wallet = mapWalletSummary(walletSnapshot.exists ? walletSnapshot.data() : undefined, decodedToken.uid);
   const economy = mapWalletEconomy(walletSnapshot.exists ? walletSnapshot.data() : undefined);
   const policy = mapCommissionPolicy(policySnapshot.exists ? policySnapshot.data() : undefined);
+  const theaterFlags = resolveGiftTheaterFlags(growthSnapshot.exists ? growthSnapshot.data() : undefined);
+  const luckyTable = resolvePublishedLuckyTable(
+    luckyTableSnapshot.exists ? luckyTableSnapshot.data() : undefined,
+    'default',
+  );
   return {
     ok: true,
     result: {
@@ -133,6 +158,14 @@ async function getRoomGiftCenter({ command, db, decodedToken }) {
         .map((document) => mapCatalogForRoomGift(document.data()))
         .filter(Boolean),
       economyBalances: economy.balances,
+      ...(theaterFlags.luckyGifts ? { luckyOdds: publicLuckyOdds(luckyTable) } : {}),
+      ...(theaterFlags.magicGiftTemplates
+        ? {
+          magicFrameTemplates: resolvePublishedMagicTemplates(
+            magicTemplatesSnapshot.exists ? magicTemplatesSnapshot.data() : undefined,
+          ),
+        }
+        : {}),
       policy: policy
         ? {
           commissionBps: policy.commissionBps,
@@ -141,6 +174,7 @@ async function getRoomGiftCenter({ command, db, decodedToken }) {
         : null,
       requestId: command.requestId,
       roomId: command.roomId,
+      theaterFlags,
     },
   };
 }
@@ -241,7 +275,7 @@ async function quoteRoomGiftCommand({
     const quoteId = createRoomGiftQuoteId(command.requestId);
     const catalogItem = mapCatalogForRoomGift(catalogSnapshot.exists ? catalogSnapshot.data() : undefined);
     if (catalogItem?.presentation?.animationEnabled) {
-      const inspected = inspectApprovedGiftPresentation({
+      const inspected = inspectGiftPresentation({
         presentation: catalogItem.presentation,
         records: await readGiftPresentationRecords(transaction, db, catalogItem.presentation),
       });
@@ -311,12 +345,16 @@ async function sendRoomGiftCommand({
   fieldValue,
   fingerprint,
 }) {
-  return db.runTransaction(async (transaction) => {
+  const response = await db.runTransaction(async (transaction) => {
     const roomRef = db.doc(`rooms/${command.roomId}`);
     const requestRef = roomRef.collection('giftCommandRequests').doc(command.requestId);
     const featureRef = db.doc('appConfig/voiceRoomFeatures');
+    const growthRef = db.doc('appConfig/growthFeatures');
     const cosmeticsFeatureRef = db.doc('appConfig/cosmeticsFeatures');
     const globalCampaignRef = db.doc('appConfig/roomGiftGlobalCampaign');
+    const luckyTableRef = db.doc('appConfig/giftLuckyTable');
+    const magicTemplatesRef = db.doc('appConfig/magicGiftFrameTemplates');
+    const catalogRef = db.doc(`giftCatalog/${command.giftId}`);
     const quoteRef = roomRef.collection('giftQuotes').doc(command.quoteId);
     const eventId = createRoomGiftEventId(command.requestId, command.roomId);
     const eventRef = roomRef.collection('giftEvents').doc(eventId);
@@ -362,8 +400,12 @@ async function sendRoomGiftCommand({
     const [
       requestSnapshot,
       featureSnapshot,
+      growthSnapshot,
       cosmeticsFeatureSnapshot,
       globalCampaignSnapshot,
+      luckyTableSnapshot,
+      magicTemplatesSnapshot,
+      catalogSnapshot,
       quoteSnapshot,
       roomSnapshot,
       actorMemberSnapshot,
@@ -381,8 +423,12 @@ async function sendRoomGiftCommand({
     ] = await Promise.all([
       transaction.get(requestRef),
       transaction.get(featureRef),
+      transaction.get(growthRef),
       transaction.get(cosmeticsFeatureRef),
       transaction.get(globalCampaignRef),
+      transaction.get(luckyTableRef),
+      transaction.get(magicTemplatesRef),
+      transaction.get(catalogRef),
       transaction.get(quoteRef),
       transaction.get(roomRef),
       transaction.get(actorMemberRef),
@@ -425,7 +471,7 @@ async function sendRoomGiftCommand({
 
     let approvedPresentation = resolution.value.presentation;
     if (approvedPresentation?.animationEnabled) {
-      const inspected = inspectApprovedGiftPresentation({
+      const inspected = inspectGiftPresentation({
         presentation: approvedPresentation,
         records: await readGiftPresentationRecords(transaction, db, approvedPresentation),
       });
@@ -460,14 +506,60 @@ async function sendRoomGiftCommand({
       },
       command.clientVersion,
     );
-    const combo = resolveGiftComboState({
+    const theaterFlags = resolveGiftTheaterFlags(growthSnapshot.exists ? growthSnapshot.data() : undefined);
+    const catalogTheater = mapCatalogForRoomGift(catalogSnapshot.exists ? catalogSnapshot.data() : undefined)?.theater
+      || { luckyTableId: 'default', tags: [] };
+    const combo = resolveGiftComboForTheater({
+      combosEnabled: theaterFlags.giftCombos,
       existing: comboSnapshot.exists ? comboSnapshot.data() : undefined,
       giftId: quote.giftId,
       nowMs: clock.nowMillis(),
       quantity: quote.quantity,
+      requestId: command.requestId,
+      resolveGiftComboState,
       senderUid: decodedToken.uid,
       targetUid: command.targetUid,
       tier: quote.presentationTier,
+    });
+    let luckyOutcome = null;
+    if (theaterFlags.luckyGifts && catalogTheater.tags.includes('lucky')) {
+      const table = resolvePublishedLuckyTable(
+        luckyTableSnapshot.exists ? luckyTableSnapshot.data() : undefined,
+        catalogTheater.luckyTableId || 'default',
+      );
+      const roll = resolveLuckyGiftRoll({
+        giftId: quote.giftId,
+        requestId: command.requestId,
+        table,
+      });
+      if (!roll.ok) {
+        return roomGiftError(roll.code, 503, 'Lucky gift table is unavailable.');
+      }
+      luckyOutcome = roll.value;
+    }
+    let magicFrame = null;
+    if (theaterFlags.magicGiftTemplates && catalogTheater.tags.includes('magic')) {
+      const templates = resolvePublishedMagicTemplates(
+        magicTemplatesSnapshot.exists ? magicTemplatesSnapshot.data() : undefined,
+      );
+      const resolvedMagic = resolveMagicGiftTemplate({
+        magicFrameTemplateId: command.magicFrameTemplateId,
+        templates,
+      });
+      if (!resolvedMagic.ok) {
+        return roomGiftError(
+          resolvedMagic.code,
+          400,
+          resolvedMagic.code === 'MAGIC_TEMPLATE_UNKNOWN'
+            ? 'Unknown magic gift frame template.'
+            : 'Select an approved magic gift frame template.',
+        );
+      }
+      magicFrame = resolvedMagic.value;
+    }
+    const theaterKind = resolveGiftTheaterKind({
+      presentationTier: delivery.presentationTier,
+      tags: catalogTheater.tags,
     });
     const senderWallet = mapWalletSummary(
       senderWalletSnapshot.exists ? senderWalletSnapshot.data() : undefined,
@@ -584,12 +676,15 @@ async function sendRoomGiftCommand({
       comboKey: combo.comboKey,
       comboSequence: combo.sequence,
       comboWindowExpiresAtMs: combo.windowExpiresAtMs,
+      comboWindowId: combo.comboWindowId,
       commissionBps: quote.commissionBps,
       createdAt: timestamp,
       currency: quote.currency,
       eventId,
       giftId: quote.giftId,
       iconKey: quote.iconKey,
+      ...(luckyOutcome ? { luckyOutcome } : {}),
+      ...(magicFrame ? { magicFrame } : {}),
       nameAr: quote.nameAr,
       platformShare: quote.platformShare,
       policyVersion: quote.policyVersion,
@@ -618,6 +713,8 @@ async function sendRoomGiftCommand({
       senderUid: decodedToken.uid,
       status: 'committed',
       targetMode: quote.targetMode,
+      theaterKind,
+      theaterTags: catalogTheater.tags,
       unitPrice: quote.unitPrice,
     };
 
@@ -636,6 +733,14 @@ async function sendRoomGiftCommand({
           comboCount: combo.comboCount,
           comboKey: combo.comboKey,
           comboSequence: combo.sequence,
+          comboWindowExpiresAtMs: combo.windowExpiresAtMs,
+          comboWindowId: combo.comboWindowId,
+          copy: buildGiftEffectCopySnapshot({
+            giftNameAr: quote.nameAr,
+            quantity: combo.comboCount,
+            recipientDisplayName: recipientProfile.displayName,
+            senderDisplayName: actorPublicSnapshot.data().displayName,
+          }),
           durationMs: quote.presentation.durationMs,
           eventId,
           expiresAtMs: clock.nowMillis() + Math.max(8_000, quote.presentation.durationMs + 2_000),
@@ -648,8 +753,17 @@ async function sendRoomGiftCommand({
           } : {}),
           hapticPolicy: quote.presentation.hapticPolicy,
           iconKey: quote.iconKey,
+          ...(luckyOutcome ? {
+            luckyOutcome: {
+              kind: luckyOutcome.kind,
+              labelAr: luckyOutcome.labelAr,
+              oddsLabelAr: luckyOutcome.oddsLabelAr,
+            },
+          } : {}),
+          ...(magicFrame ? { magicFrame } : {}),
           nameAr: quote.nameAr,
           presentationTier: delivery.presentationTier,
+          presentationSurface: resolveRoomEffectSurface('room-gift', delivery.presentationTier),
           priority: delivery.presentationTier === 'global' ? 4 : delivery.presentationTier === 'major' ? 3 : delivery.presentationTier === 'targeted' ? 2 : 1,
           quantity: quote.quantity,
           recipientDisplayName: recipientProfile.displayName,
@@ -658,11 +772,14 @@ async function sendRoomGiftCommand({
           senderDisplayName: actorPublicSnapshot.data().displayName,
           senderUid: decodedToken.uid,
           soundPolicy: delivery.audioEnabled ? quote.presentation.soundPolicy : 'off',
+          theaterKind,
         },
         eventId,
+        priceCoins: quote.price,
         receiptId: eventId,
         requestId: command.requestId,
         roomId: command.roomId,
+        scoreValue: quote.scoreValue,
       },
     };
 
@@ -752,6 +869,18 @@ async function sendRoomGiftCommand({
       updatedAt: timestamp,
       windowExpiresAt: clock.timestampFromMillis(combo.windowExpiresAtMs),
     });
+    if (luckyOutcome) {
+      transaction.create(roomRef.collection('luckyGiftOutcomes').doc(command.requestId), {
+        createdAt: timestamp,
+        eventId,
+        giftId: quote.giftId,
+        outcome: luckyOutcome,
+        requestId: command.requestId,
+        roomId: command.roomId,
+        senderUid: decodedToken.uid,
+        targetUid: command.targetUid,
+      });
+    }
     transaction.update(targetPublicRef, {
       giftScore: nextGiftScore,
       updatedAt: timestamp,
@@ -780,6 +909,116 @@ async function sendRoomGiftCommand({
 
     return response;
   });
+
+  if (response?.ok && response.result?.eventId) {
+    void applyRoomGiftLeaderboardContributionSafely({
+      clock,
+      db,
+      fieldValue,
+      response,
+      senderUid: decodedToken.uid,
+      targetUid: command.targetUid,
+    });
+    void applyRoomPkGiftContributionSafely({
+      clock,
+      db,
+      fieldValue,
+      response,
+      roomId: command.roomId,
+      senderUid: decodedToken.uid,
+      targetUid: command.targetUid,
+    });
+  }
+  return response;
+}
+
+async function applyRoomPkGiftContributionSafely({
+  clock,
+  db,
+  fieldValue,
+  response,
+  roomId,
+  senderUid,
+  targetUid,
+}) {
+  try {
+    const { applyRoomPkGiftContribution } = require('./roomPkService');
+    const priceCoins = Number(response.result?.priceCoins);
+    if (!Number.isSafeInteger(priceCoins) || priceCoins < 1) return;
+    await applyRoomPkGiftContribution({
+      contribution: {
+        eventId: response.result.eventId,
+        nowMs: typeof clock.nowMillis === 'function' ? clock.nowMillis() : Date.now(),
+        priceCoins,
+        recipientUid: targetUid,
+        roomId,
+        senderUid,
+      },
+      db,
+      fieldValue,
+    });
+  } catch (error) {
+    console.error('[roomGift] PK projection failed', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      eventId: response?.result?.eventId,
+    });
+  }
+}
+
+async function applyRoomGiftLeaderboardContributionSafely({
+  clock,
+  db,
+  fieldValue,
+  response,
+  senderUid,
+  targetUid,
+}) {
+  try {
+    const { applyGiftLeaderboardContribution } = require('./growthLeaderboardService');
+    const effect = response.result?.effect || {};
+    const priceCoins = Number(response.result?.priceCoins);
+    const scoreValue = Number(response.result?.scoreValue);
+    if (!Number.isSafeInteger(priceCoins) || priceCoins < 1) return;
+    if (!Number.isSafeInteger(scoreValue) || scoreValue < 0) return;
+    const [senderSnap, recipientSnap] = await Promise.all([
+      db.doc(`publicProfiles/${senderUid}`).get(),
+      db.doc(`publicProfiles/${targetUid}`).get(),
+    ]);
+    const sender = senderSnap.exists ? senderSnap.data() : {};
+    const recipient = recipientSnap.exists ? recipientSnap.data() : {};
+    await applyGiftLeaderboardContribution({
+      contribution: {
+        eventId: response.result.eventId,
+        nowMs: typeof clock.nowMillis === 'function' ? clock.nowMillis() : Date.now(),
+        priceCoins,
+        recipientCountryCode: typeof recipient.countryCode === 'string' ? recipient.countryCode : '',
+        recipientDisplayName: effect.recipientDisplayName || recipient.displayName || '',
+        recipientPublicId: recipient.publicId || '',
+        recipientUid: targetUid,
+        scoreValue,
+        senderCountryCode: typeof sender.countryCode === 'string' ? sender.countryCode : '',
+        senderDisplayName: effect.senderDisplayName || sender.displayName || '',
+        senderPublicId: sender.publicId || '',
+        senderUid,
+      },
+      db,
+      fieldValue,
+    });
+    const { recordOpsMissionProgressSafely } = require('./opsEventsService');
+    await recordOpsMissionProgressSafely({
+      amount: 1,
+      clock,
+      db,
+      fieldValue,
+      kind: 'send_gifts',
+      uid: senderUid,
+    });
+  } catch (error) {
+    console.error('[roomGift] leaderboard projection failed', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      eventId: response?.result?.eventId,
+    });
+  }
 }
 
 async function readGiftPresentationRecords(transaction, db, presentation) {
@@ -801,10 +1040,12 @@ async function readGiftPresentationRecords(transaction, db, presentation) {
       version: version.exists ? version.data() : undefined,
     };
   }
-  const receipt = await transaction.get(
-    db.doc(`giftPresentationApprovalReceipts/${presentation.physicalApprovalReceiptId}`),
-  );
-  records.physicalReceipt = receipt.exists ? receipt.data() : undefined;
+  if (presentation.physicalApprovalReceiptId) {
+    const receipt = await transaction.get(
+      db.doc(`giftPresentationApprovalReceipts/${presentation.physicalApprovalReceiptId}`),
+    );
+    records.physicalReceipt = receipt.exists ? receipt.data() : undefined;
+  }
   return records;
 }
 

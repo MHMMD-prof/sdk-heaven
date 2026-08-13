@@ -1,4 +1,4 @@
-const { validateRoomThemeManifestV1 } = require('./roomThemeCore');
+const { validateRoomThemeManifest } = require('./roomThemeCore');
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,80}$/;
 const THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
@@ -38,13 +38,15 @@ function normalizeAdminRoomThemeMutation(body = {}) {
   const candidate = body.manifest && typeof body.manifest === 'object'
     ? {
         ...body.manifest,
-        manifestVersion: 1,
+        manifestVersion: [1, 2, 3].includes(body.manifest.manifestVersion)
+          ? body.manifest.manifestVersion
+          : 1,
         publicationStatus: operation === 'publish' ? 'published' : 'draft',
         revision: Math.max(1, expectedRevision + 1),
         themeId,
       }
     : undefined;
-  const manifest = candidate ? validateRoomThemeManifestV1(candidate, themeId) : undefined;
+  const manifest = candidate ? validateRoomThemeManifest(candidate, themeId) : undefined;
   if (!manifest) return { ok: false, status: 400, error: 'The room-theme manifest is invalid.' };
   if (operation === 'publish' && !manifest.assets.background) {
     return { ok: false, status: 400, error: 'A versioned background asset is required before publishing.' };

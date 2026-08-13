@@ -1,17 +1,22 @@
 import type { User } from '@firebase/auth';
 import { ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import { AccountDeletionRequestInput, createAccountDeletionRequestPayload } from './accountLifecycle';
+import { AccountDeletionRequestInput } from './accountLifecycle';
+import type { AccountDeletionStatus, AccountLifecycleState } from './accountLifecycleClient';
 import { createProfilePayload, isCompleteProfile, mapUserProfileDocument, validateProfileInput } from './profile';
 import { AuthUser, ProfileStatus, SaveProfileInput, UserProfile } from './types';
 
 type AuthContextValue = {
   authUser: AuthUser | null;
+  accountState: AccountLifecycleState;
+  deletionStatus: AccountDeletionStatus | null;
   initializing: boolean;
   profile: UserProfile | null;
   profileStatus: ProfileStatus;
   refreshUser: () => Promise<void>;
-  requestAccountDeletion: (input: AccountDeletionRequestInput) => Promise<void>;
+  requestAccountDeletion: (input: AccountDeletionRequestInput, password: string) => Promise<void>;
+  cancelAccountDeletion: (password: string) => Promise<void>;
+  refreshAccountLifecycle: () => Promise<void>;
   saveProfile: (input: SaveProfileInput) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   sendPasswordResetForCurrentUser: () => Promise<void>;
@@ -31,6 +36,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const previousMediaCacheUid = useRef('');
   const [authRevision, setAuthRevision] = useState(0);
   const [initializing, setInitializing] = useState(true);
+  const [accountState, setAccountState] = useState<AccountLifecycleState>('active');
+  const [deletionStatus, setDeletionStatus] = useState<AccountDeletionStatus | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileStatus, setProfileStatus] = useState<ProfileStatus>('missing');
   const [user, setUser] = useState<User | null>(null);
@@ -57,7 +64,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         unsubscribe = onAuthStateChanged(firebaseAuth, (nextUser) => {
           setUser(nextUser);
           setAuthRevision((revision) => revision + 1);
-          setInitializing(false);
+          setInitializing(Boolean(nextUser));
         });
       })
       .catch(() => {
@@ -75,6 +82,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     if (!user) {
+      setAccountState('active');
+      setDeletionStatus(null);
+      setInitializing(false);
+      return;
+    }
+    let active = true;
+    void user.getIdTokenResult()
+      .then(async (token) => {
+        if (!active) return;
+        const pending = token.claims.accountDeletionPending === true;
+        setAccountState(pending ? 'deletion-pending' : 'active');
+        if (pending) {
+          const { getDeletionStatusCommand } = await import('./accountLifecycleClient');
+          const status = await getDeletionStatusCommand();
+          if (active) {
+            setDeletionStatus(status);
+            if (status.state === 'purging') setAccountState('purging');
+          }
+        } else {
+          setDeletionStatus(null);
+        }
+      })
+      .catch(() => { if (active) setAccountState('active'); })
+      .finally(() => { if (active) setInitializing(false); });
+    return () => { active = false; };
+  }, [authRevision, user]);
+
+  useEffect(() => {
+    if (!user || accountState !== 'active') {
       setProfile(null);
       setProfileStatus('missing');
       return undefined;
@@ -121,7 +157,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isActive = false;
       unsubscribe?.();
     };
-  }, [user?.uid]);
+  }, [accountState, user?.uid]);
 
   const authUser = useMemo<AuthUser | null>(() => {
     if (!user || !isCompleteProfile(profile)) {
@@ -138,7 +174,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const value = useMemo<AuthContextValue>(
     () => ({
+      accountState,
       authUser,
+      cancelAccountDeletion: async (password) => {
+        const { firebaseAuth } = await import('./firebase');
+        const { cancelDeletionCommand, reauthenticateCurrentUser } = await import('./accountLifecycleClient');
+        await reauthenticateCurrentUser(password);
+        await cancelDeletionCommand();
+        if (firebaseAuth.currentUser) await firebaseAuth.currentUser.getIdToken(true);
+        setAccountState('active');
+        setDeletionStatus(null);
+        setAuthRevision((revision) => revision + 1);
+      },
+      deletionStatus,
       initializing,
       profile,
       profileStatus,
@@ -192,28 +240,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
           { merge: true },
         );
       },
-      requestAccountDeletion: async (input) => {
-        const [
-          { firebaseAuth, firebaseDb },
-          { addDoc, collection, serverTimestamp },
-        ] = await Promise.all([import('./firebase'), import('firebase/firestore')]);
-        const currentUser = firebaseAuth.currentUser;
-
-        if (!currentUser?.email || !authUser) {
-          throw new Error('A complete account is required to request account deletion.');
+      refreshAccountLifecycle: async () => {
+        const { getDeletionStatusCommand } = await import('./accountLifecycleClient');
+        const status = await getDeletionStatusCommand();
+        setDeletionStatus(status);
+        if (status.state === 'deletion-pending' || status.state === 'purging') setAccountState(status.state);
+      },
+      requestAccountDeletion: async (input, password) => {
+        const { firebaseAuth } = await import('./firebase');
+        const { requestDeletionCommand, reauthenticateCurrentUser } = await import('./accountLifecycleClient');
+        await reauthenticateCurrentUser(password);
+        const status = await requestDeletionCommand(input.reason || '');
+        setDeletionStatus(status);
+        setAccountState('deletion-pending');
+        const currentUid = firebaseAuth.currentUser?.uid || '';
+        try { await import('../notifications/pushNotifications').then(({ unregisterCurrentDevice }) => unregisterCurrentDevice()); } catch {}
+        if (currentUid) {
+          try { await import('../personalChat/directChatDrafts').then(({ clearDirectChatPrivateData }) => clearDirectChatPrivateData(currentUid)); } catch {}
+          try { await import('../personalChat/directChatMedia').then(({ clearProtectedDirectChatMedia }) => clearProtectedDirectChatMedia(currentUid)); } catch {}
         }
-
-        const payload = createAccountDeletionRequestPayload(authUser, input);
-
-        if (!payload) {
-          throw new Error('Account deletion request is invalid.');
-        }
-
-        await addDoc(collection(firebaseDb, 'users', currentUser.uid, 'accountDeletionRequests'), {
-          ...payload,
-          requestedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        const { signOut: firebaseSignOut } = await import('@firebase/auth');
+        await firebaseSignOut(firebaseAuth);
       },
       sendPasswordReset: async (email) => {
         const [{ firebaseAuth }, { sendPasswordResetEmail }] = await Promise.all([
@@ -249,12 +296,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
           import('./firebase'),
           import('@firebase/auth'),
         ]);
+        const signingOutUid = firebaseAuth.currentUser?.uid || '';
 
         try {
           const { unregisterCurrentDevice } = await import('../notifications/pushNotifications');
           await unregisterCurrentDevice();
         } catch {
           // Signing out must remain available even when push services are offline.
+        }
+        if (signingOutUid) {
+          try {
+            const { clearDirectChatPrivateData } = await import('../personalChat/directChatDrafts');
+            await clearDirectChatPrivateData(signingOutUid);
+          } catch {
+            // Draft wipe must not block sign-out.
+          }
         }
         await firebaseSignOut(firebaseAuth);
       },
@@ -268,7 +324,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       },
       user,
     }),
-    [authRevision, authUser, initializing, profile, profileStatus, user],
+    [accountState, authRevision, authUser, deletionStatus, initializing, profile, profileStatus, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

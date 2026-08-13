@@ -157,6 +157,47 @@
     }
   },
   {
+    "name": "rejects a report selecting more than ten messages",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "report-direct-chat",
+      "payload": {
+        "category": "harassment",
+        "messageIds": [
+          "dmm_00000000000a", "dmm_00000000000b", "dmm_00000000000c", "dmm_00000000000d",
+          "dmm_00000000000e", "dmm_00000000000f", "dmm_00000000000g", "dmm_00000000000h",
+          "dmm_00000000000i", "dmm_00000000000j", "dmm_00000000000k"
+        ],
+        "targetUid": "uid-2"
+      },
+      "requestId": "report_request_002",
+      "version": 1
+    },
+    "expected": { "ok": false, "code": "INVALID_REQUEST" }
+  },
+  {
+    "name": "rejects a report with no selected message",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "report-direct-chat",
+      "payload": { "category": "harassment", "messageIds": [], "targetUid": "uid-2" },
+      "requestId": "report_request_003",
+      "version": 1
+    },
+    "expected": { "ok": false, "code": "INVALID_REQUEST" }
+  },
+  {
+    "name": "rejects an unknown report category",
+    "requestingUid": "uid-1",
+    "input": {
+      "action": "report-direct-chat",
+      "payload": { "category": "unsafe-room", "messageIds": ["dmm_123456789012"], "targetUid": "uid-2" },
+      "requestId": "report_request_004",
+      "version": 1
+    },
+    "expected": { "ok": false, "code": "INVALID_REQUEST" }
+  },
+  {
     "name": "rejects targeting the requesting account",
     "requestingUid": "uid-1",
     "input": {

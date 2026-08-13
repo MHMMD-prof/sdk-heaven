@@ -14,6 +14,7 @@ export type DrawingGuessRouteSource = 'games' | 'voice-room';
 
 export type DrawingGuessRouteParams = {
   displayName?: string;
+  hostUid?: string;
   playerId?: string;
   roomId?: string;
   sessionId?: string;
@@ -90,8 +91,11 @@ export type DrawingGuessViewModel = {
   transportMode: 'mock' | 'livekit';
   isOnlineRoom: boolean;
   isShowcaseMode: boolean;
+  isVoiceRoomSession: boolean;
   showOnlineControls: boolean;
+  showRoomResetControls: boolean;
   canUseSimulatedGuessControls: boolean;
+  lobbyStatusLabel: string;
   canEndRound: boolean;
   eligibleGuesserIds: string[];
   roundScoreDeltas: Record<string, number>;

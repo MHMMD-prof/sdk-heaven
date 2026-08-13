@@ -164,13 +164,9 @@ export function PayrollPanel({ permissions, user }: { permissions: string[]; use
   }
 
   return (
-    <section className="payroll-panel" dir="rtl">
-      <div className="payroll-heading">
-        <div>
-          <p className="section-eyebrow">التسوية الأسبوعية الآلية</p>
-          <h2>رواتب السوبر أدمن والموظفين والمضيفات</h2>
-          <p>الدوام المحتسب: متصل، على مقعد متحدث، والوقت يتوقف بعد خمس دقائق كتم متواصل. أي تعديل مالي يبدأ من دورة بغداد القادمة.</p>
-        </div>
+    <section className="payroll-panel incentives-embedded-panel" dir="rtl">
+      <div className="incentives-panel-toolbar">
+        <p className="field-hint">الدوام المحتسب: متصل، على مقعد متحدث، والوقت يتوقف بعد خمس دقائق كتم متواصل. أي تعديل مالي يبدأ من دورة بغداد القادمة.</p>
         <button className="secondary-button compact" onClick={() => void load()} type="button">تحديث</button>
       </div>
 
